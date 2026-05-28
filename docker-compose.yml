@@ -1,0 +1,5 @@
+name: kerosene
+
+include:
+  - path: backend/kerosene-infrastructure/docker-compose.local.yml
+    env_file: backend/kerosene/.env
