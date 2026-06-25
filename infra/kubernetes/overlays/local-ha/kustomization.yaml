@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kerosene-local-ha
+resources:
+  - namespace.yaml
+  - local-ha-runtime.yaml
+  - local-ha-network-policy.yaml
+  - local-ha-onion.yaml
+  - local-ha-tor-egress.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+secretGenerator:
+  - name: kerosene-db-secrets
+    literals: [application-user=kerosene, application-password=kerosene-local-password]
+  - name: kerosene-redis-secrets
+    literals: [redis-password=kerosene-local-redis]
+  - name: kerosene-bitcoin-secrets
+    literals: [rpc-user=kerosene, rpc-password=kerosene-local-bitcoin]
+  - name: kerosene-lnd-secrets
+    literals: [admin-macaroon=local-lnd-placeholder]
+  - name: kerosene-mpc-secrets
+    literals: [master-key=local-ha-mpc-master-key-change-me]
+  - name: server-secrets
+    literals: [shard-attestation-secret=local-ha-shard-attestation-change-me, release-attestation-secret=local-ha-release-attestation-change-me, kfe-internal-shared-secret=local-ha-kfe-internal-secret]
+images:
+  - name: kerosene/kfe-service
+    newTag: local
+  - name: kerosene/server
+    newTag: local
+  - name: kerosene/mpc-sidecar
+    newTag: local
+  - name: kerosene/web-page
+    newTag: local
+commonLabels:
+  app.kubernetes.io/part-of: kerosene
+  app.kubernetes.io/environment: local-ha
+
+patchesStrategicMerge:
+  - patch-tor-wvo.yaml
+  - patch-tor-iw5.yaml
+  - patch-tor-ltv.yaml

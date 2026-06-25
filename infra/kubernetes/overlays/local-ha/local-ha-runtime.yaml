@@ -1,0 +1,1852 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: bitcoin-core
+  labels:
+    app: bitcoin-core
+spec:
+  selector:
+    app: bitcoin-core
+  ports:
+    - name: rpc
+      port: 8332
+      targetPort: rpc
+    - name: p2p
+      port: 8333
+      targetPort: p2p
+    - name: zmq-block
+      port: 28332
+      targetPort: zmq-block
+    - name: zmq-tx
+      port: 28333
+      targetPort: zmq-tx
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bitcoin-core
+  labels:
+    app: bitcoin-core
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bitcoin-core
+  template:
+    metadata:
+      labels:
+        app: bitcoin-core
+    spec:
+      containers:
+        - name: bitcoind
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "local-ha bitcoin placeholder ready"
+              while true; do nc -lk -p 8332 >/dev/null 2>&1; done
+          ports:
+            - name: rpc
+              containerPort: 8332
+            - name: p2p
+              containerPort: 8333
+            - name: zmq-block
+              containerPort: 28332
+            - name: zmq-tx
+              containerPort: 28333
+          readinessProbe:
+            tcpSocket:
+              port: rpc
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: bitcoin-data
+              mountPath: /home/bitcoin/.bitcoin
+      volumes:
+        - name: bitcoin-data
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+  labels:
+    app: server
+spec:
+  selector:
+    app: server-wvo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kfe-service
+  labels:
+    app: kfe-service
+spec:
+  selector:
+    app: kfe-service-wvo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-page
+  labels:
+    app: web-page
+spec:
+  type: NodePort
+  selector:
+    app: web-page
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 31090
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-page
+  labels:
+    app: web-page
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web-page
+  template:
+    metadata:
+      labels:
+        app: web-page
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web-page
+          image: kerosene/web-page:local
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+            - name: nginx-run
+              mountPath: /var/run
+            - name: nginx-tmp
+              mountPath: /tmp
+      volumes:
+        - name: nginx-cache
+          emptyDir: {}
+        - name: nginx-run
+          emptyDir: {}
+        - name: nginx-tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lnd-placeholder
+  labels:
+    app: lnd-placeholder
+spec:
+  selector:
+    app: lnd-placeholder
+  ports:
+    - name: grpc
+      port: 10009
+      targetPort: grpc
+    - name: rest
+      port: 8080
+      targetPort: rest
+    - name: p2p
+      port: 9735
+      targetPort: p2p
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lnd-placeholder
+  labels:
+    app: lnd-placeholder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lnd-placeholder
+  template:
+    metadata:
+      labels:
+        app: lnd-placeholder
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lnd-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "tail -f /dev/null"]
+          ports:
+            - name: grpc
+              containerPort: 10009
+            - name: rest
+              containerPort: 8080
+            - name: p2p
+              containerPort: 9735
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-raft-1
+  labels:
+    app: vault-raft-1
+spec:
+  selector:
+    app: vault-raft-1
+  ports:
+    - name: api
+      port: 8200
+      targetPort: api
+    - name: cluster
+      port: 8201
+      targetPort: cluster
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-raft-2
+  labels:
+    app: vault-raft-2
+spec:
+  selector:
+    app: vault-raft-2
+  ports:
+    - name: api
+      port: 8200
+      targetPort: api
+    - name: cluster
+      port: 8201
+      targetPort: cluster
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-raft-3
+  labels:
+    app: vault-raft-3
+spec:
+  selector:
+    app: vault-raft-3
+  ports:
+    - name: api
+      port: 8200
+      targetPort: api
+    - name: cluster
+      port: 8201
+      targetPort: cluster
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-raft-1
+  labels:
+    app: vault-raft-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-raft-1
+  template:
+    metadata:
+      labels:
+        app: vault-raft-1
+    spec:
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.17
+          imagePullPolicy: IfNotPresent
+          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              value: local-root-token
+          ports:
+            - name: api
+              containerPort: 8200
+            - name: cluster
+              containerPort: 8201
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-raft-2
+  labels:
+    app: vault-raft-2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-raft-2
+  template:
+    metadata:
+      labels:
+        app: vault-raft-2
+    spec:
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.17
+          imagePullPolicy: IfNotPresent
+          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              value: local-root-token
+          ports:
+            - name: api
+              containerPort: 8200
+            - name: cluster
+              containerPort: 8201
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-raft-3
+  labels:
+    app: vault-raft-3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vault-raft-3
+  template:
+    metadata:
+      labels:
+        app: vault-raft-3
+    spec:
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.17
+          imagePullPolicy: IfNotPresent
+          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              value: local-root-token
+          ports:
+            - name: api
+              containerPort: 8200
+            - name: cluster
+              containerPort: 8201
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-wvo
+  labels:
+    app: db-wvo
+spec:
+  selector:
+    app: db-wvo
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db-wvo
+  labels:
+    app: db-wvo
+spec:
+  serviceName: db-wvo
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-wvo
+  template:
+    metadata:
+      labels:
+        app: db-wvo
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: kerosene
+            - name: POSTGRES_USER
+              value: kerosene
+            - name: POSTGRES_PASSWORD
+              value: kerosene-dev
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kerosene", "-d", "kerosene"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-wvo
+  labels:
+    app: redis-wvo
+spec:
+  selector:
+    app: redis-wvo
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-wvo
+  labels:
+    app: redis-wvo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-wvo
+  template:
+    metadata:
+      labels:
+        app: redis-wvo
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args: ["exec redis-server --appendonly yes --requirepass kerosene-dev"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a kerosene-dev ping | grep PONG"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mpc-sidecar-wvo
+  labels:
+    app: mpc-sidecar-wvo
+spec:
+  type: NodePort
+  selector:
+    app: mpc-sidecar-wvo
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+    - name: health
+      port: 8081
+      targetPort: health
+      nodePort: 31180
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mpc-sidecar-wvo
+  labels:
+    app: mpc-sidecar-wvo
+spec:
+  serviceName: mpc-sidecar-wvo
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mpc-sidecar-wvo
+  template:
+    metadata:
+      labels:
+        app: mpc-sidecar-wvo
+    spec:
+      containers:
+        - name: mpc-sidecar
+          image: kerosene/mpc-sidecar:local
+          imagePullPolicy: Never
+          env:
+            - name: MPC_ALLOW_INSECURE_GRPC
+              value: "true"
+            - name: MPC_REQUIRE_MASTER_KEY
+              value: "false"
+            - name: MPC_RUNTIME_MODE
+              value: LOCAL_DEV_SIGNER
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: health
+          volumeMounts:
+            - name: shards
+              mountPath: /app/encrypted-shards
+      volumes:
+        - name: shards
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tor-wvo
+  labels:
+    app: tor-wvo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tor-wvo
+  template:
+    metadata:
+      labels:
+        app: tor-wvo
+    spec:
+      containers:
+        - name: tor-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "tail -f /dev/null"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vanguards-wvo
+  labels:
+    app: vanguards-wvo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vanguards-wvo
+  template:
+    metadata:
+      labels:
+        app: vanguards-wvo
+    spec:
+      containers:
+        - name: vanguards-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "tail -f /dev/null"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-wvo
+  labels:
+    app: server-wvo
+spec:
+  type: NodePort
+  selector:
+    app: server-wvo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 31080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-wvo
+  labels:
+    app: server-wvo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server-wvo
+  template:
+    metadata:
+      labels:
+        app: server-wvo
+    spec:
+      containers:
+        - name: server
+          image: kerosene/server:local
+          imagePullPolicy: Never
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: KEROSENE_RUNTIME_ROLE
+              value: core-service
+            - name: KFE_REMOTE_BASE_URL
+              value: http://kfe-service-wvo:8080
+            - name: KFE_REMOTE_WALLET_PROVISIONING_ENABLED
+              value: "true"
+            - name: KFE_INTERNAL_SHARED_SECRET
+              value: local-ha-kfe-internal-secret
+            - name: SERVER_PORT
+              value: "8080"
+            - name: REGION
+              value: WVO
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://db-wvo:5432/kerosene?ssl=false
+            - name: SPRING_DATASOURCE_USERNAME
+              value: kerosene
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: kerosene-dev
+            - name: SPRING_DATA_REDIS_HOST
+              value: redis-wvo
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            - name: SPRING_DATA_REDIS_PASSWORD
+              value: kerosene-dev
+            - name: MPC_SIDECAR_HOST
+              value: mpc-sidecar-wvo
+            - name: MPC_SIDECAR_PORT
+              value: "50051"
+            - name: MPC_SIDECAR_TLS_ENABLED
+              value: "false"
+            - name: VAULT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_REQUIRED
+              value: "false"
+            - name: VAULT_RAFT_URL
+              value: http://vault-raft-1:8200
+            - name: VAULT_RAFT_EXPECTED_SERVERS
+              value: "3"
+            - name: VAULT_RAFT_TLS_INSECURE
+              value: "true"
+            - name: TOR_HEALTH_REQUIRED
+              value: "false"
+            - name: tor.health.required
+              value: "false"
+            - name: LIGHTNING_LND_ENABLED
+              value: "false"
+            - name: LIGHTNING_LND_TLS_ENABLED
+              value: "false"
+            - name: BITCOIN_NETWORK
+              value: regtest
+            - name: BITCOIN_RPC_ENABLED
+              value: "true"
+            - name: BITCOIN_RPC_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_PRUNED_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_URL
+              value: http://bitcoin-core:8332
+            - name: BITCOIN_RPC_USER
+              value: kerosene
+            - name: BITCOIN_RPC_PASSWORD
+              value: kerosene-dev
+            - name: BITCOIN_ZMQ_ENABLED
+              value: "false"
+            - name: FLYWAY_ENABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 18
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kfe-service-ltv
+  labels:
+    app: kfe-service-ltv
+spec:
+  selector:
+    app: kfe-service-ltv
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kfe-service-ltv
+  labels:
+    app: kfe-service-ltv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kfe-service-ltv
+  template:
+    metadata:
+      labels:
+        app: kfe-service-ltv
+    spec:
+      containers:
+        - name: kfe-service
+          image: kerosene/kfe-service:local
+          imagePullPolicy: Never
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker,kfe
+            - name: KEROSENE_RUNTIME_ROLE
+              value: kfe-service
+            - name: KFE_INTERNAL_SHARED_SECRET
+              value: local-ha-kfe-internal-secret
+            - name: SERVER_PORT
+              value: "8080"
+            - name: REGION
+              value: LTV
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://db-ltv:5432/kerosene?ssl=false
+            - name: SPRING_DATASOURCE_USERNAME
+              value: kerosene
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: kerosene-dev
+            - name: SPRING_DATA_REDIS_HOST
+              value: redis-ltv
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            - name: SPRING_DATA_REDIS_PASSWORD
+              value: kerosene-dev
+            - name: MPC_SIDECAR_HOST
+              value: mpc-sidecar-ltv
+            - name: MPC_SIDECAR_PORT
+              value: "50051"
+            - name: MPC_SIDECAR_TLS_ENABLED
+              value: "false"
+            - name: VAULT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_REQUIRED
+              value: "false"
+            - name: VAULT_RAFT_URL
+              value: http://vault-raft-1:8200
+            - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
+              value: "180000"
+            - name: VAULT_RAFT_EXPECTED_SERVERS
+              value: "3"
+            - name: VAULT_RAFT_TLS_INSECURE
+              value: "true"
+            - name: TOR_HEALTH_REQUIRED
+              value: "false"
+            - name: tor.health.required
+              value: "false"
+            - name: LIGHTNING_LND_ENABLED
+              value: "false"
+            - name: LIGHTNING_LND_HOST
+              value: lnd-placeholder
+            - name: LIGHTNING_LND_PORT
+              value: "10009"
+            - name: LIGHTNING_LND_TLS_ENABLED
+              value: "false"
+            - name: BITCOIN_NETWORK
+              value: regtest
+            - name: BITCOIN_RPC_ENABLED
+              value: "true"
+            - name: BITCOIN_RPC_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_PRUNED_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_URL
+              value: http://bitcoin-core:8332
+            - name: BITCOIN_RPC_USER
+              value: kerosene
+            - name: BITCOIN_RPC_PASSWORD
+              value: kerosene-dev
+            - name: BITCOIN_RPC_WALLET
+              value: kerosene
+            - name: BITCOIN_ZMQ_ENABLED
+              value: "false"
+            - name: KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED
+              value: "true"
+            - name: TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED
+              value: "true"
+            - name: FLYWAY_ENABLED
+              value: "true"
+            - name: QUORUM_ALLOW_LOCAL_SIMULATION
+              value: "true"
+            - name: AUDIT_SOLVENCY_ENFORCED
+              value: "false"
+            - name: RELEASE_ATTESTATION_REQUIRED
+              value: "false"
+            - name: RELEASE_REMOTE_ATTESTATION_ENABLED
+              value: "false"
+            - name: SHARD_ATTESTATION_SECRET
+              value: local-ha-shard-attestation-change-me
+            - name: RELEASE_ATTESTATION_SECRET
+              value: local-ha-release-attestation-change-me
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 18
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kfe-service-wvo
+  labels:
+    app: kfe-service-wvo
+spec:
+  selector:
+    app: kfe-service-wvo
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kfe-service-wvo
+  labels:
+    app: kfe-service-wvo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kfe-service-wvo
+  template:
+    metadata:
+      labels:
+        app: kfe-service-wvo
+    spec:
+      containers:
+        - name: kfe-service
+          image: kerosene/kfe-service:local
+          imagePullPolicy: Never
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker,kfe
+            - name: KEROSENE_RUNTIME_ROLE
+              value: kfe-service
+            - name: KFE_INTERNAL_SHARED_SECRET
+              value: local-ha-kfe-internal-secret
+            - name: SERVER_PORT
+              value: "8080"
+            - name: REGION
+              value: WVO
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://db-wvo:5432/kerosene?ssl=false
+            - name: SPRING_DATASOURCE_USERNAME
+              value: kerosene
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: kerosene-dev
+            - name: SPRING_DATA_REDIS_HOST
+              value: redis-wvo
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            - name: SPRING_DATA_REDIS_PASSWORD
+              value: kerosene-dev
+            - name: MPC_SIDECAR_HOST
+              value: mpc-sidecar-wvo
+            - name: MPC_SIDECAR_PORT
+              value: "50051"
+            - name: MPC_SIDECAR_TLS_ENABLED
+              value: "false"
+            - name: VAULT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_REQUIRED
+              value: "false"
+            - name: VAULT_RAFT_URL
+              value: http://vault-raft-1:8200
+            - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
+              value: "180000"
+            - name: VAULT_RAFT_EXPECTED_SERVERS
+              value: "3"
+            - name: VAULT_RAFT_TLS_INSECURE
+              value: "true"
+            - name: TOR_HEALTH_REQUIRED
+              value: "false"
+            - name: tor.health.required
+              value: "false"
+            - name: LIGHTNING_LND_ENABLED
+              value: "false"
+            - name: LIGHTNING_LND_HOST
+              value: lnd-placeholder
+            - name: LIGHTNING_LND_PORT
+              value: "10009"
+            - name: LIGHTNING_LND_TLS_ENABLED
+              value: "false"
+            - name: BITCOIN_NETWORK
+              value: regtest
+            - name: BITCOIN_RPC_ENABLED
+              value: "true"
+            - name: BITCOIN_RPC_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_PRUNED_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_URL
+              value: http://bitcoin-core:8332
+            - name: BITCOIN_RPC_USER
+              value: kerosene
+            - name: BITCOIN_RPC_PASSWORD
+              value: kerosene-dev
+            - name: BITCOIN_RPC_WALLET
+              value: kerosene
+            - name: BITCOIN_ZMQ_ENABLED
+              value: "false"
+            - name: KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED
+              value: "true"
+            - name: TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED
+              value: "true"
+            - name: FLYWAY_ENABLED
+              value: "true"
+            - name: QUORUM_ALLOW_LOCAL_SIMULATION
+              value: "true"
+            - name: AUDIT_SOLVENCY_ENFORCED
+              value: "false"
+            - name: RELEASE_ATTESTATION_REQUIRED
+              value: "false"
+            - name: RELEASE_REMOTE_ATTESTATION_ENABLED
+              value: "false"
+            - name: SHARD_ATTESTATION_SECRET
+              value: local-ha-shard-attestation-change-me
+            - name: RELEASE_ATTESTATION_SECRET
+              value: local-ha-release-attestation-change-me
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 18
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-iw5
+  labels:
+    app: db-iw5
+spec:
+  selector:
+    app: db-iw5
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db-iw5
+  labels:
+    app: db-iw5
+spec:
+  serviceName: db-iw5
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-iw5
+  template:
+    metadata:
+      labels:
+        app: db-iw5
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: kerosene
+            - name: POSTGRES_USER
+              value: kerosene
+            - name: POSTGRES_PASSWORD
+              value: kerosene-dev
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kerosene", "-d", "kerosene"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-iw5
+  labels:
+    app: redis-iw5
+spec:
+  selector:
+    app: redis-iw5
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-iw5
+  labels:
+    app: redis-iw5
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-iw5
+  template:
+    metadata:
+      labels:
+        app: redis-iw5
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args: ["exec redis-server --appendonly yes --requirepass kerosene-dev"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a kerosene-dev ping | grep PONG"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mpc-sidecar-iw5
+  labels:
+    app: mpc-sidecar-iw5
+spec:
+  type: NodePort
+  selector:
+    app: mpc-sidecar-iw5
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+    - name: health
+      port: 8081
+      targetPort: health
+      nodePort: 31181
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mpc-sidecar-iw5
+  labels:
+    app: mpc-sidecar-iw5
+spec:
+  serviceName: mpc-sidecar-iw5
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mpc-sidecar-iw5
+  template:
+    metadata:
+      labels:
+        app: mpc-sidecar-iw5
+    spec:
+      containers:
+        - name: mpc-sidecar
+          image: kerosene/mpc-sidecar:local
+          imagePullPolicy: Never
+          env:
+            - name: MPC_ALLOW_INSECURE_GRPC
+              value: "true"
+            - name: MPC_REQUIRE_MASTER_KEY
+              value: "false"
+            - name: MPC_RUNTIME_MODE
+              value: LOCAL_DEV_SIGNER
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: health
+          volumeMounts:
+            - name: shards
+              mountPath: /app/encrypted-shards
+      volumes:
+        - name: shards
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tor-iw5
+  labels:
+    app: tor-iw5
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tor-iw5
+  template:
+    metadata:
+      labels:
+        app: tor-iw5
+    spec:
+      containers:
+        - name: tor-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "tail -f /dev/null"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vanguards-iw5
+  labels:
+    app: vanguards-iw5
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vanguards-iw5
+  template:
+    metadata:
+      labels:
+        app: vanguards-iw5
+    spec:
+      containers:
+        - name: vanguards-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "tail -f /dev/null"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-iw5
+  labels:
+    app: server-iw5
+spec:
+  type: NodePort
+  selector:
+    app: server-iw5
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 31081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-iw5
+  labels:
+    app: server-iw5
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server-iw5
+  template:
+    metadata:
+      labels:
+        app: server-iw5
+    spec:
+      containers:
+        - name: server
+          image: kerosene/server:local
+          imagePullPolicy: Never
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: KEROSENE_RUNTIME_ROLE
+              value: core-service
+            - name: KFE_REMOTE_BASE_URL
+              value: http://kfe-service-iw5:8080
+            - name: KFE_REMOTE_WALLET_PROVISIONING_ENABLED
+              value: "true"
+            - name: KFE_INTERNAL_SHARED_SECRET
+              value: local-ha-kfe-internal-secret
+            - name: SERVER_PORT
+              value: "8080"
+            - name: REGION
+              value: IW5
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://db-iw5:5432/kerosene?ssl=false
+            - name: SPRING_DATASOURCE_USERNAME
+              value: kerosene
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: kerosene-dev
+            - name: SPRING_DATA_REDIS_HOST
+              value: redis-iw5
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            - name: SPRING_DATA_REDIS_PASSWORD
+              value: kerosene-dev
+            - name: MPC_SIDECAR_HOST
+              value: mpc-sidecar-iw5
+            - name: MPC_SIDECAR_PORT
+              value: "50051"
+            - name: MPC_SIDECAR_TLS_ENABLED
+              value: "false"
+            - name: VAULT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_REQUIRED
+              value: "false"
+            - name: VAULT_RAFT_URL
+              value: http://vault-raft-1:8200
+            - name: VAULT_RAFT_EXPECTED_SERVERS
+              value: "3"
+            - name: VAULT_RAFT_TLS_INSECURE
+              value: "true"
+            - name: TOR_HEALTH_REQUIRED
+              value: "false"
+            - name: tor.health.required
+              value: "false"
+            - name: LIGHTNING_LND_ENABLED
+              value: "false"
+            - name: LIGHTNING_LND_TLS_ENABLED
+              value: "false"
+            - name: BITCOIN_NETWORK
+              value: regtest
+            - name: BITCOIN_RPC_ENABLED
+              value: "true"
+            - name: BITCOIN_RPC_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_PRUNED_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_URL
+              value: http://bitcoin-core:8332
+            - name: BITCOIN_RPC_USER
+              value: kerosene
+            - name: BITCOIN_RPC_PASSWORD
+              value: kerosene-dev
+            - name: BITCOIN_ZMQ_ENABLED
+              value: "false"
+            - name: FLYWAY_ENABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 18
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kfe-service-iw5
+  labels:
+    app: kfe-service-iw5
+spec:
+  selector:
+    app: kfe-service-iw5
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kfe-service-iw5
+  labels:
+    app: kfe-service-iw5
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kfe-service-iw5
+  template:
+    metadata:
+      labels:
+        app: kfe-service-iw5
+    spec:
+      containers:
+        - name: kfe-service
+          image: kerosene/kfe-service:local
+          imagePullPolicy: Never
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker,kfe
+            - name: KEROSENE_RUNTIME_ROLE
+              value: kfe-service
+            - name: KFE_INTERNAL_SHARED_SECRET
+              value: local-ha-kfe-internal-secret
+            - name: SERVER_PORT
+              value: "8080"
+            - name: REGION
+              value: IW5
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://db-iw5:5432/kerosene?ssl=false
+            - name: SPRING_DATASOURCE_USERNAME
+              value: kerosene
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: kerosene-dev
+            - name: SPRING_DATA_REDIS_HOST
+              value: redis-iw5
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            - name: SPRING_DATA_REDIS_PASSWORD
+              value: kerosene-dev
+            - name: MPC_SIDECAR_HOST
+              value: mpc-sidecar-iw5
+            - name: MPC_SIDECAR_PORT
+              value: "50051"
+            - name: MPC_SIDECAR_TLS_ENABLED
+              value: "false"
+            - name: VAULT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_REQUIRED
+              value: "false"
+            - name: VAULT_RAFT_URL
+              value: http://vault-raft-1:8200
+            - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
+              value: "180000"
+            - name: VAULT_RAFT_EXPECTED_SERVERS
+              value: "3"
+            - name: VAULT_RAFT_TLS_INSECURE
+              value: "true"
+            - name: TOR_HEALTH_REQUIRED
+              value: "false"
+            - name: tor.health.required
+              value: "false"
+            - name: LIGHTNING_LND_ENABLED
+              value: "false"
+            - name: LIGHTNING_LND_HOST
+              value: lnd-placeholder
+            - name: LIGHTNING_LND_PORT
+              value: "10009"
+            - name: LIGHTNING_LND_TLS_ENABLED
+              value: "false"
+            - name: BITCOIN_NETWORK
+              value: regtest
+            - name: BITCOIN_RPC_ENABLED
+              value: "true"
+            - name: BITCOIN_RPC_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_PRUNED_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_URL
+              value: http://bitcoin-core:8332
+            - name: BITCOIN_RPC_USER
+              value: kerosene
+            - name: BITCOIN_RPC_PASSWORD
+              value: kerosene-dev
+            - name: BITCOIN_RPC_WALLET
+              value: kerosene
+            - name: BITCOIN_ZMQ_ENABLED
+              value: "false"
+            - name: KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED
+              value: "true"
+            - name: TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED
+              value: "true"
+            - name: FLYWAY_ENABLED
+              value: "true"
+            - name: QUORUM_ALLOW_LOCAL_SIMULATION
+              value: "true"
+            - name: AUDIT_SOLVENCY_ENFORCED
+              value: "false"
+            - name: RELEASE_ATTESTATION_REQUIRED
+              value: "false"
+            - name: RELEASE_REMOTE_ATTESTATION_ENABLED
+              value: "false"
+            - name: SHARD_ATTESTATION_SECRET
+              value: local-ha-shard-attestation-change-me
+            - name: RELEASE_ATTESTATION_SECRET
+              value: local-ha-release-attestation-change-me
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 18
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-ltv
+  labels:
+    app: db-ltv
+spec:
+  selector:
+    app: db-ltv
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db-ltv
+  labels:
+    app: db-ltv
+spec:
+  serviceName: db-ltv
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-ltv
+  template:
+    metadata:
+      labels:
+        app: db-ltv
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: kerosene
+            - name: POSTGRES_USER
+              value: kerosene
+            - name: POSTGRES_PASSWORD
+              value: kerosene-dev
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kerosene", "-d", "kerosene"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-ltv
+  labels:
+    app: redis-ltv
+spec:
+  selector:
+    app: redis-ltv
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-ltv
+  labels:
+    app: redis-ltv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-ltv
+  template:
+    metadata:
+      labels:
+        app: redis-ltv
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args: ["exec redis-server --appendonly yes --requirepass kerosene-dev"]
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a kerosene-dev ping | grep PONG"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mpc-sidecar-ltv
+  labels:
+    app: mpc-sidecar-ltv
+spec:
+  type: NodePort
+  selector:
+    app: mpc-sidecar-ltv
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: grpc
+    - name: health
+      port: 8081
+      targetPort: health
+      nodePort: 31182
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mpc-sidecar-ltv
+  labels:
+    app: mpc-sidecar-ltv
+spec:
+  serviceName: mpc-sidecar-ltv
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mpc-sidecar-ltv
+  template:
+    metadata:
+      labels:
+        app: mpc-sidecar-ltv
+    spec:
+      containers:
+        - name: mpc-sidecar
+          image: kerosene/mpc-sidecar:local
+          imagePullPolicy: Never
+          env:
+            - name: MPC_ALLOW_INSECURE_GRPC
+              value: "true"
+            - name: MPC_REQUIRE_MASTER_KEY
+              value: "false"
+            - name: MPC_RUNTIME_MODE
+              value: LOCAL_DEV_SIGNER
+          ports:
+            - name: grpc
+              containerPort: 50051
+            - name: health
+              containerPort: 8081
+          readinessProbe:
+            httpGet:
+              path: /version
+              port: health
+          volumeMounts:
+            - name: shards
+              mountPath: /app/encrypted-shards
+      volumes:
+        - name: shards
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tor-ltv
+  labels:
+    app: tor-ltv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tor-ltv
+  template:
+    metadata:
+      labels:
+        app: tor-ltv
+    spec:
+      containers:
+        - name: tor-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "tail -f /dev/null"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vanguards-ltv
+  labels:
+    app: vanguards-ltv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vanguards-ltv
+  template:
+    metadata:
+      labels:
+        app: vanguards-ltv
+    spec:
+      containers:
+        - name: vanguards-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "tail -f /dev/null"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-ltv
+  labels:
+    app: server-ltv
+spec:
+  type: NodePort
+  selector:
+    app: server-ltv
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      nodePort: 31082
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-ltv
+  labels:
+    app: server-ltv
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server-ltv
+  template:
+    metadata:
+      labels:
+        app: server-ltv
+    spec:
+      containers:
+        - name: server
+          image: kerosene/server:local
+          imagePullPolicy: Never
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: docker
+            - name: KEROSENE_RUNTIME_ROLE
+              value: core-service
+            - name: KFE_REMOTE_BASE_URL
+              value: http://kfe-service-ltv:8080
+            - name: KFE_REMOTE_WALLET_PROVISIONING_ENABLED
+              value: "true"
+            - name: KFE_INTERNAL_SHARED_SECRET
+              value: local-ha-kfe-internal-secret
+            - name: SERVER_PORT
+              value: "8080"
+            - name: REGION
+              value: LTV
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://db-ltv:5432/kerosene?ssl=false
+            - name: SPRING_DATASOURCE_USERNAME
+              value: kerosene
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: kerosene-dev
+            - name: SPRING_DATA_REDIS_HOST
+              value: redis-ltv
+            - name: SPRING_DATA_REDIS_PORT
+              value: "6379"
+            - name: SPRING_DATA_REDIS_PASSWORD
+              value: kerosene-dev
+            - name: MPC_SIDECAR_HOST
+              value: mpc-sidecar-ltv
+            - name: MPC_SIDECAR_PORT
+              value: "50051"
+            - name: MPC_SIDECAR_TLS_ENABLED
+              value: "false"
+            - name: VAULT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_ENABLED
+              value: "false"
+            - name: VAULT_RAFT_REQUIRED
+              value: "false"
+            - name: VAULT_RAFT_URL
+              value: http://vault-raft-1:8200
+            - name: VAULT_RAFT_EXPECTED_SERVERS
+              value: "3"
+            - name: VAULT_RAFT_TLS_INSECURE
+              value: "true"
+            - name: TOR_HEALTH_REQUIRED
+              value: "false"
+            - name: tor.health.required
+              value: "false"
+            - name: LIGHTNING_LND_ENABLED
+              value: "false"
+            - name: LIGHTNING_LND_TLS_ENABLED
+              value: "false"
+            - name: BITCOIN_NETWORK
+              value: regtest
+            - name: BITCOIN_RPC_ENABLED
+              value: "true"
+            - name: BITCOIN_RPC_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_PRUNED_REQUIRED
+              value: "false"
+            - name: BITCOIN_RPC_URL
+              value: http://bitcoin-core:8332
+            - name: BITCOIN_RPC_USER
+              value: kerosene
+            - name: BITCOIN_RPC_PASSWORD
+              value: kerosene-dev
+            - name: BITCOIN_ZMQ_ENABLED
+              value: "false"
+            - name: FLYWAY_ENABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            failureThreshold: 18

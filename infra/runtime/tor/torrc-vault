@@ -1,0 +1,8 @@
+User kerosene
+SocksPort 0
+HiddenServiceDir /var/lib/tor/kerosene_service/
+HiddenServiceVersion 3
+HiddenServicePort 80 10.242.0.10:8090
+Log notice stdout
+DataDirectory /var/lib/tor
+NumCPUs 1

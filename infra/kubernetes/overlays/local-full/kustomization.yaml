@@ -1,0 +1,38 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kerosene-local
+resources:
+  - ../../base
+  - namespace.yaml
+  - local-dev-secrets.yaml
+  - local-dev-runtime.yaml
+  - local-network-policy.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/environment: local-full
+images:
+  - name: kerosene/kfe-service
+    newName: localhost:5000/kerosene/kfe-service
+    newTag: local
+  - name: kerosene/server
+    newTag: local
+  - name: kerosene/mpc-sidecar
+    newTag: local
+  - name: kerosene/web-page
+    newTag: local
+patches:
+  - path: patch-local-full.yaml
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: mpc-sidecar
+    patch: |-
+      - op: remove
+        path: /spec/volumeClaimTemplates
+      - op: add
+        path: /spec/template/spec/volumes/-
+        value:
+          name: encrypted-shards
+          emptyDir:
+            sizeLimit: 1Gi

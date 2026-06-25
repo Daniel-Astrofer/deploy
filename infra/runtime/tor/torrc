@@ -1,0 +1,17 @@
+## Tor Hidden Service Configuration
+## Kerosene Backend — v3 Onion Service
+
+# Disable SOCKS proxy (we don't need outbound Tor circuits for routing)
+SocksPort 0
+
+# Hidden service: forward .onion port 80 → app container on port 8080
+HiddenServiceDir /var/lib/tor/kerosene_service/
+HiddenServiceVersion 3
+HiddenServicePort 80 app:8080
+
+# Logging
+Log notice stdout
+
+# Reduce footprint
+DataDirectory /var/lib/tor
+NumCPUs 1

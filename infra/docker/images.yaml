@@ -1,0 +1,59 @@
+# Kerosene image contract.
+#
+# This file is the canonical inventory for image names, local tags,
+# Dockerfiles and build contexts.
+#
+# During migration, dockerfile points to the canonical infra/ path and
+# legacy_dockerfile records the previous active path for compatibility wrappers.
+
+images:
+  server:
+    image: kerosene/server
+    local_tag: local
+    dockerfile: infra/docker/images/server/Dockerfile
+    legacy_dockerfile: backend/kerosene-infrastructure/images/app/Dockerfile
+    context: backend/kerosene
+    owner: backend
+
+  kfe-service:
+    image: kerosene/kfe-service
+    local_tag: local
+    dockerfile: infra/docker/images/kfe-service/Dockerfile
+    legacy_dockerfile: backend/kerosene-infrastructure/images/kfe/Dockerfile
+    context: backend/kerosene
+    owner: kfe
+
+  mpc-sidecar:
+    image: kerosene/mpc-sidecar
+    local_tag: local
+    dockerfile: infra/docker/images/mpc-sidecar/Dockerfile
+    legacy_dockerfile: backend/mpc-sidecar/Dockerfile
+    context: backend/mpc-sidecar
+    owner: mpc
+
+  vault:
+    image: kerosene/vault
+    local_tag: local
+    dockerfile: infra/docker/images/vault/Dockerfile
+    legacy_dockerfile: backend/kerosene-infrastructure/images/vault/Dockerfile
+    context: backend/vault
+    owner: security
+
+  tor:
+    image: kerosene/tor
+    local_tag: local
+    dockerfile: infra/docker/images/tor/Dockerfile
+    legacy_dockerfile: backend/kerosene/deploy/tor/Dockerfile
+    context: backend/kerosene/deploy/tor
+    owner: network
+
+  web-page:
+    image: kerosene/web-page
+    local_tag: local
+    dockerfile: infra/docker/images/web-page/Dockerfile
+    legacy_dockerfile: generated-by-backend/kerosene-infrastructure/k8s/scripts/import-local-docker-images.sh
+    context: .
+    owner: frontend
+    notes: >-
+      The web-page Kubernetes image now has a canonical Dockerfile. Legacy
+      scripts may still keep fallback behavior during the migration window.

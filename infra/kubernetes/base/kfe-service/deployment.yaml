@@ -1,0 +1,186 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kfe-service
+  labels:
+    app.kubernetes.io/name: kfe-service
+    app.kubernetes.io/component: financial-engine
+spec:
+  replicas: 3
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kfe-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kfe-service
+        app.kubernetes.io/component: financial-engine
+        kerosene.io/scrape: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /actuator/prometheus
+        prometheus.io/port: "8080"
+    spec:
+      serviceAccountName: kfe-service
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kfe-service
+          image: kerosene/kfe-service:replace-me
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: kfe-service-config
+          env:
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-db-secrets
+                  key: jdbc-url
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-db-secrets
+                  key: application-user
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-db-secrets
+                  key: application-password
+            - name: SPRING_DATA_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-redis-secrets
+                  key: redis-password
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-user
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-password
+            - name: LIGHTNING_LND_MACAROON
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-lnd-secrets
+                  key: admin-macaroon
+            - name: SHARD_ATTESTATION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: shard-attestation-secret
+            - name: RELEASE_ATTESTATION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: release-attestation-secret
+                  optional: true
+            - name: KFE_INTERNAL_SHARED_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: kfe-internal-shared-secret
+            - name: KEROSENE_RUNTIME_ROLE
+              value: kfe-service
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -XX:+UseContainerSupport
+                -XX:MaxRAMPercentage=75.0
+                -XX:+ExitOnOutOfMemoryError
+                -Djava.security.egd=file:/dev/./urandom
+                -Djava.awt.headless=true
+          startupProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 72
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                command: ["java", "-cp", "/app/healthcheck", "Healthcheck", "--sleep-seconds", "15"]
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 2Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kerosene-runtime
+              mountPath: /opt/kerosene
+            - name: release-manifest
+              mountPath: /release
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi
+        - name: kerosene-runtime
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+        - name: release-manifest
+          secret:
+            secretName: kerosene-release-manifest
+            optional: true
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: kfe-service
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: kfe-service
+                topologyKey: kubernetes.io/hostname

@@ -1,0 +1,409 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: local-postgres
+  labels:
+    app: kerosene-db-patroni
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  serviceName: kerosene-db-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-db-patroni
+  template:
+    metadata:
+      labels:
+        app: kerosene-db-patroni
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: kerosene
+        kerosene.io/local-dependency: "true"
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+            - name: patroni
+              containerPort: 8008
+              protocol: TCP
+          env:
+            - name: POSTGRES_DB
+              value: kerosene
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-db-secrets
+                  key: application-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-db-secrets
+                  key: application-password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kerosene", "-d", "kerosene"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "kerosene", "-d", "kerosene"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-redis
+  labels:
+    app: kerosene-redis
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-redis
+  template:
+    metadata:
+      labels:
+        app: kerosene-redis
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: cache
+        app.kubernetes.io/part-of: kerosene
+        kerosene.io/local-dependency: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - exec redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+            - name: sentinel
+              containerPort: 26379
+              protocol: TCP
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-redis-secrets
+                  key: redis-password
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep PONG"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep PONG"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+      volumes:
+        - name: redis-data
+          emptyDir:
+            sizeLimit: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-vault
+  labels:
+    app: kerosene-vault
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-vault
+  template:
+    metadata:
+      labels:
+        app: kerosene-vault
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/component: secrets
+        app.kubernetes.io/part-of: kerosene
+        kerosene.io/local-dependency: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 100
+        fsGroup: 100
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.17
+          imagePullPolicy: IfNotPresent
+          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+          env:
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              value: local-root-token
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8200
+            - name: SKIP_SETCAP
+              value: "true"
+            - name: VAULT_DISABLE_MLOCK
+              value: "true"
+          ports:
+            - name: vault-api
+              containerPort: 8200
+              protocol: TCP
+            - name: vault-cluster
+              containerPort: 8201
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: vault-api
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-bitcoin
+  labels:
+    app: kerosene-bitcoin
+    app.kubernetes.io/name: bitcoin-core
+    app.kubernetes.io/component: bitcoin
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-bitcoin
+  template:
+    metadata:
+      labels:
+        app: kerosene-bitcoin
+        app.kubernetes.io/name: bitcoin-core
+        app.kubernetes.io/component: bitcoin
+        app.kubernetes.io/part-of: kerosene
+        kerosene.io/local-dependency: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bitcoind
+          image: bitcoin/bitcoin:27.0
+          imagePullPolicy: IfNotPresent
+          command: ["bitcoind"]
+          args:
+            - -regtest
+            - -datadir=/home/bitcoin/.bitcoin
+            - -server=1
+            - -printtoconsole
+            - -rpcbind=0.0.0.0
+            - -rpcallowip=0.0.0.0/0
+            - -rpcport=8332
+            - -port=8333
+            - -rpcuser=$(BITCOIN_RPC_USER)
+            - -rpcpassword=$(BITCOIN_RPC_PASSWORD)
+            - -zmqpubrawblock=tcp://0.0.0.0:28332
+            - -zmqpubrawtx=tcp://0.0.0.0:28333
+          env:
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-user
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-password
+          ports:
+            - name: rpc
+              containerPort: 8332
+              protocol: TCP
+            - name: p2p
+              containerPort: 8333
+              protocol: TCP
+            - name: zmq-block
+              containerPort: 28332
+              protocol: TCP
+            - name: zmq-tx
+              containerPort: 28333
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: rpc
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 18
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: bitcoin-data
+              mountPath: /home/bitcoin/.bitcoin
+      volumes:
+        - name: bitcoin-data
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-lnd-placeholder
+  labels:
+    app: kerosene-lnd
+    app.kubernetes.io/name: lnd
+    app.kubernetes.io/component: lightning
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-lnd
+  template:
+    metadata:
+      labels:
+        app: kerosene-lnd
+        app.kubernetes.io/name: lnd
+        app.kubernetes.io/component: lightning
+        app.kubernetes.io/part-of: kerosene
+        kerosene.io/local-dependency: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: lnd-placeholder
+          image: alpine:3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              echo "local LND placeholder ready"
+              sleep 365d
+          ports:
+            - name: grpc
+              containerPort: 10009
+              protocol: TCP
+            - name: rest
+              containerPort: 8080
+              protocol: TCP
+            - name: p2p
+              containerPort: 9735
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "true"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

@@ -1,0 +1,1130 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# docker-compose.local.yml — Kerosene Full-Cluster Local Simulation
+# ─────────────────────────────────────────────────────────────────────────────
+# Simulates the full Infra (IS + CH + SG + Vault) on a single machine.
+# Uses production images (Debian Bookworm builder + Distroless runtime).
+#
+# BEFORE RUNNING:
+#   1. Run: bash scripts/init-local.sh
+#   2. Ensure backend/kerosene/.env is populated (no default fallbacks allowed)
+#
+# USAGE:
+#   bash scripts/start-local.sh
+#
+# ⚠️  LOCAL ONLY — Not identical to production topology (multi-host).
+#     In production each region runs on a dedicated bare-metal machine.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # VAULT (Hardware Attestation + Key Provisioning)
+  # Reachable ONLY via kerosene-tor-vault onion — no host port binding.
+  # ════════════════════════════════════════════════════════════════════════════
+  kerosene-vault:
+    build:
+      context: ../../../backend/vault
+      dockerfile: ../../infra/docker/images/vault/Dockerfile
+    container_name: kerosene-vault-local
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [IPC_LOCK]
+    security_opt:
+      - no-new-privileges:true
+      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+    env_file: ../../../backend/kerosene/.env
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    environment:
+      - FOUNDER_TOTP_SECRET=${FOUNDER_TOTP_SECRET}
+      - VAULT_DIRECTOR_HMAC_SECRETS=${VAULT_DIRECTOR_HMAC_SECRETS}
+      - VAULT_REQUIRED_APPROVALS=${VAULT_REQUIRED_APPROVALS:-2}
+      - VAULT_CLUSTER_ATTESTATION_SECRET=${VAULT_CLUSTER_ATTESTATION_SECRET}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    networks:
+      net_vault:
+        ipv4_address: 10.242.0.10
+
+  kerosene-tor-vault:
+    build:
+      context: ../../../backend/kerosene/deploy/tor
+      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+    container_name: kerosene-tor-vault-local
+    environment:
+      - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
+    volumes:
+      - ../../runtime/tor/torrc-vault:/etc/tor/torrc:ro,z
+      - ../../runtime/tor/entrypoint.sh:/entrypoint.sh:ro,z
+      - tor_keys_vault:/var/lib/tor/kerosene_service
+    # Removed authorized_clients mount from inside HiddenServiceDir to fix Read-only FS error
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks: [net_vault, tor_egress]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/tor-ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    depends_on: [kerosene-vault]
+
+  kerosene-vault-arm:
+    image: curlimages/curl:8.10.1
+    container_name: kerosene-vault-arm-local
+    restart: "no"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - VAULT_URL=http://kerosene-vault:8090/v1/vault/arm
+      - VAULT_ARM_MAX_WAIT_SECONDS=120
+      - VAULT_ARM_DIRECTORS=${VAULT_ARM_DIRECTORS:-director-1,director-2}
+      - DIRECTOR_1_ARM_SIGNATURE=${DIRECTOR_1_ARM_SIGNATURE}
+      - DIRECTOR_2_ARM_SIGNATURE=${DIRECTOR_2_ARM_SIGNATURE}
+      - DIRECTOR_3_ARM_SIGNATURE=${DIRECTOR_3_ARM_SIGNATURE:-}
+    volumes:
+      - ../../../scripts/arm-vault-compose.sh:/arm-vault.sh:ro,z
+    entrypoint: ["sh", "/arm-vault.sh"]
+    networks: [net_vault]
+    depends_on:
+      kerosene-vault: { condition: service_started }
+
+  lnd-neutrino:
+    image: ${LIGHTNING_LND_IMAGE:-lightninglabs/lnd:v0.20.1-beta}
+    container_name: lnd-neutrino-local
+    restart: "no"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - LND_BITCOIN_NODE=${LIGHTNING_LND_BITCOIN_NODE:-bitcoind}
+      - LND_GRPC_PORT=${LIGHTNING_LND_PORT:-10009}
+      - LND_REST_PORT=${LIGHTNING_LND_REST_PORT:-8080}
+      - LND_ALIAS=${LIGHTNING_LND_ALIAS:-kerosene-lnd-bitcoind}
+      - LND_COLOR=${LIGHTNING_LND_COLOR:-#D1495B}
+      - LND_NEUTRINO_CONNECT=${LIGHTNING_LND_NEUTRINO_CONNECT:-}
+      - LND_NEUTRINO_ADDPEERS=${LIGHTNING_LND_NEUTRINO_ADDPEERS:-}
+      - LND_EXTERNAL_IP=${LIGHTNING_LND_EXTERNAL_IP:-}
+      - LND_TLS_EXTRA_DOMAINS=${LIGHTNING_LND_TLS_EXTRA_DOMAINS:-lnd-bitcoind,lnd-neutrino,localhost}
+      - LND_TLS_EXTRA_IPS=${LIGHTNING_LND_TLS_EXTRA_IPS:-127.0.0.1}
+      - BITCOIN_RPC_HOST=bitcoin-pruned-node
+      - BITCOIN_RPC_PORT=${BITCOIN_RPC_PORT:-8332}
+      - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-kerosene}
+      - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD:?BITCOIN_RPC_PASSWORD is required}
+      - BITCOIN_ZMQ_RAWTX=${BITCOIN_ZMQ_RAWTX:-tcp://bitcoin-pruned-node:28332}
+      - BITCOIN_ZMQ_RAWBLOCK=${BITCOIN_ZMQ_RAWBLOCK:-tcp://bitcoin-pruned-node:28334}
+    volumes:
+      - lnd_data:/root/.lnd
+      - ../../../backend/kerosene-infrastructure/scripts/lnd-entrypoint.sh:/lnd-entrypoint.sh:ro,z
+    entrypoint: ["/bin/sh", "/lnd-entrypoint.sh"]
+    networks:
+      net_bitcoin:
+        aliases:
+          - lnd-bitcoind
+      net_tor:
+        aliases:
+          - lnd-bitcoind
+      tor_egress:
+    depends_on:
+      bitcoin-core: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "lncli --lnddir=/root/.lnd --rpcserver=127.0.0.1:${LIGHTNING_LND_PORT:-10009} --network=${BITCOIN_NETWORK:-mainnet} getinfo >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 36
+      start_period: 20s
+
+  lnd-bootstrap:
+    image: curlimages/curl:8.10.1
+    container_name: lnd-bootstrap-local
+    restart: "no"
+    user: "0:0"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
+      - LND_REST_PORT=${LIGHTNING_LND_REST_PORT:-8080}
+      - LND_BOOTSTRAP_TIMEOUT_SECONDS=${LIGHTNING_LND_BOOTSTRAP_TIMEOUT_SECONDS:-180}
+      - LND_TLS_SERVER_NAME=${LIGHTNING_LND_TLS_SERVER_NAME:-lnd-bitcoind}
+    volumes:
+      - lnd_data:/lnd
+      - ../../../backend/kerosene-infrastructure/scripts/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro,z
+    entrypoint: ["sh", "/lnd-bootstrap.sh"]
+    networks: [net_tor]
+    depends_on:
+      lnd-neutrino: { condition: service_started }
+
+  lnd-unlocker:
+    image: curlimages/curl:8.10.1
+    container_name: lnd-unlocker-local
+    restart: "no"
+    user: "0:0"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
+      - LND_REST_PORT=${LIGHTNING_LND_REST_PORT:-8080}
+      - LND_BOOTSTRAP_TIMEOUT_SECONDS=${LIGHTNING_LND_BOOTSTRAP_TIMEOUT_SECONDS:-180}
+      - LND_BOOTSTRAP_WATCH=true
+      - LND_BOOTSTRAP_WATCH_INTERVAL_SECONDS=${LIGHTNING_LND_UNLOCK_WATCH_INTERVAL_SECONDS:-30}
+      - LND_TLS_SERVER_NAME=${LIGHTNING_LND_TLS_SERVER_NAME:-lnd-bitcoind}
+    volumes:
+      - lnd_data:/lnd
+      - ../../../backend/kerosene-infrastructure/scripts/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro,z
+    entrypoint: ["sh", "/lnd-bootstrap.sh"]
+    networks: [net_tor]
+    depends_on:
+      lnd-bootstrap: { condition: service_completed_successfully }
+      lnd-neutrino: { condition: service_started }
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BITCOIN CORE PRUNED MAINNET (primary on-chain source)
+  # ════════════════════════════════════════════════════════════════════════════
+  bitcoin-core:
+    image: ${BITCOIN_CORE_IMAGE:-bitcoin/bitcoin:27.1}
+    container_name: bitcoin-pruned-node-local
+    hostname: bitcoin-pruned-node
+    restart: "no"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - BITCOIN_CHAIN=${BITCOIN_CHAIN:-mainnet}
+      - BITCOIN_PRUNE_MB=${BITCOIN_PRUNE_MB:-5500}
+      - BITCOIN_MAX_MEMPOOL_MB=${BITCOIN_MAX_MEMPOOL_MB:-300}
+      - BITCOIN_DBCACHE_MB=${BITCOIN_DBCACHE_MB:-1024}
+      - BITCOIN_P2P_PORT=${BITCOIN_P2P_PORT:-8333}
+      - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-kerosene}
+      - BITCOIN_RPC_WALLET=${BITCOIN_RPC_WALLET:-kerosene}
+      - BITCOIN_WALLET_PASSPHRASE=${BITCOIN_WALLET_PASSPHRASE:-}
+      - BITCOIN_REINDEX_CHAINSTATE_ONCE=${BITCOIN_REINDEX_CHAINSTATE_ONCE:-false}
+      - BITCOIN_REINDEX_ONCE=${BITCOIN_REINDEX_ONCE:-false}
+    volumes:
+      - bitcoin_core_data:/home/bitcoin/.bitcoin
+      - ../../runtime/bitcoin/bitcoind-entrypoint.sh:/entrypoint.sh:ro,z
+      - ../../runtime/bitcoin/bitcoind-healthcheck.sh:/healthcheck.sh:ro,z
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks:
+      net_bitcoin:
+        aliases:
+          - bitcoin-pruned-node
+          - bitcoin-core
+      tor_egress:
+    healthcheck:
+      test: ["CMD-SHELL", "sh /healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      start_period: ${BITCOIN_HEALTH_START_PERIOD:-2h}
+      retries: 30
+
+  bitcoin-indexer:
+    image: ${BITCOIN_INDEXER_IMAGE:-getumbrel/electrs:v0.10.2}
+    container_name: bitcoin-indexer-local
+    profiles: ["archive-indexer"]
+    restart: "no"
+    env_file: ../../../backend/kerosene/.env
+    command:
+      - --network
+      - ${BITCOIN_CHAIN:-mainnet}
+      - --daemon-rpc-addr
+      - bitcoin-core:8332
+      - --daemon-p2p-addr
+      - bitcoin-core:${BITCOIN_P2P_PORT:-8333}
+      - --electrum-rpc-addr
+      - 0.0.0.0:50001
+      - --http-addr
+      - 0.0.0.0:3002
+      - --cookie
+      - ${BITCOIN_RPC_USER:-kerosene}:${BITCOIN_RPC_PASSWORD}
+      - --db-dir
+      - /data
+    volumes:
+      - bitcoin_indexer_data:/data
+    networks: [net_bitcoin]
+    depends_on:
+      bitcoin-core: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 3002"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # HASHICORP VAULT RAFT CLUSTER (real integrated storage quorum)
+  # ════════════════════════════════════════════════════════════════════════════
+  vault-raft-data-init:
+    image: alpine:3.20
+    container_name: vault-raft-data-init-local
+    restart: "no"
+    network_mode: none
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        for dir in /vault-raft-1 /vault-raft-2 /vault-raft-3 /vault-bootstrap; do
+          mkdir -p "$$dir"
+          chown -R 100:1000 "$$dir"
+          chmod 700 "$$dir"
+        done
+    volumes:
+      - vault_raft_1_data:/vault-raft-1
+      - vault_raft_2_data:/vault-raft-2
+      - vault_raft_3_data:/vault-raft-3
+      - vault_raft_bootstrap:/vault-bootstrap
+
+  vault-raft-1:
+    image: ${VAULT_IMAGE:-hashicorp/vault:1.17.6}
+    container_name: vault-raft-1-local
+    restart: "no"
+    cap_add: [IPC_LOCK]
+    environment:
+      - VAULT_ADDR=https://127.0.0.1:8200
+      - VAULT_SKIP_VERIFY=true
+    command: ["server"]
+    volumes:
+      - vault_raft_1_data:/vault/data
+      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro
+      - ../../../backend/kerosene-infrastructure/vault/raft/vault-raft-1.hcl:/vault/config/vault.hcl:ro,z
+    networks: [net_vault]
+    healthcheck:
+      test: ["CMD-SHELL", "vault status >/dev/null 2>&1 || test $$? -eq 2"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      vault-raft-data-init: { condition: service_completed_successfully }
+
+  vault-raft-2:
+    image: ${VAULT_IMAGE:-hashicorp/vault:1.17.6}
+    container_name: vault-raft-2-local
+    restart: "no"
+    cap_add: [IPC_LOCK]
+    environment:
+      - VAULT_ADDR=https://127.0.0.1:8200
+      - VAULT_SKIP_VERIFY=true
+    command: ["server"]
+    volumes:
+      - vault_raft_2_data:/vault/data
+      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro
+      - ../../../backend/kerosene-infrastructure/vault/raft/vault-raft-2.hcl:/vault/config/vault.hcl:ro,z
+    networks: [net_vault]
+    healthcheck:
+      test: ["CMD-SHELL", "vault status >/dev/null 2>&1 || test $$? -eq 2"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      vault-raft-data-init: { condition: service_completed_successfully }
+
+  vault-raft-3:
+    image: ${VAULT_IMAGE:-hashicorp/vault:1.17.6}
+    container_name: vault-raft-3-local
+    restart: "no"
+    cap_add: [IPC_LOCK]
+    environment:
+      - VAULT_ADDR=https://127.0.0.1:8200
+      - VAULT_SKIP_VERIFY=true
+    command: ["server"]
+    volumes:
+      - vault_raft_3_data:/vault/data
+      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro
+      - ../../../backend/kerosene-infrastructure/vault/raft/vault-raft-3.hcl:/vault/config/vault.hcl:ro,z
+    networks: [net_vault]
+    healthcheck:
+      test: ["CMD-SHELL", "vault status >/dev/null 2>&1 || test $$? -eq 2"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      vault-raft-data-init: { condition: service_completed_successfully }
+
+  vault-raft-bootstrap:
+    image: ${VAULT_IMAGE:-hashicorp/vault:1.17.6}
+    container_name: vault-raft-bootstrap-local
+    restart: "no"
+    environment:
+      - VAULT_ADDR=https://vault-raft-1:8200
+      - VAULT_SKIP_VERIFY=true
+      - VAULT_BOOTSTRAP_DIR=/vault/bootstrap
+      - VAULT_APP_READ_GID=65532
+    volumes:
+      - vault_raft_bootstrap:/vault/bootstrap
+      - ../../../backend/kerosene-infrastructure/vault/raft/bootstrap-raft.sh:/bootstrap-raft.sh:ro,z
+      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro,z
+    entrypoint: ["/bin/sh", "/bootstrap-raft.sh"]
+    networks: [net_vault]
+    depends_on:
+      vault-raft-1: { condition: service_healthy }
+      vault-raft-2: { condition: service_healthy }
+      vault-raft-3: { condition: service_healthy }
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # WVO shard (Tor prefix wvo; former IS)
+  # ════════════════════════════════════════════════════════════════════════════
+  db-wvo:
+    image: postgres:17-bookworm
+    container_name: db-wvo-local
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - POSTGRES_DB=kerosene
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--locale=C.UTF-8 --encoding=UTF8
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+      - REQUIRE_MTLS=false
+    volumes:
+      - pg_data_is:/var/lib/postgresql/data
+      - ../../runtime/postgres/initdb:/docker-entrypoint-initdb.d:z
+    networks: [net_db_wvo]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d kerosene"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis-wvo:
+    image: redis:7-alpine
+    container_name: redis-wvo-local
+    env_file: ../../../backend/kerosene/.env
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes: [redis_data_is:/data]
+    networks: [net_db_wvo]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mpc-sidecar-wvo:
+    build:
+      context: ../../../backend/mpc-sidecar
+      dockerfile: ../../infra/docker/images/mpc-sidecar/Dockerfile
+    container_name: mpc-sidecar-wvo-local
+    restart: "no"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - MPC_ALLOW_INSECURE_GRPC=true
+      - MPC_REQUIRE_MASTER_KEY=true
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}
+      - BUILD_TIME=${BUILD_TIME:-unknown}
+      - IMAGE_DIGEST=${MPC_IMAGE_DIGEST:-unknown}
+      - RELEASE_MANIFEST_DIGEST=${RELEASE_MANIFEST_DIGEST:-unknown}
+    tmpfs:
+      - /mnt/mpc-shards:rw,noexec,nosuid,size=64m,uid=65532,gid=65532,mode=0700
+    volumes:
+      - mpc_shards_is:/app/encrypted-shards
+    networks: [net_mpc]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  tor-wvo:
+    build:
+      context: ../../../backend/kerosene/deploy/tor
+      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+    container_name: tor-wvo-local
+    environment:
+      - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
+    volumes:
+      - tor_data_is:/var/lib/tor
+      - ../../runtime/tor/torrc-is:/etc/tor/torrc:ro,z
+      - ../../runtime/tor/entrypoint.sh:/entrypoint.sh:ro,z
+      - tor_keys_is:/var/lib/tor/kerosene_service
+      - tor_socks_is:/var/run/tor/socks
+      - tor_control_is:/var/run/tor/control
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks: [net_tor, tor_egress]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/tor-ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+
+  shard-identity-init-wvo:
+    image: alpine:3.20
+    container_name: kerosene-shard-identity-init-wvo-local
+    command: ["sh", "-c", "mkdir -p /identity && chown -R 65532:65532 /identity && chmod 700 /identity"]
+    restart: "no"
+    network_mode: none
+    volumes:
+      - shard_identity_is:/identity
+
+  server-wvo:
+    build:
+      context: ../../../backend/kerosene
+      dockerfile: ../../infra/docker/images/server/Dockerfile
+    container_name: server-wvo-local
+    restart: "no"
+    ports:
+      - "${APP_WVO_PORT:-8080}:8080"
+    cap_drop: [ALL]
+    cap_add: [IPC_LOCK]
+    security_opt:
+      - no-new-privileges:true
+      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+      - /opt/kerosene:rw,noexec,nosuid,size=10m
+    volumes:
+      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro,z
+      - ../../../backend/kerosene/deploy/local/certs:/certs:ro,z
+      - tor_socks_is:/var/run/tor/socks
+      - vanguards_state_is:/var/run/tor/vanguards:ro
+      - tor_keys_vault:/vault-onion:ro
+      - shard_identity_is:/opt/kerosene/identity
+      - lnd_data:/lnd:ro
+      - vault_raft_bootstrap:/vault-raft:ro
+      - ../../../release:/release:ro,z
+    env_file: ../../../backend/kerosene/.env
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - FLYWAY_ENABLED=${FLYWAY_ENABLED:-true}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db-wvo-local:5432/kerosene?ssl=false
+      - REGION=WVO
+      - MPC_SIDECAR_HOST=mpc-sidecar-wvo
+      - MPC_SIDECAR_TLS_ENABLED=false
+      - AUDIT_SOLVENCY_ENFORCED=false
+      - SPRING_DATA_REDIS_HOST=redis-wvo
+      - VAULT_ENABLED=${VAULT_ENABLED:-false}
+      - VAULT_URL=http://kerosene-vault:8090
+      - VAULT_ONION_FILE=/vault-onion/hostname
+      - VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS=${VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS:-180000}
+      - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_ENABLED=true
+      - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_CONFIRMATION=KEROSENE_LOCAL_RESET_OK
+      - SHARD_ATTESTATION_SECRET=${VAULT_CLUSTER_ATTESTATION_SECRET}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_RPC_ENABLED=${BITCOIN_RPC_ENABLED:-true}
+      - BITCOIN_RPC_REQUIRED=${BITCOIN_RPC_REQUIRED:-true}
+      - BITCOIN_RPC_PRUNED_REQUIRED=${BITCOIN_RPC_PRUNED_REQUIRED:-true}
+      - BITCOIN_RPC_URL=${BITCOIN_RPC_URL:-http://bitcoin-pruned-node:8332}
+      - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-kerosene}
+      - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD}
+      - BITCOIN_RPC_WALLET=${BITCOIN_RPC_WALLET:-kerosene}
+      - BITCOIN_ZMQ_ENABLED=${BITCOIN_ZMQ_ENABLED:-true}
+      - BITCOIN_ZMQ_RAWTX=${BITCOIN_ZMQ_RAWTX:-tcp://bitcoin-pruned-node:28332}
+      - BITCOIN_ZMQ_HASHBLOCK=${BITCOIN_ZMQ_HASHBLOCK:-tcp://bitcoin-pruned-node:28333}
+      - BITCOIN_INDEXER_BASE_URL=${BITCOIN_INDEXER_BASE_URL:-}
+      - VAULT_RAFT_ENABLED=${VAULT_RAFT_ENABLED:-true}
+      - VAULT_RAFT_REQUIRED=${VAULT_RAFT_REQUIRED:-true}
+      - VAULT_RAFT_URL=${VAULT_RAFT_URL:-https://vault-raft-1:8200}
+      - VAULT_RAFT_TOKEN_FILE=${VAULT_RAFT_TOKEN_FILE:-/vault-raft/app-health-token}
+      - VAULT_RAFT_TLS_INSECURE=true
+      - RELEASE_MANIFEST_PATH=${RELEASE_MANIFEST_PATH:-/release/release-manifest.json}
+      - RELEASE_MANIFEST_SIGNATURE_PATH=${RELEASE_MANIFEST_SIGNATURE_PATH:-/release/release-manifest.json.sig}
+      - RELEASE_MANIFEST_PUBLIC_KEY_PATH=${RELEASE_MANIFEST_PUBLIC_KEY_PATH:-/release/release-public-key.der.b64}
+      - RELEASE_ATTESTATION_REQUIRED=${RELEASE_ATTESTATION_REQUIRED:-false}
+      - RELEASE_REMOTE_ATTESTATION_ENABLED=${RELEASE_REMOTE_ATTESTATION_ENABLED:-false}
+      - RELEASE_ATTESTATION_SECRET=${RELEASE_ATTESTATION_SECRET:-}
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}
+      - BUILD_TIME=${BUILD_TIME:-unknown}
+      - IMAGE_DIGEST=${IMAGE_DIGEST:-unknown}
+      - CODE_HASH=${CODE_HASH:-unknown}
+      - CONFIG_HASH=${CONFIG_HASH:-unknown}
+      - TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED=${TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED:-true}
+      - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
+      - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
+      - LIGHTNING_LND_TLS_CERT_PATH=/lnd/tls.cert
+      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-mainnet}/admin.macaroon
+      - SHARD_IDENTITY_PATH=/opt/kerosene/identity
+      - TOR_HEALTH_VANGUARDS_STATE_FILE=/var/run/tor/vanguards/vanguards.state
+    networks:
+      net_ingress:
+      net_db_wvo:
+      net_mpc:
+      net_tor:
+        ipv4_address: 10.241.0.10
+      net_vault:
+      net_bitcoin:
+    depends_on:
+      db-wvo: { condition: service_healthy }
+      redis-wvo: { condition: service_healthy }
+      mpc-sidecar-wvo: { condition: service_healthy }
+      kerosene-vault-arm: { condition: service_completed_successfully }
+      vault-raft-bootstrap: { condition: service_completed_successfully }
+      tor-wvo: { condition: service_healthy }
+      vanguards-wvo: { condition: service_healthy }
+      shard-identity-init-wvo: { condition: service_completed_successfully }
+      lnd-bootstrap: { condition: service_completed_successfully }
+      lnd-neutrino: { condition: service_healthy }
+
+  vanguards-wvo:
+    build:
+      context: ../../../backend/kerosene/deploy/tor/vanguards
+      dockerfile: Dockerfile
+    container_name: vanguards-wvo-local
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=16m,mode=1777
+    volumes:
+      - tor_control_is:/var/run/tor/control:ro
+      - tor_data_is:/var/lib/tor:ro
+      - vanguards_state_is:/var/lib/vanguards
+    network_mode: none
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/vanguards-ready && test -s /var/lib/vanguards/vanguards.state"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    depends_on:
+      tor-wvo: { condition: service_healthy }
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # IW5 shard (Tor prefix iw5; former CH)
+  # ════════════════════════════════════════════════════════════════════════════
+  db-iw5:
+    image: postgres:17-bookworm
+    container_name: db-iw5-local
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - POSTGRES_DB=kerosene
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--locale=C.UTF-8 --encoding=UTF8
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+      - REQUIRE_MTLS=false
+    volumes:
+      - pg_data_ch:/var/lib/postgresql/data
+      - ../../runtime/postgres/initdb:/docker-entrypoint-initdb.d:z
+    networks: [net_db_iw5]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d kerosene"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis-iw5:
+    image: redis:7-alpine
+    container_name: redis-iw5-local
+    env_file: ../../../backend/kerosene/.env
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes: [redis_data_ch:/data]
+    networks: [net_db_iw5]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mpc-sidecar-iw5:
+    build:
+      context: ../../../backend/mpc-sidecar
+      dockerfile: ../../infra/docker/images/mpc-sidecar/Dockerfile
+    container_name: mpc-sidecar-iw5-local
+    restart: "no"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - MPC_ALLOW_INSECURE_GRPC=true
+      - MPC_REQUIRE_MASTER_KEY=true
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}
+      - BUILD_TIME=${BUILD_TIME:-unknown}
+      - IMAGE_DIGEST=${MPC_IMAGE_DIGEST:-unknown}
+      - RELEASE_MANIFEST_DIGEST=${RELEASE_MANIFEST_DIGEST:-unknown}
+    tmpfs:
+      - /mnt/mpc-shards:rw,noexec,nosuid,size=64m,uid=65532,gid=65532,mode=0700
+    volumes:
+      - mpc_shards_ch:/app/encrypted-shards
+    networks: [net_mpc]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  tor-iw5:
+    build:
+      context: ../../../backend/kerosene/deploy/tor
+      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+    container_name: tor-iw5-local
+    environment:
+      - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
+    volumes:
+      - tor_data_ch:/var/lib/tor
+      - ../../runtime/tor/torrc-ch:/etc/tor/torrc:ro,z
+      - ../../runtime/tor/entrypoint.sh:/entrypoint.sh:ro,z
+      - tor_keys_ch:/var/lib/tor/kerosene_service
+      - tor_socks_ch:/var/run/tor/socks
+      - tor_control_ch:/var/run/tor/control
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks: [net_tor, tor_egress]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/tor-ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+
+  shard-identity-init-iw5:
+    image: alpine:3.20
+    container_name: kerosene-shard-identity-init-iw5-local
+    command: ["sh", "-c", "mkdir -p /identity && chown -R 65532:65532 /identity && chmod 700 /identity"]
+    restart: "no"
+    network_mode: none
+    volumes:
+      - shard_identity_ch:/identity
+
+  server-iw5:
+    build:
+      context: ../../../backend/kerosene
+      dockerfile: ../../infra/docker/images/server/Dockerfile
+    container_name: server-iw5-local
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [IPC_LOCK]
+    security_opt:
+      - no-new-privileges:true
+      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+      - /opt/kerosene:rw,noexec,nosuid,size=10m
+    volumes:
+      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro,z
+      - ../../../backend/kerosene/deploy/local/certs:/certs:ro,z
+      - tor_socks_ch:/var/run/tor/socks
+      - vanguards_state_ch:/var/run/tor/vanguards:ro
+      - tor_keys_vault:/vault-onion:ro
+      - shard_identity_ch:/opt/kerosene/identity
+      - lnd_data:/lnd:ro
+      - vault_raft_bootstrap:/vault-raft:ro
+      - ../../../release:/release:ro,z
+    env_file: ../../../backend/kerosene/.env
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - FLYWAY_ENABLED=${FLYWAY_ENABLED:-true}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db-iw5-local:5432/kerosene?ssl=false
+      - REGION=IW5
+      - MPC_SIDECAR_HOST=mpc-sidecar-iw5
+      - MPC_SIDECAR_TLS_ENABLED=false
+      - AUDIT_SOLVENCY_ENFORCED=false
+      - SPRING_DATA_REDIS_HOST=redis-iw5
+      - VAULT_ENABLED=${VAULT_ENABLED:-false}
+      - VAULT_URL=http://kerosene-vault:8090
+      - VAULT_ONION_FILE=/vault-onion/hostname
+      - VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS=${VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS:-180000}
+      - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_ENABLED=true
+      - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_CONFIRMATION=KEROSENE_LOCAL_RESET_OK
+      - SHARD_ATTESTATION_SECRET=${VAULT_CLUSTER_ATTESTATION_SECRET}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_RPC_ENABLED=${BITCOIN_RPC_ENABLED:-true}
+      - BITCOIN_RPC_REQUIRED=${BITCOIN_RPC_REQUIRED:-true}
+      - BITCOIN_RPC_PRUNED_REQUIRED=${BITCOIN_RPC_PRUNED_REQUIRED:-true}
+      - BITCOIN_RPC_URL=${BITCOIN_RPC_URL:-http://bitcoin-pruned-node:8332}
+      - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-kerosene}
+      - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD}
+      - BITCOIN_RPC_WALLET=${BITCOIN_RPC_WALLET:-kerosene}
+      - BITCOIN_ZMQ_ENABLED=${BITCOIN_ZMQ_ENABLED:-true}
+      - BITCOIN_ZMQ_RAWTX=${BITCOIN_ZMQ_RAWTX:-tcp://bitcoin-pruned-node:28332}
+      - BITCOIN_ZMQ_HASHBLOCK=${BITCOIN_ZMQ_HASHBLOCK:-tcp://bitcoin-pruned-node:28333}
+      - BITCOIN_INDEXER_BASE_URL=${BITCOIN_INDEXER_BASE_URL:-}
+      - VAULT_RAFT_ENABLED=${VAULT_RAFT_ENABLED:-true}
+      - VAULT_RAFT_REQUIRED=${VAULT_RAFT_REQUIRED:-true}
+      - VAULT_RAFT_URL=${VAULT_RAFT_URL:-https://vault-raft-1:8200}
+      - VAULT_RAFT_TOKEN_FILE=${VAULT_RAFT_TOKEN_FILE:-/vault-raft/app-health-token}
+      - VAULT_RAFT_TLS_INSECURE=true
+      - RELEASE_MANIFEST_PATH=${RELEASE_MANIFEST_PATH:-/release/release-manifest.json}
+      - RELEASE_MANIFEST_SIGNATURE_PATH=${RELEASE_MANIFEST_SIGNATURE_PATH:-/release/release-manifest.json.sig}
+      - RELEASE_MANIFEST_PUBLIC_KEY_PATH=${RELEASE_MANIFEST_PUBLIC_KEY_PATH:-/release/release-public-key.der.b64}
+      - RELEASE_ATTESTATION_REQUIRED=${RELEASE_ATTESTATION_REQUIRED:-false}
+      - RELEASE_REMOTE_ATTESTATION_ENABLED=${RELEASE_REMOTE_ATTESTATION_ENABLED:-false}
+      - RELEASE_ATTESTATION_SECRET=${RELEASE_ATTESTATION_SECRET:-}
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}
+      - BUILD_TIME=${BUILD_TIME:-unknown}
+      - IMAGE_DIGEST=${IMAGE_DIGEST:-unknown}
+      - CODE_HASH=${CODE_HASH:-unknown}
+      - CONFIG_HASH=${CONFIG_HASH:-unknown}
+      - TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED=${TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED:-true}
+      - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
+      - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
+      - LIGHTNING_LND_TLS_CERT_PATH=/lnd/tls.cert
+      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-mainnet}/admin.macaroon
+      - SHARD_IDENTITY_PATH=/opt/kerosene/identity
+      - TOR_HEALTH_VANGUARDS_STATE_FILE=/var/run/tor/vanguards/vanguards.state
+    networks:
+      net_ingress:
+      net_db_iw5:
+      net_mpc:
+      net_tor:
+        ipv4_address: 10.241.0.11
+      net_vault:
+      net_bitcoin:
+    depends_on:
+      db-iw5: { condition: service_healthy }
+      redis-iw5: { condition: service_healthy }
+      mpc-sidecar-iw5: { condition: service_healthy }
+      kerosene-vault-arm: { condition: service_completed_successfully }
+      vault-raft-bootstrap: { condition: service_completed_successfully }
+      tor-iw5: { condition: service_healthy }
+      vanguards-iw5: { condition: service_healthy }
+      shard-identity-init-iw5: { condition: service_completed_successfully }
+      lnd-bootstrap: { condition: service_completed_successfully }
+      lnd-neutrino: { condition: service_healthy }
+
+  vanguards-iw5:
+    build:
+      context: ../../../backend/kerosene/deploy/tor/vanguards
+      dockerfile: Dockerfile
+    container_name: vanguards-iw5-local
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=16m,mode=1777
+    volumes:
+      - tor_control_ch:/var/run/tor/control:ro
+      - tor_data_ch:/var/lib/tor:ro
+      - vanguards_state_ch:/var/lib/vanguards
+    network_mode: none
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/vanguards-ready && test -s /var/lib/vanguards/vanguards.state"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    depends_on:
+      tor-iw5: { condition: service_healthy }
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # LTV shard (Tor prefix ltv; former SG)
+  # ════════════════════════════════════════════════════════════════════════════
+  db-ltv:
+    image: postgres:17-bookworm
+    container_name: db-ltv-local
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - POSTGRES_DB=kerosene
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--locale=C.UTF-8 --encoding=UTF8
+      - LANG=C.UTF-8
+      - LC_ALL=C.UTF-8
+      - REQUIRE_MTLS=false
+    volumes:
+      - pg_data_sg:/var/lib/postgresql/data
+      - ../../runtime/postgres/initdb:/docker-entrypoint-initdb.d:z
+    networks: [net_db_ltv]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d kerosene"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis-ltv:
+    image: redis:7-alpine
+    container_name: redis-ltv-local
+    env_file: ../../../backend/kerosene/.env
+    command: redis-server --requirepass ${REDIS_PASSWORD} --appendonly yes
+    volumes: [redis_data_sg:/data]
+    networks: [net_db_ltv]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  mpc-sidecar-ltv:
+    build:
+      context: ../../../backend/mpc-sidecar
+      dockerfile: ../../infra/docker/images/mpc-sidecar/Dockerfile
+    container_name: mpc-sidecar-ltv-local
+    restart: "no"
+    env_file: ../../../backend/kerosene/.env
+    environment:
+      - MPC_ALLOW_INSECURE_GRPC=true
+      - MPC_REQUIRE_MASTER_KEY=true
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}
+      - BUILD_TIME=${BUILD_TIME:-unknown}
+      - IMAGE_DIGEST=${MPC_IMAGE_DIGEST:-unknown}
+      - RELEASE_MANIFEST_DIGEST=${RELEASE_MANIFEST_DIGEST:-unknown}
+    tmpfs:
+      - /mnt/mpc-shards:rw,noexec,nosuid,size=64m,uid=65532,gid=65532,mode=0700
+    volumes:
+      - mpc_shards_sg:/app/encrypted-shards
+    networks: [net_mpc]
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 50051"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  tor-ltv:
+    build:
+      context: ../../../backend/kerosene/deploy/tor
+      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+    container_name: tor-ltv-local
+    environment:
+      - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
+    volumes:
+      - tor_data_sg:/var/lib/tor
+      - ../../runtime/tor/torrc-sg:/etc/tor/torrc:ro,z
+      - ../../runtime/tor/entrypoint.sh:/entrypoint.sh:ro,z
+      - tor_keys_sg:/var/lib/tor/kerosene_service
+      - tor_socks_sg:/var/run/tor/socks
+      - tor_control_sg:/var/run/tor/control
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks: [net_tor, tor_egress]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/tor-ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+
+  shard-identity-init-ltv:
+    image: alpine:3.20
+    container_name: kerosene-shard-identity-init-ltv-local
+    command: ["sh", "-c", "mkdir -p /identity && chown -R 65532:65532 /identity && chmod 700 /identity"]
+    restart: "no"
+    network_mode: none
+    volumes:
+      - shard_identity_sg:/identity
+
+  server-ltv:
+    build:
+      context: ../../../backend/kerosene
+      dockerfile: ../../infra/docker/images/server/Dockerfile
+    container_name: server-ltv-local
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [IPC_LOCK]
+    security_opt:
+      - no-new-privileges:true
+      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+    tmpfs:
+      - /tmp:rw,size=64m,mode=1777
+      - /opt/kerosene:rw,noexec,nosuid,size=10m
+    volumes:
+      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro,z
+      - ../../../backend/kerosene/deploy/local/certs:/certs:ro,z
+      - tor_socks_sg:/var/run/tor/socks
+      - vanguards_state_sg:/var/run/tor/vanguards:ro
+      - tor_keys_vault:/vault-onion:ro
+      - shard_identity_sg:/opt/kerosene/identity
+      - lnd_data:/lnd:ro
+      - vault_raft_bootstrap:/vault-raft:ro
+      - ../../../release:/release:ro,z
+    env_file: ../../../backend/kerosene/.env
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - FLYWAY_ENABLED=${FLYWAY_ENABLED:-true}
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://db-ltv-local:5432/kerosene?ssl=false
+      - REGION=LTV
+      - MPC_SIDECAR_HOST=mpc-sidecar-ltv
+      - MPC_SIDECAR_TLS_ENABLED=false
+      - AUDIT_SOLVENCY_ENFORCED=false
+      - SPRING_DATA_REDIS_HOST=redis-ltv
+      - VAULT_ENABLED=${VAULT_ENABLED:-false}
+      - VAULT_URL=http://kerosene-vault:8090
+      - VAULT_ONION_FILE=/vault-onion/hostname
+      - VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS=${VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS:-180000}
+      - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_ENABLED=true
+      - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_CONFIRMATION=KEROSENE_LOCAL_RESET_OK
+      - SHARD_ATTESTATION_SECRET=${VAULT_CLUSTER_ATTESTATION_SECRET}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_RPC_ENABLED=${BITCOIN_RPC_ENABLED:-true}
+      - BITCOIN_RPC_REQUIRED=${BITCOIN_RPC_REQUIRED:-true}
+      - BITCOIN_RPC_PRUNED_REQUIRED=${BITCOIN_RPC_PRUNED_REQUIRED:-true}
+      - BITCOIN_RPC_URL=${BITCOIN_RPC_URL:-http://bitcoin-pruned-node:8332}
+      - BITCOIN_RPC_USER=${BITCOIN_RPC_USER:-kerosene}
+      - BITCOIN_RPC_PASSWORD=${BITCOIN_RPC_PASSWORD}
+      - BITCOIN_RPC_WALLET=${BITCOIN_RPC_WALLET:-kerosene}
+      - BITCOIN_ZMQ_ENABLED=${BITCOIN_ZMQ_ENABLED:-true}
+      - BITCOIN_ZMQ_RAWTX=${BITCOIN_ZMQ_RAWTX:-tcp://bitcoin-pruned-node:28332}
+      - BITCOIN_ZMQ_HASHBLOCK=${BITCOIN_ZMQ_HASHBLOCK:-tcp://bitcoin-pruned-node:28333}
+      - BITCOIN_INDEXER_BASE_URL=${BITCOIN_INDEXER_BASE_URL:-}
+      - VAULT_RAFT_ENABLED=${VAULT_RAFT_ENABLED:-true}
+      - VAULT_RAFT_REQUIRED=${VAULT_RAFT_REQUIRED:-true}
+      - VAULT_RAFT_URL=${VAULT_RAFT_URL:-https://vault-raft-1:8200}
+      - VAULT_RAFT_TOKEN_FILE=${VAULT_RAFT_TOKEN_FILE:-/vault-raft/app-health-token}
+      - VAULT_RAFT_TLS_INSECURE=true
+      - RELEASE_MANIFEST_PATH=${RELEASE_MANIFEST_PATH:-/release/release-manifest.json}
+      - RELEASE_MANIFEST_SIGNATURE_PATH=${RELEASE_MANIFEST_SIGNATURE_PATH:-/release/release-manifest.json.sig}
+      - RELEASE_MANIFEST_PUBLIC_KEY_PATH=${RELEASE_MANIFEST_PUBLIC_KEY_PATH:-/release/release-public-key.der.b64}
+      - RELEASE_ATTESTATION_REQUIRED=${RELEASE_ATTESTATION_REQUIRED:-false}
+      - RELEASE_REMOTE_ATTESTATION_ENABLED=${RELEASE_REMOTE_ATTESTATION_ENABLED:-false}
+      - RELEASE_ATTESTATION_SECRET=${RELEASE_ATTESTATION_SECRET:-}
+      - GIT_COMMIT=${GIT_COMMIT:-unknown}
+      - BUILD_TIME=${BUILD_TIME:-unknown}
+      - IMAGE_DIGEST=${IMAGE_DIGEST:-unknown}
+      - CODE_HASH=${CODE_HASH:-unknown}
+      - CONFIG_HASH=${CONFIG_HASH:-unknown}
+      - TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED=${TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED:-true}
+      - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
+      - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
+      - LIGHTNING_LND_TLS_CERT_PATH=/lnd/tls.cert
+      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-mainnet}/admin.macaroon
+      - SHARD_IDENTITY_PATH=/opt/kerosene/identity
+      - TOR_HEALTH_VANGUARDS_STATE_FILE=/var/run/tor/vanguards/vanguards.state
+    networks:
+      net_ingress:
+      net_db_ltv:
+      net_mpc:
+      net_tor:
+        ipv4_address: 10.241.0.12
+      net_vault:
+      net_bitcoin:
+    depends_on:
+      db-ltv: { condition: service_healthy }
+      redis-ltv: { condition: service_healthy }
+      mpc-sidecar-ltv: { condition: service_healthy }
+      kerosene-vault-arm: { condition: service_completed_successfully }
+      vault-raft-bootstrap: { condition: service_completed_successfully }
+      tor-ltv: { condition: service_healthy }
+      vanguards-ltv: { condition: service_healthy }
+      shard-identity-init-ltv: { condition: service_completed_successfully }
+      lnd-bootstrap: { condition: service_completed_successfully }
+      lnd-neutrino: { condition: service_healthy }
+
+  vanguards-ltv:
+    build:
+      context: ../../../backend/kerosene/deploy/tor/vanguards
+      dockerfile: Dockerfile
+    container_name: vanguards-ltv-local
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,size=16m,mode=1777
+    volumes:
+      - tor_control_sg:/var/run/tor/control:ro
+      - tor_data_sg:/var/lib/tor:ro
+      - vanguards_state_sg:/var/lib/vanguards
+    network_mode: none
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/vanguards-ready && test -s /var/lib/vanguards/vanguards.state"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    depends_on:
+      tor-ltv: { condition: service_healthy }
+
+  web-admin:
+    image: nginx:1.27-alpine
+    container_name: kerosene-web-admin-local
+    restart: "no"
+    ports:
+      - "${WEB_ADMIN_PORT:-3000}:8080"
+    volumes:
+      - ../../../frontend/build/web:/usr/share/nginx/html:ro,z
+      - ../../runtime/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
+      - ../../../release:/release:ro,z
+    networks: [net_ingress]
+    depends_on:
+      server-wvo: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /usr/share/nginx/html/index.html"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: kerosene-prometheus-local
+    restart: "no"
+    ports:
+      - "${PROMETHEUS_PORT:-19090}:9090"
+    volumes:
+      - ../../runtime/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+      - prometheus_data:/prometheus
+    networks: [net_ingress, net_tor]
+    depends_on:
+      server-wvo: { condition: service_healthy }
+      server-iw5: { condition: service_healthy }
+      server-ltv: { condition: service_healthy }
+
+# ════════════════════════════════════════════════════════════════════════════
+# Volumes
+# ════════════════════════════════════════════════════════════════════════════
+volumes:
+  pg_data_is:
+  pg_data_ch:
+  pg_data_sg:
+  redis_data_is:
+  redis_data_ch:
+  redis_data_sg:
+  mpc_shards_is:
+  mpc_shards_ch:
+  mpc_shards_sg:
+  tor_socks_is:
+  tor_socks_ch:
+  tor_socks_sg:
+  tor_data_is:
+  tor_data_ch:
+  tor_data_sg:
+  tor_control_is:
+  tor_control_ch:
+  tor_control_sg:
+  vanguards_state_is:
+  vanguards_state_ch:
+  vanguards_state_sg:
+  shard_identity_is:
+  shard_identity_ch:
+  shard_identity_sg:
+  tor_keys_vault:
+  tor_keys_is:
+  tor_keys_ch:
+  tor_keys_sg:
+  lnd_data:
+  bitcoin_core_data:
+  bitcoin_indexer_data:
+  vault_raft_1_data:
+  vault_raft_2_data:
+  vault_raft_3_data:
+  vault_raft_bootstrap:
+  prometheus_data:
+
+# ════════════════════════════════════════════════════════════════════════════
+# Networks — each shard is isolated; only net_tor and net_mpc are shared
+# ════════════════════════════════════════════════════════════════════════════
+networks:
+  net_ingress:
+    driver: bridge
+  net_vault:
+    driver: bridge
+    internal: true    # Vault net has NO internet egress — only tor_egress for Tor
+    ipam:
+      config:
+        - subnet: 10.242.0.0/24
+  net_db_wvo:
+    driver: bridge
+    internal: true
+  net_db_iw5:
+    driver: bridge
+    internal: true
+  net_db_ltv:
+    driver: bridge
+    internal: true
+  net_mpc:
+    driver: bridge
+    internal: true    # MPC sidecar coordination — air-gapped from internet
+  net_bitcoin:
+    driver: bridge
+    internal: true    # Bitcoin Core pruned + optional local indexer
+  net_tor:
+    driver: bridge
+    internal: true    # App↔Tor UDS volume bridge — no direct internet
+    ipam:
+      config:
+        - subnet: 10.241.0.0/24
+  tor_egress:
+    driver: bridge    # Only Tor daemons have internet access via this network

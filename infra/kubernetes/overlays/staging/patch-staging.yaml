@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kfe-service
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: kfe-service
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 1500m
+              memory: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: server
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 1500m
+              memory: 2Gi
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kfe-service
+spec:
+  minReplicas: 2
+  maxReplicas: 6
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: server
+spec:
+  minReplicas: 2
+  maxReplicas: 6
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kfe-service
+spec:
+  minAvailable: 1
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: server
+spec:
+  minAvailable: 1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-config
+data:
+  SPRING_PROFILES_ACTIVE: "staging"
+  BITCOIN_NETWORK: "signet"
+  REGION: "STAGING"
+  AUDIT_SOLVENCY_ENFORCED: "true"
+  RELEASE_ATTESTATION_REQUIRED: "false"
+  RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kfe-service-config
+data:
+  SPRING_PROFILES_ACTIVE: "staging,kfe"
+  KEROSENE_RUNTIME_ROLE: "kfe-service"
+  BITCOIN_NETWORK: "signet"
+  REGION: "STAGING"
+  AUDIT_SOLVENCY_ENFORCED: "true"
+  RELEASE_ATTESTATION_REQUIRED: "false"
+  RELEASE_REMOTE_ATTESTATION_ENABLED: "false"

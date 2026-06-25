@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-config
+  labels:
+    app.kubernetes.io/name: server
+data:
+  SPRING_PROFILES_ACTIVE: "prod"
+  SERVER_PORT: "8080"
+  KEROSENE_RUNTIME_ROLE: "core-service"
+  SERVER_SHUTDOWN: "graceful"
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: "45s"
+  FLYWAY_ENABLED: "true"
+  FLYWAY_BASELINE_ON_MIGRATE: "false"
+  MANAGEMENT_HEALTH_SHOW_DETAILS: "when_authorized"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  SPRING_DATA_REDIS_HOST: "kerosene-redis-headless"
+  SPRING_DATA_REDIS_PORT: "6379"
+  MPC_SIDECAR_HOST: "mpc-sidecar"
+  MPC_SIDECAR_PORT: "50051"
+  MPC_SIDECAR_TLS_ENABLED: "true"
+  VAULT_RAFT_URL: "https://kerosene-vault-raft-headless:8200"
+  VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS: "1800000"
+  LIGHTNING_LND_HOST: "kerosene-lnd-headless"
+  LIGHTNING_LND_PORT: "10009"
+  BITCOIN_NETWORK: "mainnet"
+  BITCOIN_RPC_ENABLED: "true"
+  BITCOIN_RPC_REQUIRED: "true"
+  BITCOIN_RPC_PRUNED_REQUIRED: "true"
+  BITCOIN_RPC_URL: "http://bitcoin-core:8332"
+  BITCOIN_ZMQ_ENABLED: "true"
+  BITCOIN_ZMQ_RAWTX: "tcp://bitcoin-core:28332"
+  BITCOIN_ZMQ_HASHBLOCK: "tcp://bitcoin-core:28333"
+  REGION: "PROD"
+  AUDIT_SOLVENCY_ENFORCED: "true"
+  RELEASE_ATTESTATION_REQUIRED: "true"
+  RELEASE_REMOTE_ATTESTATION_ENABLED: "true"
+  KFE_REMOTE_BASE_URL: "http://kfe-service:8080"
+  KFE_REMOTE_WALLET_PROVISIONING_ENABLED: "true"

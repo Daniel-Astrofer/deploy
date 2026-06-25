@@ -1,0 +1,185 @@
+# Local resource caps keep the full single-machine cluster usable.
+# Set KEROSENE_COMPOSE_RESOURCE_LIMITS=0 to run without this override.
+
+x-app-limits: &app-limits
+  cpus: "${KEROSENE_LOCAL_APP_CPUS:-0.75}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_APP_CPUS:-0.75}"
+        memory: "${KEROSENE_LOCAL_APP_MEMORY:-768M}"
+
+x-db-limits: &db-limits
+  cpus: "${KEROSENE_LOCAL_DB_CPUS:-0.50}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_DB_CPUS:-0.50}"
+        memory: "${KEROSENE_LOCAL_DB_MEMORY:-384M}"
+
+x-redis-limits: &redis-limits
+  cpus: "${KEROSENE_LOCAL_REDIS_CPUS:-0.25}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_REDIS_CPUS:-0.25}"
+        memory: "${KEROSENE_LOCAL_REDIS_MEMORY:-128M}"
+
+x-mpc-limits: &mpc-limits
+  cpus: "${KEROSENE_LOCAL_MPC_CPUS:-0.50}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_MPC_CPUS:-0.50}"
+        memory: "${KEROSENE_LOCAL_MPC_MEMORY:-256M}"
+
+x-tor-limits: &tor-limits
+  cpus: "${KEROSENE_LOCAL_TOR_CPUS:-0.25}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_TOR_CPUS:-0.25}"
+        memory: "${KEROSENE_LOCAL_TOR_MEMORY:-128M}"
+
+x-vanguards-limits: &vanguards-limits
+  cpus: "${KEROSENE_LOCAL_VANGUARDS_CPUS:-0.25}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_VANGUARDS_CPUS:-0.25}"
+        memory: "${KEROSENE_LOCAL_VANGUARDS_MEMORY:-96M}"
+
+x-vault-limits: &vault-limits
+  cpus: "${KEROSENE_LOCAL_VAULT_CPUS:-0.50}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_VAULT_CPUS:-0.50}"
+        memory: "${KEROSENE_LOCAL_VAULT_MEMORY:-512M}"
+
+x-vault-raft-limits: &vault-raft-limits
+  cpus: "${KEROSENE_LOCAL_VAULT_RAFT_CPUS:-0.50}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_VAULT_RAFT_CPUS:-0.50}"
+        memory: "${KEROSENE_LOCAL_VAULT_RAFT_MEMORY:-512M}"
+
+x-bitcoin-limits: &bitcoin-limits
+  cpus: "${KEROSENE_LOCAL_BITCOIN_CPUS:-2.00}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_BITCOIN_CPUS:-2.00}"
+        memory: "${KEROSENE_LOCAL_BITCOIN_MEMORY:-4096M}"
+
+x-lnd-limits: &lnd-limits
+  cpus: "${KEROSENE_LOCAL_LND_CPUS:-0.50}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_LND_CPUS:-0.50}"
+        memory: "${KEROSENE_LOCAL_LND_MEMORY:-512M}"
+
+x-small-job-limits: &small-job-limits
+  cpus: "${KEROSENE_LOCAL_JOB_CPUS:-0.50}"
+  deploy:
+    resources:
+      limits:
+        cpus: "${KEROSENE_LOCAL_JOB_CPUS:-0.50}"
+        memory: "${KEROSENE_LOCAL_JOB_MEMORY:-192M}"
+
+services:
+  kerosene-vault:
+    <<: *vault-limits
+  kerosene-tor-vault:
+    <<: *tor-limits
+  kerosene-vault-arm:
+    <<: *small-job-limits
+
+  lnd-neutrino:
+    <<: *lnd-limits
+  lnd-bootstrap:
+    <<: *small-job-limits
+  lnd-unlocker:
+    <<: *small-job-limits
+  bitcoin-core:
+    <<: *bitcoin-limits
+  bitcoin-indexer:
+    cpus: "${KEROSENE_LOCAL_INDEXER_CPUS:-0.75}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${KEROSENE_LOCAL_INDEXER_CPUS:-0.75}"
+          memory: "${KEROSENE_LOCAL_INDEXER_MEMORY:-1024M}"
+
+  vault-raft-data-init:
+    <<: *small-job-limits
+  vault-raft-1:
+    <<: *vault-raft-limits
+  vault-raft-2:
+    <<: *vault-raft-limits
+  vault-raft-3:
+    <<: *vault-raft-limits
+  vault-raft-bootstrap:
+    <<: *small-job-limits
+
+  db-wvo:
+    <<: *db-limits
+  redis-wvo:
+    <<: *redis-limits
+  mpc-sidecar-wvo:
+    <<: *mpc-limits
+  tor-wvo:
+    <<: *tor-limits
+  shard-identity-init-wvo:
+    <<: *small-job-limits
+  server-wvo:
+    <<: *app-limits
+  vanguards-wvo:
+    <<: *vanguards-limits
+
+  db-iw5:
+    <<: *db-limits
+  redis-iw5:
+    <<: *redis-limits
+  mpc-sidecar-iw5:
+    <<: *mpc-limits
+  tor-iw5:
+    <<: *tor-limits
+  shard-identity-init-iw5:
+    <<: *small-job-limits
+  server-iw5:
+    <<: *app-limits
+  vanguards-iw5:
+    <<: *vanguards-limits
+
+  db-ltv:
+    <<: *db-limits
+  redis-ltv:
+    <<: *redis-limits
+  mpc-sidecar-ltv:
+    <<: *mpc-limits
+  tor-ltv:
+    <<: *tor-limits
+  shard-identity-init-ltv:
+    <<: *small-job-limits
+  server-ltv:
+    <<: *app-limits
+  vanguards-ltv:
+    <<: *vanguards-limits
+
+  web-admin:
+    cpus: "${KEROSENE_LOCAL_WEB_CPUS:-0.25}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${KEROSENE_LOCAL_WEB_CPUS:-0.25}"
+          memory: "${KEROSENE_LOCAL_WEB_MEMORY:-128M}"
+  prometheus:
+    cpus: "${KEROSENE_LOCAL_PROMETHEUS_CPUS:-0.50}"
+    deploy:
+      resources:
+        limits:
+          cpus: "${KEROSENE_LOCAL_PROMETHEUS_CPUS:-0.50}"
+          memory: "${KEROSENE_LOCAL_PROMETHEUS_MEMORY:-384M}"

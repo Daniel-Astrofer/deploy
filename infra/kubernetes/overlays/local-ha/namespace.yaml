@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kerosene-local-ha
+  labels:
+    app.kubernetes.io/name: kerosene-local-ha
+    app.kubernetes.io/part-of: kerosene
+    app.kubernetes.io/environment: local-ha

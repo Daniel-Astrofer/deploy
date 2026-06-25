@@ -1,0 +1,126 @@
+# Optional local split-runtime overlay for KFE.
+#
+# Usage:
+#   docker compose -f docker-compose.local.yml -f docker-compose.kfe.local.yml --profile kfe-split up
+#
+# This does not route production traffic to KFE yet. It starts KFE as a separate
+# workload on the same shard networks so the team can validate health, rails,
+# DB/Redis access and observability before Core -> KFE traffic cutover.
+
+x-kfe-env: &kfe-env
+  SPRING_PROFILES_ACTIVE: docker,kfe
+  KEROSENE_RUNTIME_ROLE: kfe-service
+  FLYWAY_ENABLED: ${KFE_FLYWAY_ENABLED:-true}
+  VAULT_ENABLED: ${VAULT_ENABLED:-false}
+  VAULT_URL: http://kerosene-vault:8090
+  VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS: ${VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS:-180000}
+  BITCOIN_NETWORK: ${BITCOIN_NETWORK:-mainnet}
+  BITCOIN_RPC_ENABLED: ${BITCOIN_RPC_ENABLED:-true}
+  BITCOIN_RPC_REQUIRED: ${BITCOIN_RPC_REQUIRED:-true}
+  BITCOIN_RPC_PRUNED_REQUIRED: ${BITCOIN_RPC_PRUNED_REQUIRED:-true}
+  BITCOIN_RPC_URL: ${BITCOIN_RPC_URL:-http://bitcoin-pruned-node:8332}
+  BITCOIN_RPC_USER: ${BITCOIN_RPC_USER:-kerosene}
+  BITCOIN_RPC_PASSWORD: ${BITCOIN_RPC_PASSWORD}
+  BITCOIN_RPC_WALLET: ${BITCOIN_RPC_WALLET:-kerosene}
+  BITCOIN_ZMQ_ENABLED: ${BITCOIN_ZMQ_ENABLED:-true}
+  BITCOIN_ZMQ_RAWTX: ${BITCOIN_ZMQ_RAWTX:-tcp://bitcoin-pruned-node:28332}
+  BITCOIN_ZMQ_HASHBLOCK: ${BITCOIN_ZMQ_HASHBLOCK:-tcp://bitcoin-pruned-node:28333}
+  LIGHTNING_LND_ENABLED: ${LIGHTNING_LND_ENABLED:-true}
+  LIGHTNING_LND_HOST: ${LIGHTNING_LND_HOST:-lnd-bitcoind}
+  LIGHTNING_LND_TLS_CERT_PATH: /lnd/tls.cert
+  LIGHTNING_LND_MACAROON_PATH: /lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-mainnet}/admin.macaroon
+  VAULT_RAFT_ENABLED: ${VAULT_RAFT_ENABLED:-true}
+  VAULT_RAFT_REQUIRED: ${VAULT_RAFT_REQUIRED:-true}
+  VAULT_RAFT_URL: ${VAULT_RAFT_URL:-https://vault-raft-1:8200}
+  VAULT_RAFT_TOKEN_FILE: ${VAULT_RAFT_TOKEN_FILE:-/vault-raft/app-health-token}
+  VAULT_RAFT_TLS_INSECURE: "true"
+  RELEASE_MANIFEST_PATH: ${RELEASE_MANIFEST_PATH:-/release/release-manifest.json}
+  RELEASE_MANIFEST_SIGNATURE_PATH: ${RELEASE_MANIFEST_SIGNATURE_PATH:-/release/release-manifest.json.sig}
+  RELEASE_MANIFEST_PUBLIC_KEY_PATH: ${RELEASE_MANIFEST_PUBLIC_KEY_PATH:-/release/release-public-key.der.b64}
+  RELEASE_ATTESTATION_REQUIRED: ${RELEASE_ATTESTATION_REQUIRED:-false}
+  RELEASE_REMOTE_ATTESTATION_ENABLED: ${RELEASE_REMOTE_ATTESTATION_ENABLED:-false}
+  RELEASE_ATTESTATION_SECRET: ${RELEASE_ATTESTATION_SECRET:-}
+  GIT_COMMIT: ${GIT_COMMIT:-unknown}
+  BUILD_TIME: ${BUILD_TIME:-unknown}
+  IMAGE_DIGEST: ${KFE_IMAGE_DIGEST:-unknown}
+
+x-kfe-service-common: &kfe-service-common
+  build:
+    context: ../../../backend/kerosene
+    dockerfile: ../../infra/docker/images/kfe-service/Dockerfile
+  restart: "no"
+  cap_drop: [ALL]
+  cap_add: [IPC_LOCK]
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,size=64m,mode=1777
+    - /opt/kerosene:rw,noexec,nosuid,size=10m
+  env_file: ../../../backend/kerosene/.env
+  deploy:
+    resources:
+      limits:
+        memory: 1024M
+  volumes:
+    - lnd_data:/lnd:ro
+    - vault_raft_bootstrap:/vault-raft:ro
+    - ../../../release:/release:ro,z
+  profiles: ["kfe-split"]
+
+services:
+  kfe-service-wvo:
+    <<: *kfe-service-common
+    container_name: kfe-service-wvo-local
+    environment:
+      <<: *kfe-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-wvo-local:5432/kerosene?ssl=false
+      SPRING_DATA_REDIS_HOST: redis-wvo
+      REGION: WVO
+      MPC_SIDECAR_HOST: mpc-sidecar-wvo
+      MPC_SIDECAR_TLS_ENABLED: "false"
+    networks: [net_db_wvo, net_mpc, net_vault, net_bitcoin]
+    depends_on:
+      db-wvo: { condition: service_healthy }
+      redis-wvo: { condition: service_healthy }
+      mpc-sidecar-wvo: { condition: service_healthy }
+      vault-raft-bootstrap: { condition: service_completed_successfully }
+      lnd-bootstrap: { condition: service_completed_successfully }
+      lnd-neutrino: { condition: service_healthy }
+
+  kfe-service-iw5:
+    <<: *kfe-service-common
+    container_name: kfe-service-iw5-local
+    environment:
+      <<: *kfe-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-iw5-local:5432/kerosene?ssl=false
+      SPRING_DATA_REDIS_HOST: redis-iw5
+      REGION: IW5
+      MPC_SIDECAR_HOST: mpc-sidecar-iw5
+      MPC_SIDECAR_TLS_ENABLED: "false"
+    networks: [net_db_iw5, net_mpc, net_vault, net_bitcoin]
+    depends_on:
+      db-iw5: { condition: service_healthy }
+      redis-iw5: { condition: service_healthy }
+      mpc-sidecar-iw5: { condition: service_healthy }
+      vault-raft-bootstrap: { condition: service_completed_successfully }
+      lnd-bootstrap: { condition: service_completed_successfully }
+      lnd-neutrino: { condition: service_healthy }
+
+  kfe-service-ltv:
+    <<: *kfe-service-common
+    container_name: kfe-service-ltv-local
+    environment:
+      <<: *kfe-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-ltv-local:5432/kerosene?ssl=false
+      SPRING_DATA_REDIS_HOST: redis-ltv
+      REGION: LTV
+      MPC_SIDECAR_HOST: mpc-sidecar-ltv
+      MPC_SIDECAR_TLS_ENABLED: "false"
+    networks: [net_db_ltv, net_mpc, net_vault, net_bitcoin]
+    depends_on:
+      db-ltv: { condition: service_healthy }
+      redis-ltv: { condition: service_healthy }
+      mpc-sidecar-ltv: { condition: service_healthy }
+      vault-raft-bootstrap: { condition: service_completed_successfully }
+      lnd-bootstrap: { condition: service_completed_successfully }
+      lnd-neutrino: { condition: service_healthy }

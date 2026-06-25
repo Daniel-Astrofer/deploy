@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tor-wvo
+spec:
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      containers:
+        - name: tor-placeholder
+          image: kerosene/tor:local
+          imagePullPolicy: Never
+          command: ["tor"]
+          args: ["-f", "/etc/tor/torrc"]
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "test -s /var/lib/tor/kerosene_service/hostname"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60
+          volumeMounts:
+            - name: torrc
+              mountPath: /etc/tor/torrc
+              subPath: torrc
+              readOnly: true
+            - name: tor-hidden-service
+              mountPath: /var/lib/tor/kerosene_service
+      volumes:
+        - name: torrc
+          configMap:
+            name: torrc-wvo
+        - name: tor-hidden-service
+          hostPath:
+            path: /home/omega/Kerosene/backend/kerosene/deploy/local/tor/keys/is
+            type: Directory

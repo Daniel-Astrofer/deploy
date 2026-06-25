@@ -1,0 +1,148 @@
+# Service contracts for stateful infrastructure. These selectors are compatible
+# with the existing backend/kerosene-infrastructure/prod/k8s StatefulSets while
+# the new Kustomize stack is being adopted.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-db-headless
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  clusterIP: None
+  selector:
+    app: kerosene-db-patroni
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+      protocol: TCP
+    - name: patroni
+      port: 8008
+      targetPort: patroni
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-redis-headless
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+spec:
+  clusterIP: None
+  selector:
+    app: kerosene-redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+    - name: sentinel
+      port: 26379
+      targetPort: sentinel
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-vault-raft-headless
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: secrets
+spec:
+  clusterIP: None
+  selector:
+    app: kerosene-vault
+  ports:
+    - name: vault-api
+      port: 8200
+      targetPort: vault-api
+      protocol: TCP
+    - name: vault-cluster
+      port: 8201
+      targetPort: vault-cluster
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bitcoin-core
+  labels:
+    app.kubernetes.io/name: bitcoin-core
+    app.kubernetes.io/component: bitcoin
+spec:
+  type: ClusterIP
+  selector:
+    app: kerosene-bitcoin
+  ports:
+    - name: rpc
+      port: 8332
+      targetPort: rpc
+      protocol: TCP
+    - name: p2p
+      port: 8333
+      targetPort: p2p
+      protocol: TCP
+    - name: zmq-rawblock
+      port: 28332
+      targetPort: zmq-block
+      protocol: TCP
+    - name: zmq-rawtx
+      port: 28333
+      targetPort: zmq-tx
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-bitcoin-headless
+  labels:
+    app.kubernetes.io/name: bitcoin-core
+    app.kubernetes.io/component: bitcoin
+spec:
+  clusterIP: None
+  selector:
+    app: kerosene-bitcoin
+  ports:
+    - name: rpc
+      port: 8332
+      targetPort: rpc
+      protocol: TCP
+    - name: p2p
+      port: 8333
+      targetPort: p2p
+      protocol: TCP
+    - name: zmq-rawblock
+      port: 28332
+      targetPort: zmq-block
+      protocol: TCP
+    - name: zmq-rawtx
+      port: 28333
+      targetPort: zmq-tx
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-lnd-headless
+  labels:
+    app.kubernetes.io/name: lnd
+    app.kubernetes.io/component: lightning
+spec:
+  clusterIP: None
+  selector:
+    app: kerosene-lnd
+  ports:
+    - name: grpc
+      port: 10009
+      targetPort: grpc
+      protocol: TCP
+    - name: rest
+      port: 8080
+      targetPort: rest
+      protocol: TCP
+    - name: p2p
+      port: 9735
+      targetPort: p2p
+      protocol: TCP

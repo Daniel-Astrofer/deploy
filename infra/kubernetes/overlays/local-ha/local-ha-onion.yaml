@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: torrc-wvo
+  labels:
+    app: tor-wvo
+data:
+  torrc: |
+    SocksPort 0
+    HiddenServiceDir /var/lib/tor/kerosene_service/
+    HiddenServiceVersion 3
+    HiddenServicePort 80 server-wvo:8080
+    Log notice stdout
+    DataDirectory /tmp/tor-data
+    NumCPUs 1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: torrc-iw5
+  labels:
+    app: tor-iw5
+data:
+  torrc: |
+    SocksPort 0
+    HiddenServiceDir /var/lib/tor/kerosene_service/
+    HiddenServiceVersion 3
+    HiddenServicePort 80 server-iw5:8080
+    Log notice stdout
+    DataDirectory /tmp/tor-data
+    NumCPUs 1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: torrc-ltv
+  labels:
+    app: tor-ltv
+data:
+  torrc: |
+    SocksPort 0
+    HiddenServiceDir /var/lib/tor/kerosene_service/
+    HiddenServiceVersion 3
+    HiddenServicePort 80 server-ltv:8080
+    Log notice stdout
+    DataDirectory /tmp/tor-data
+    NumCPUs 1

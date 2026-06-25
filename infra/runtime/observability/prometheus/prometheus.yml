@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: kerosene-app
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - kerosene-app-is:8080
+          - kerosene-app-ch:8080
+          - kerosene-app-sg:8080
