@@ -1,8 +1,8 @@
-# KFE — Krinse Financial Engine runtime image
+# KFE — Krinse Financial Engine runtime image.
 #
-# This image intentionally builds the current Kerosene Spring Boot executable while
-# selecting the kfe runtime profile. During the staged cutover, the monolith can
-# still host adapters while Kubernetes/Docker run KFE as its own workload.
+# The image builds the dedicated kfe-service Spring Boot artifact instead of the
+# Core bootJar, so the container only carries the KFE HTTP runtime and its direct
+# dependencies.
 
 FROM eclipse-temurin:21-jdk AS builder
 
@@ -16,26 +16,26 @@ COPY settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY kerosene-contracts kerosene-contracts/
 COPY kerosene-shared kerosene-shared/
 COPY kfe-service kfe-service/
-RUN ./gradlew :kfe-service:classes --no-daemon --max-workers=${GRADLE_MAX_WORKERS:-2} --quiet || true
 
 COPY src src/
 COPY deploy/docker docker/
-COPY web-admin-build web-admin-build/
 ARG GRADLE_MAX_WORKERS=2
-RUN ./gradlew bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
+RUN ./gradlew :kfe-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
 RUN javac docker/Healthcheck.java -d /workspace/healthcheck
 
 FROM gcr.io/distroless/java21-debian12:nonroot AS runtime
 
 WORKDIR /app
 
-COPY --chown=65532:65532 --from=builder /workspace/build/libs/*.jar app.jar
+COPY --chown=65532:65532 --from=builder /workspace/kfe-service/build/libs/*-boot.jar app.jar
 COPY --chown=65532:65532 --from=builder /workspace/healthcheck /app/healthcheck
 
 USER 65532:65532
 EXPOSE 8080
 
 ENV SPRING_PROFILES_ACTIVE=kfe,docker
+ENV SPRING_CONFIG_IMPORT=optional:classpath:kfe-service-defaults.properties
+ENV KFE_STANDALONE=true
 ENV KEROSENE_RUNTIME_ROLE=kfe-service
 
 HEALTHCHECK --interval=10s --timeout=4s --start-period=180s --retries=12 \
