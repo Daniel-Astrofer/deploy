@@ -19,13 +19,14 @@ Expected targets:
 Options:
   --skip-kfe-service-build
                          Do not build/rebuild kerosene/kfe-service:local.
-  --skip-web-page-build  Do not build/rebuild kerosene/web-page:local from frontend/build/web.
+  --skip-web-page-build  Do not rebuild the Flutter web bundle or kerosene/web-page:local image.
 USAGE
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 BACKEND_COMMON="$REPO_ROOT/scripts/backend-common.sh"
+FLUTTER_COMMON="$REPO_ROOT/scripts/flutter-common.sh"
 SKIP_WEB_PAGE_BUILD=0
 SKIP_KFE_SERVICE_BUILD=0
 
@@ -41,6 +42,8 @@ done
 
 # shellcheck source=scripts/backend-common.sh
 source "$BACKEND_COMMON"
+# shellcheck source=scripts/flutter-common.sh
+source "$FLUTTER_COMMON"
 
 require_docker
 
@@ -113,6 +116,30 @@ build_kfe_service_image() {
   docker build -t "$target" -f "$dockerfile" "$context"
 }
 
+build_kubernetes_web_bundle() {
+  local frontend_dir="$REPO_ROOT/frontend"
+  local web_build="$frontend_dir/build/web"
+  local flutter_bin
+
+  if ! flutter_bin="$(kerosene_resolve_flutter_bin "$frontend_dir")"; then
+    fail "Flutter CLI not found for the Kubernetes web-page build user."
+  fi
+
+  info "Building Flutter web bundle for Kubernetes web-page same-origin routing."
+  (
+    cd "$frontend_dir"
+    FLUTTER_BUILD_ARGS=(web --release --csp --no-web-resources-cdn --target lib/web_main.dart)
+    if [[ "${FLUTTER_BUILD_NO_PUB:-0}" == "1" ]]; then
+      FLUTTER_BUILD_ARGS+=(--no-pub)
+    fi
+    kerosene_run_flutter "$flutter_bin" build "${FLUTTER_BUILD_ARGS[@]}" \
+      --dart-define="PASSKEY_RP_ID=${FRONTEND_PASSKEY_RP_ID:-kerosene-device}" \
+      --dart-define="PASSKEY_ORIGIN=${FRONTEND_PASSKEY_ORIGIN:-android:apk-key-hash:kerosene}"
+  )
+  rm -f "$web_build/kerosene-runtime-config.json"
+  kerosene_chown_sudo_user "$frontend_dir/.dart_tool" "$frontend_dir/build"
+}
+
 build_web_page_image() {
   local target="kerosene/web-page:local"
   local web_build="$REPO_ROOT/frontend/build/web"
@@ -124,8 +151,10 @@ build_web_page_image() {
     return 0
   fi
 
+  build_kubernetes_web_bundle
+
   if [[ ! -f "$web_build/index.html" ]]; then
-    fail "frontend/build/web/index.html not found. Run scripts/start-local.sh or scripts/build-web-page-backend.sh first."
+    fail "Flutter Kubernetes web-page build did not produce frontend/build/web/index.html."
   fi
   if [[ ! -f "$nginx_conf" ]]; then
     fail "nginx config not found: $nginx_conf"
@@ -182,4 +211,4 @@ fi
 info "Imported images visible to Kubernetes:"
 sudo ctr -n k8s.io images ls | grep -E 'kerosene/(server|kfe-service|mpc-sidecar|web-page)' || true
 
-info "Done. You can now run: backend/kerosene-infrastructure/k8s/scripts/deploy.sh local"
+info "Done. You can now run: infra/kubernetes/scripts/deploy.sh local"

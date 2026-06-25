@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-page-runtime-config
+data:
+  kerosene-runtime-config.json: |
+    {"apiUrl":"http://127.0.0.1:30082","frontendUrl":"http://127.0.0.1:30082","source":"infra/kubernetes/overlays/local-full"}

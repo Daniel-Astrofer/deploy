@@ -10,7 +10,7 @@ This document describes the developer-only Kubernetes runtime that boots Kerosen
 The implementation lives in:
 
 ```text
-backend/kerosene-infrastructure/k8s/overlays/local-full
+infra/kubernetes/overlays/local-full
 ```
 
 ## What local-full includes
@@ -45,11 +45,17 @@ Use `web-page` for financial routes. The Kubernetes web proxy sends `/kfe/**`,
 `/api/public/kfe/**` and `/api/admin/kfe/**` to `Service/kfe-service`; the
 direct `server` NodePort is Core-only.
 
+The `web-page` deployment mounts `web-page-runtime-config` at
+`/usr/share/nginx/html/kerosene-runtime-config.json`, pointing the Flutter web
+runtime at `http://127.0.0.1:30082`. The image import script rebuilds the web
+bundle for Kubernetes same-origin routing, so a stale `WEB_API_URL` from
+another local build does not leak into the Kubernetes frontend.
+
 ## Validate only
 
 ```bash
-bash backend/kerosene-infrastructure/k8s/scripts/validate-local-full.sh
-bash backend/kerosene-infrastructure/k8s/scripts/deploy-local-full.sh --dry-run
+bash infra/kubernetes/scripts/validate-local-full.sh
+bash infra/kubernetes/scripts/deploy-local-full.sh --dry-run
 ```
 
 ## Deploy
@@ -57,14 +63,14 @@ bash backend/kerosene-infrastructure/k8s/scripts/deploy-local-full.sh --dry-run
 Build/import local application images first, then apply the overlay:
 
 ```bash
-bash backend/kerosene-infrastructure/k8s/scripts/import-local-docker-images.sh
-bash backend/kerosene-infrastructure/k8s/scripts/deploy-local-full.sh --skip-image-import --wait
+bash infra/kubernetes/scripts/import-local-docker-images.sh
+bash infra/kubernetes/scripts/deploy-local-full.sh --skip-image-import --wait
 ```
 
 Or let the deploy wrapper import images:
 
 ```bash
-bash backend/kerosene-infrastructure/k8s/scripts/deploy-local-full.sh --wait
+bash infra/kubernetes/scripts/deploy-local-full.sh --wait
 ```
 
 ## Production boundary

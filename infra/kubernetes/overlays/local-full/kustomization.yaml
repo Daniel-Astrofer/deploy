@@ -7,6 +7,8 @@ resources:
   - local-dev-secrets.yaml
   - local-dev-runtime.yaml
   - local-network-policy.yaml
+  - web-page-nginx-config.yaml
+  - web-page-runtime-config.yaml
 labels:
   - pairs:
       app.kubernetes.io/environment: local-full
