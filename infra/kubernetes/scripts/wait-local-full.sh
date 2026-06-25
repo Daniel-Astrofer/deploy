@@ -29,6 +29,7 @@ wait_for statefulset mpc-sidecar
 wait_for deployment server
 wait_for deployment kfe-service
 wait_for deployment web-page
+wait_for deployment tor-onion
 
 echo "[*] Pods"
 kubectl_cmd -n "$NS" get pods -o wide

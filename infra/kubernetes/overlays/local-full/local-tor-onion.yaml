@@ -1,0 +1,151 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tor-onion-entrypoint
+  labels:
+    app.kubernetes.io/name: tor-onion
+data:
+  entrypoint.sh: |
+    #!/bin/sh
+    set -eu
+    TOR_READY_FILE=/tmp/tor-ready
+    TOR_LOG_FILE=/tmp/tor.log
+    rm -f "$TOR_READY_FILE" "$TOR_LOG_FILE"
+    mkdir -p /var/lib/tor /var/lib/tor/kerosene_service
+    chmod 700 /var/lib/tor/kerosene_service 2>/dev/null || true
+    touch "$TOR_LOG_FILE"
+    tail -n +1 -F "$TOR_LOG_FILE" &
+    TAIL_PID=$!
+    echo "==> Starting Kerosene Kubernetes Tor hidden service"
+    tor -f /etc/tor/torrc >"$TOR_LOG_FILE" 2>&1 &
+    TOR_PID=$!
+    echo "==> Waiting for Tor bootstrap"
+    while ! grep -q 'Bootstrapped 100% (done): Done' "$TOR_LOG_FILE"; do
+      if ! kill -0 "$TOR_PID" 2>/dev/null; then
+        wait "$TOR_PID"
+        exit $?
+      fi
+      sleep 1
+    done
+    while [ ! -s /var/lib/tor/kerosene_service/hostname ]; do
+      sleep 1
+    done
+    touch "$TOR_READY_FILE"
+    echo "==> Tor hidden service ready"
+    cat /var/lib/tor/kerosene_service/hostname
+    wait "$TOR_PID"
+    TOR_EXIT_CODE=$?
+    kill "$TAIL_PID" 2>/dev/null || true
+    wait "$TAIL_PID" 2>/dev/null || true
+    rm -f "$TOR_READY_FILE"
+    exit "$TOR_EXIT_CODE"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tor-onion-config
+  labels:
+    app.kubernetes.io/name: tor-onion
+data:
+  torrc: |
+    SocksPort 0
+    HiddenServiceDir /var/lib/tor/kerosene_service/
+    HiddenServiceVersion 3
+    HiddenServicePort 80 web-page:8080
+    Log notice stdout
+    DataDirectory /var/lib/tor
+    NumCPUs 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tor-onion
+  labels:
+    app.kubernetes.io/name: tor-onion
+    app.kubernetes.io/component: tor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tor-onion
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tor-onion
+        app.kubernetes.io/component: tor
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: tor
+          image: kerosene/tor:local
+          imagePullPolicy: Never
+          command: ["/bin/sh", "/entrypoint.sh"]
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -f /tmp/tor-ready && test -s /var/lib/tor/kerosene_service/hostname
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tor-entrypoint
+              mountPath: /entrypoint.sh
+              subPath: entrypoint.sh
+              readOnly: true
+            - name: torrc
+              mountPath: /etc/tor/torrc
+              subPath: torrc
+              readOnly: true
+      volumes:
+        - name: tor-entrypoint
+          configMap:
+            name: tor-onion-entrypoint
+            defaultMode: 0555
+        - name: torrc
+          configMap:
+            name: tor-onion-config
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: local-full-allow-tor-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tor-onion
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

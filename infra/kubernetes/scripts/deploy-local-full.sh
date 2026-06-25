@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: backend/kerosene-infrastructure/k8s/scripts/deploy-local-full.sh [--dry-run] [--skip-image-import] [--wait]
+Usage: infra/kubernetes/scripts/deploy-local-full.sh [--dry-run] [--skip-image-import] [--wait]
 
 Deploys the complete local Kubernetes runtime into namespace kerosene-local:
   - server
@@ -15,6 +15,7 @@ Deploys the complete local Kubernetes runtime into namespace kerosene-local:
   - Vault dev
   - Bitcoin Core regtest
   - LND local placeholder
+  - Tor hidden service for the web-page API gateway
 
 Options:
   --dry-run            Validate against the Kubernetes API without persisting resources.
@@ -83,3 +84,12 @@ echo "[+] server:   http://127.0.0.1:30080"
 echo "[+] mpc:      http://127.0.0.1:30081/version"
 echo "[+] web-page: http://127.0.0.1:30082"
 echo "[+] KFE routes: use web-page NodePort 30082 for /kfe, /api/public/kfe and /api/admin/kfe."
+if kubectl_cmd -n kerosene-local get deploy/tor-onion >/dev/null 2>&1; then
+  onion_hostname="$(kubectl_cmd -n kerosene-local exec deploy/tor-onion -- sh -c 'cat /var/lib/tor/kerosene_service/hostname' 2>/dev/null || true)"
+  if [[ -n "$onion_hostname" ]]; then
+    echo "[+] tor onion: http://$onion_hostname"
+    echo "[+] Android local release will use this .onion automatically via scripts/run-android-release-local.sh."
+  else
+    echo "[!] tor-onion exists but hostname is not ready yet. Re-run with --wait or check: kubectl -n kerosene-local logs deploy/tor-onion" >&2
+  fi
+fi

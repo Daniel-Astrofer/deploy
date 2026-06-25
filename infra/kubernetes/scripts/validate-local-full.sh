@@ -43,6 +43,12 @@ require '^kind: Deployment$'
 require '^  name: server$'
 require '^  name: kfe-service$'
 require '^  name: web-page$'
+require '^  name: tor-onion$'
+require '^  name: tor-onion-entrypoint$'
+require '^  name: tor-onion-config$'
+require 'HiddenServicePort 80 web-page:8080'
+require 'image: kerosene/tor:local'
+require 'local-full-allow-tor-egress'
 require '^  name: web-page-runtime-config$'
 require 'kerosene-runtime-config.json'
 require '"apiUrl":"http://127.0.0.1:30082"'
@@ -104,3 +110,4 @@ fi
 echo "[+] local-full overlay renders successfully."
 echo "[+] Expected access: server NodePort 30080, mpc health NodePort 30081, web-page NodePort 30082."
 echo "[+] web-page routes /kfe, /api/public/kfe and /api/admin/kfe to kfe-service."
+echo "[+] tor-onion publishes the web-page gateway as a Tor hidden service."
