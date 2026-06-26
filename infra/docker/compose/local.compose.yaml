@@ -1,15 +1,15 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-# docker-compose.local.yml — Kerosene Full-Cluster Local Simulation
+# infra/docker/compose/local.compose.yaml — Kerosene Full-Cluster Local Simulation
 # ─────────────────────────────────────────────────────────────────────────────
 # Simulates the full Infra (IS + CH + SG + Vault) on a single machine.
 # Uses production images (Debian Bookworm builder + Distroless runtime).
 #
 # BEFORE RUNNING:
-#   1. Run: bash scripts/init-local.sh
+#   1. Run: bash infra/scripts/local/control.sh init
 #   2. Ensure backend/kerosene/.env is populated (no default fallbacks allowed)
 #
 # USAGE:
-#   bash scripts/start-local.sh
+#   bash infra/scripts/local/control.sh start
 #
 # ⚠️  LOCAL ONLY — Not identical to production topology (multi-host).
 #     In production each region runs on a dedicated bare-metal machine.
@@ -31,7 +31,7 @@ services:
     cap_add: [IPC_LOCK]
     security_opt:
       - no-new-privileges:true
-      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+      # - seccomp:../../../infra/runtime/security/seccomp-profile.json
     tmpfs:
       - /tmp:rw,size=64m,mode=1777
     env_file: ../../../backend/kerosene/.env
@@ -54,8 +54,8 @@ services:
 
   kerosene-tor-vault:
     build:
-      context: ../../../backend/kerosene/deploy/tor
-      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+      context: ../../../infra/runtime/tor
+      dockerfile: ../../../infra/docker/images/tor/Dockerfile
     container_name: kerosene-tor-vault-local
     environment:
       - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
@@ -117,7 +117,7 @@ services:
       - BITCOIN_ZMQ_RAWBLOCK=${BITCOIN_ZMQ_RAWBLOCK:-tcp://bitcoin-pruned-node:28334}
     volumes:
       - lnd_data:/root/.lnd
-      - ../../../backend/kerosene-infrastructure/scripts/lnd-entrypoint.sh:/lnd-entrypoint.sh:ro,z
+      - ../../../infra/runtime/lightning/lnd-entrypoint.sh:/lnd-entrypoint.sh:ro,z
     entrypoint: ["/bin/sh", "/lnd-entrypoint.sh"]
     networks:
       net_bitcoin:
@@ -150,7 +150,7 @@ services:
       - LND_TLS_SERVER_NAME=${LIGHTNING_LND_TLS_SERVER_NAME:-lnd-bitcoind}
     volumes:
       - lnd_data:/lnd
-      - ../../../backend/kerosene-infrastructure/scripts/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro,z
+      - ../../../infra/runtime/lightning/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro,z
     entrypoint: ["sh", "/lnd-bootstrap.sh"]
     networks: [net_tor]
     depends_on:
@@ -172,7 +172,7 @@ services:
       - LND_TLS_SERVER_NAME=${LIGHTNING_LND_TLS_SERVER_NAME:-lnd-bitcoind}
     volumes:
       - lnd_data:/lnd
-      - ../../../backend/kerosene-infrastructure/scripts/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro,z
+      - ../../../infra/runtime/lightning/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro,z
     entrypoint: ["sh", "/lnd-bootstrap.sh"]
     networks: [net_tor]
     depends_on:
@@ -284,8 +284,8 @@ services:
     command: ["server"]
     volumes:
       - vault_raft_1_data:/vault/data
-      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro
-      - ../../../backend/kerosene-infrastructure/vault/raft/vault-raft-1.hcl:/vault/config/vault.hcl:ro,z
+      - ../../../infra/runtime/vault/raft/certs:/vault/certs:ro
+      - ../../../infra/runtime/vault/raft/vault-raft-1.hcl:/vault/config/vault.hcl:ro,z
     networks: [net_vault]
     healthcheck:
       test: ["CMD-SHELL", "vault status >/dev/null 2>&1 || test $$? -eq 2"]
@@ -306,8 +306,8 @@ services:
     command: ["server"]
     volumes:
       - vault_raft_2_data:/vault/data
-      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro
-      - ../../../backend/kerosene-infrastructure/vault/raft/vault-raft-2.hcl:/vault/config/vault.hcl:ro,z
+      - ../../../infra/runtime/vault/raft/certs:/vault/certs:ro
+      - ../../../infra/runtime/vault/raft/vault-raft-2.hcl:/vault/config/vault.hcl:ro,z
     networks: [net_vault]
     healthcheck:
       test: ["CMD-SHELL", "vault status >/dev/null 2>&1 || test $$? -eq 2"]
@@ -328,8 +328,8 @@ services:
     command: ["server"]
     volumes:
       - vault_raft_3_data:/vault/data
-      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro
-      - ../../../backend/kerosene-infrastructure/vault/raft/vault-raft-3.hcl:/vault/config/vault.hcl:ro,z
+      - ../../../infra/runtime/vault/raft/certs:/vault/certs:ro
+      - ../../../infra/runtime/vault/raft/vault-raft-3.hcl:/vault/config/vault.hcl:ro,z
     networks: [net_vault]
     healthcheck:
       test: ["CMD-SHELL", "vault status >/dev/null 2>&1 || test $$? -eq 2"]
@@ -350,8 +350,8 @@ services:
       - VAULT_APP_READ_GID=65532
     volumes:
       - vault_raft_bootstrap:/vault/bootstrap
-      - ../../../backend/kerosene-infrastructure/vault/raft/bootstrap-raft.sh:/bootstrap-raft.sh:ro,z
-      - ../../../backend/kerosene-infrastructure/vault/raft/certs:/vault/certs:ro,z
+      - ../../../infra/runtime/vault/raft/bootstrap-raft.sh:/bootstrap-raft.sh:ro,z
+      - ../../../infra/runtime/vault/raft/certs:/vault/certs:ro,z
     entrypoint: ["/bin/sh", "/bootstrap-raft.sh"]
     networks: [net_vault]
     depends_on:
@@ -424,8 +424,8 @@ services:
 
   tor-wvo:
     build:
-      context: ../../../backend/kerosene/deploy/tor
-      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+      context: ../../../infra/runtime/tor
+      dockerfile: ../../../infra/docker/images/tor/Dockerfile
     container_name: tor-wvo-local
     environment:
       - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
@@ -465,13 +465,13 @@ services:
     cap_add: [IPC_LOCK]
     security_opt:
       - no-new-privileges:true
-      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+      # - seccomp:../../../infra/runtime/security/seccomp-profile.json
     tmpfs:
       - /tmp:rw,size=64m,mode=1777
       - /opt/kerosene:rw,noexec,nosuid,size=10m
     volumes:
-      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro,z
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro,z
+      - ../../../infra/runtime/host/emergency-stop.sh:/opt/kerosene/panic.sh:ro,z
+      - ../../../infra/runtime/local/certs:/certs:ro,z
       - tor_socks_is:/var/run/tor/socks
       - vanguards_state_is:/var/run/tor/vanguards:ro
       - tor_keys_vault:/vault-onion:ro
@@ -557,7 +557,7 @@ services:
 
   vanguards-wvo:
     build:
-      context: ../../../backend/kerosene/deploy/tor/vanguards
+      context: ../../../infra/runtime/tor/vanguards
       dockerfile: Dockerfile
     container_name: vanguards-wvo-local
     restart: "no"
@@ -645,8 +645,8 @@ services:
 
   tor-iw5:
     build:
-      context: ../../../backend/kerosene/deploy/tor
-      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+      context: ../../../infra/runtime/tor
+      dockerfile: ../../../infra/docker/images/tor/Dockerfile
     container_name: tor-iw5-local
     environment:
       - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
@@ -684,13 +684,13 @@ services:
     cap_add: [IPC_LOCK]
     security_opt:
       - no-new-privileges:true
-      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+      # - seccomp:../../../infra/runtime/security/seccomp-profile.json
     tmpfs:
       - /tmp:rw,size=64m,mode=1777
       - /opt/kerosene:rw,noexec,nosuid,size=10m
     volumes:
-      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro,z
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro,z
+      - ../../../infra/runtime/host/emergency-stop.sh:/opt/kerosene/panic.sh:ro,z
+      - ../../../infra/runtime/local/certs:/certs:ro,z
       - tor_socks_ch:/var/run/tor/socks
       - vanguards_state_ch:/var/run/tor/vanguards:ro
       - tor_keys_vault:/vault-onion:ro
@@ -776,7 +776,7 @@ services:
 
   vanguards-iw5:
     build:
-      context: ../../../backend/kerosene/deploy/tor/vanguards
+      context: ../../../infra/runtime/tor/vanguards
       dockerfile: Dockerfile
     container_name: vanguards-iw5-local
     restart: "no"
@@ -864,8 +864,8 @@ services:
 
   tor-ltv:
     build:
-      context: ../../../backend/kerosene/deploy/tor
-      dockerfile: ../../../../infra/docker/images/tor/Dockerfile
+      context: ../../../infra/runtime/tor
+      dockerfile: ../../../infra/docker/images/tor/Dockerfile
     container_name: tor-ltv-local
     environment:
       - EXPECTED_TOR_HASH=${EXPECTED_TOR_HASH:-}
@@ -903,13 +903,13 @@ services:
     cap_add: [IPC_LOCK]
     security_opt:
       - no-new-privileges:true
-      # - seccomp:../../../backend/kerosene/deploy/seccomp-profile.json
+      # - seccomp:../../../infra/runtime/security/seccomp-profile.json
     tmpfs:
       - /tmp:rw,size=64m,mode=1777
       - /opt/kerosene:rw,noexec,nosuid,size=10m
     volumes:
-      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro,z
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro,z
+      - ../../../infra/runtime/host/emergency-stop.sh:/opt/kerosene/panic.sh:ro,z
+      - ../../../infra/runtime/local/certs:/certs:ro,z
       - tor_socks_sg:/var/run/tor/socks
       - vanguards_state_sg:/var/run/tor/vanguards:ro
       - tor_keys_vault:/vault-onion:ro
@@ -995,7 +995,7 @@ services:
 
   vanguards-ltv:
     build:
-      context: ../../../backend/kerosene/deploy/tor/vanguards
+      context: ../../../infra/runtime/tor/vanguards
       dockerfile: Dockerfile
     container_name: vanguards-ltv-local
     restart: "no"

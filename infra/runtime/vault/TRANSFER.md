@@ -1,13 +1,6 @@
 # Vault runtime transfer
 
-Source paths:
-
-```text
-backend/kerosene-infrastructure/vault/*
-backend/kerosene-infrastructure/prod/k8s/vault-raft.yaml
-```
-
-Target path:
+Canonical path:
 
 ```text
 infra/runtime/vault/*

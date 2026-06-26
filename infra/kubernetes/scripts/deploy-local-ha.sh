@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-K8S="$ROOT/backend/kerosene-infrastructure/k8s"
+K8S="$ROOT/infra/kubernetes"
 OVERLAY="$K8S/overlays/local-ha"
 
 if [[ "${1:-}" == "--dry-run" ]]; then

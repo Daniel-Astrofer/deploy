@@ -3,6 +3,6 @@ kind: Component
 
 # TRANSFER_PENDING
 # Source: local runtime manifests currently embedded in:
-# - backend/kerosene-infrastructure/k8s/overlays/local-full/local-dev-runtime.yaml
-# - backend/kerosene-infrastructure/k8s/overlays/local-ha/local-ha-runtime.yaml
+# - infra/kubernetes/overlays/local-full/local-dev-runtime.yaml
+# - infra/kubernetes/overlays/local-ha/local-ha-runtime.yaml
 resources: []

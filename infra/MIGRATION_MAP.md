@@ -1,70 +1,65 @@
 # Kerosene Infra Migration Map
 
-Este arquivo orienta a migração incremental. A estrutura final já existe em
-`infra/` e a primeira transferência de conteúdo real foi aplicada para
-Dockerfiles, Compose e Kustomize, preservando os caminhos legados para
-compatibilidade.
+Este arquivo registra a migração para a infraestrutura canônica em `infra/`.
 
-## Status da fase atual
+Regra atual: não criar `archive`, não criar novos Compose, não criar novas imagens e não manter duplicatas legadas como fonte operacional. Caminhos duplicados devem ser apagados depois que as referências ativas forem migradas para os caminhos canônicos abaixo.
 
-- Dockerfiles transferidos para `infra/docker/images/*`.
-- `infra/docker/images.yaml` aponta `dockerfile` para `infra/` e mantém
-  `legacy_dockerfile` como referência da origem antiga.
-- Compose files transferidos para `infra/docker/compose/*` com caminhos
-  relativos reescritos para a nova raiz.
-- Kustomize `base`, `overlays`, `scripts`, `docs` e `examples` transferidos
-  para `infra/kubernetes`.
-- Kustomize `components/*` permanece como área de decomposição futura; os
-  overlays validados ainda não dependem desses componentes.
-- Runtime assets não sensíveis foram copiados para `infra/runtime`; certificados,
-  chaves, onion auth e dados persistentes continuam fora da transferência.
-- Caminhos legados ainda não foram removidos.
+## Estado canônico
+
+- Dockerfiles e contrato de imagem: `infra/docker/images/*` e `infra/docker/images.yaml`.
+- Compose: `infra/docker/compose/*`.
+- Kubernetes/Kustomize: `infra/kubernetes/base`, `infra/kubernetes/overlays`, `infra/kubernetes/components`, `infra/kubernetes/scripts`, `infra/kubernetes/docs` e `infra/kubernetes/examples`.
+- Runtime não sensível: `infra/runtime/*`.
+- Scripts de alto nível: `infra/scripts/*`, `infra/docker/scripts/*` e `infra/kubernetes/scripts/*`.
 
 ## Docker images
 
-| Workload | Origem atual | Destino alvo |
-| --- | --- | --- |
-| server | `backend/kerosene-infrastructure/images/app/Dockerfile` | `infra/docker/images/server/Dockerfile` |
-| kfe-service | `backend/kerosene-infrastructure/images/kfe/Dockerfile` | `infra/docker/images/kfe-service/Dockerfile` |
-| mpc-sidecar | `backend/mpc-sidecar/Dockerfile` | `infra/docker/images/mpc-sidecar/Dockerfile` |
-| vault | `backend/kerosene-infrastructure/images/vault/Dockerfile` | `infra/docker/images/vault/Dockerfile` |
-| tor | `backend/kerosene/deploy/tor/Dockerfile` | `infra/docker/images/tor/Dockerfile` |
-| web-page | Dockerfile temporário em `backend/kerosene-infrastructure/k8s/scripts/import-local-docker-images.sh` | `infra/docker/images/web-page/Dockerfile` |
+| Workload | Caminho canônico |
+| --- | --- |
+| server | `infra/docker/images/server/Dockerfile` |
+| kfe-service | `infra/docker/images/kfe-service/Dockerfile` |
+| mpc-sidecar | `infra/docker/images/mpc-sidecar/Dockerfile` |
+| vault | `infra/docker/images/vault/Dockerfile` |
+| tor | `infra/docker/images/tor/Dockerfile` |
+| web-page | `infra/docker/images/web-page/Dockerfile` |
 
 ## Docker Compose
 
-| Origem atual | Destino alvo |
+| Perfil | Caminho canônico |
 | --- | --- |
-| `backend/kerosene-infrastructure/docker-compose.local.yml` | `infra/docker/compose/local.yml` |
-| `backend/kerosene-infrastructure/docker-compose.local.limits.yml` | `infra/docker/compose/local.limits.yml` |
-| `backend/kerosene-infrastructure/docker-compose.kfe.local.yml` | `infra/docker/compose/local.kfe.yml` |
-| `backend/kerosene/deploy/compose/hardened.yml` | `infra/docker/compose/hardened.yml` |
+| local | `infra/docker/compose/local.compose.yaml` |
+| local limits | `infra/docker/compose/local.limits.compose.yaml` |
+| local KFE | `infra/docker/compose/local.kfe.compose.yaml` |
+| hardened | `infra/docker/compose/hardened.compose.yaml` |
 
 ## Kubernetes / Kustomize
 
-| Origem atual | Destino alvo |
+| Área | Caminho canônico |
 | --- | --- |
-| `backend/kerosene-infrastructure/k8s/base/*` | `infra/kubernetes/base/*` |
-| `backend/kerosene-infrastructure/k8s/overlays/*` | `infra/kubernetes/overlays/*` |
-| `backend/kerosene-infrastructure/k8s/scripts/*` | `infra/kubernetes/scripts/*` |
-| `backend/kerosene-infrastructure/k8s/docs/*` | `infra/kubernetes/docs/*` |
-| `backend/kerosene-infrastructure/k8s/examples/*` | `infra/kubernetes/examples/*` |
+| base | `infra/kubernetes/base/*` |
+| overlays | `infra/kubernetes/overlays/*` |
+| components | `infra/kubernetes/components/*` |
+| scripts | `infra/kubernetes/scripts/*` |
+| docs | `infra/kubernetes/docs/*` |
+| examples | `infra/kubernetes/examples/*` |
 
 ## Runtime support
 
-| Origem atual | Destino alvo |
+| Serviço | Caminho canônico |
 | --- | --- |
-| `backend/kerosene-infrastructure/bitcoin/*` | `infra/runtime/bitcoin/*` |
-| `backend/kerosene-infrastructure/vault/*` | `infra/runtime/vault/*` |
-| `backend/kerosene-infrastructure/web/*` | `infra/runtime/web/*` |
-| `backend/kerosene/deploy/tor/*` | `infra/runtime/tor/*` |
-| `backend/kerosene/deploy/postgres/*` | `infra/runtime/postgres/*` |
-| `backend/kerosene/deploy/observability/*` | `infra/runtime/observability/*` |
+| bitcoin | `infra/runtime/bitcoin/*` |
+| lightning | `infra/runtime/lightning/*` |
+| vault | `infra/runtime/vault/*` |
+| tor | `infra/runtime/tor/*` |
+| postgres | `infra/runtime/postgres/*` |
+| web | `infra/runtime/web/*` |
+| observability | `infra/runtime/observability/*` |
+| host | `infra/runtime/host/*` |
 
 ## Regras para o agente
 
 1. Não transferir chaves privadas, certificados reais, secrets ou material sensível sem plano explícito.
-2. Após cada transferência, atualizar `infra/docker/images.yaml` ou os `kustomization.yaml` correspondentes.
-3. Manter wrappers legados até todos os scripts e docs apontarem para `infra/`.
-4. Validar com `kubectl kustomize` nos overlays afetados e com `docker compose config` nos Compose afetados.
-5. Só remover caminhos legados após validação e depois de atualizar scripts, docs e testes.
+2. Não criar arquivos Compose, Dockerfiles, imagens ou manifests novos durante esta limpeza.
+3. Atualizar apenas referências de caminho para os artefatos canônicos já existentes.
+4. Apagar duplicatas legadas, não arquivar.
+5. Validar com `docker compose config` nos Compose afetados e `kubectl kustomize` nos overlays afetados.

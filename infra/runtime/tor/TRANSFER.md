@@ -1,16 +1,9 @@
 # Tor runtime transfer
 
-Source paths:
-
-```text
-backend/kerosene/deploy/tor/*
-backend/kerosene-infrastructure/prod/tor/*
-```
-
-Target path:
+Canonical path:
 
 ```text
 infra/runtime/tor/*
 ```
 
-Do not transfer onion private keys, hostname material tied to a real hidden service, or auth secrets without a rotation plan.
+Runtime identity material must not be moved or removed without a documented rotation and backup plan.

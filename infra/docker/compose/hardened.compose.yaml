@@ -85,7 +85,7 @@ services:
       - LND_EXTERNAL_IP=${LIGHTNING_LND_EXTERNAL_IP:-}
     volumes:
       - lnd_data:/root/.lnd
-      - ../../../backend/kerosene-infrastructure/scripts/lnd-entrypoint.sh:/lnd-entrypoint.sh:ro
+      - ../../../infra/runtime/lightning/lnd-entrypoint.sh:/lnd-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/lnd-entrypoint.sh"]
     networks: [net_tor, tor_egress]
 
@@ -102,7 +102,7 @@ services:
       - LND_BOOTSTRAP_TIMEOUT_SECONDS=${LIGHTNING_LND_BOOTSTRAP_TIMEOUT_SECONDS:-180}
     volumes:
       - lnd_data:/lnd
-      - ../../../backend/kerosene-infrastructure/scripts/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro
+      - ../../../infra/runtime/lightning/lnd-bootstrap.sh:/lnd-bootstrap.sh:ro
     entrypoint: ["sh", "/lnd-bootstrap.sh"]
     networks: [net_tor]
     depends_on:
@@ -140,7 +140,7 @@ services:
     volumes:
       - pg_data_is:/var/lib/postgresql/data
       - ../../runtime/postgres/initdb:/docker-entrypoint-initdb.d
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
     networks:
       - net_db_is
     healthcheck:
@@ -177,7 +177,7 @@ services:
     tmpfs:
       - /mnt/mpc-shards:rw,noexec,nosuid,size=64m
     volumes:
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
       - mpc_shards_is:/app/encrypted-shards
     environment:
       - MPC_RUNTIME_MODE=HARDWARE_ENCLAVE
@@ -219,8 +219,8 @@ services:
     tmpfs:
       - /opt/kerosene:rw,noexec,nosuid,size=10m
     volumes:
-      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/host/emergency-stop.sh:/opt/kerosene/panic.sh:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
       - tor_socks_is:/var/run/tor/socks
       - vanguards_state_is:/var/run/tor/vanguards:ro
       - tor_keys_vault:/vault-onion:ro
@@ -295,7 +295,7 @@ services:
     volumes:
       - pg_data_ch:/var/lib/postgresql/data
       - ../../runtime/postgres/initdb:/docker-entrypoint-initdb.d
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
     networks:
       - net_db_ch
     healthcheck:
@@ -331,7 +331,7 @@ services:
     tmpfs:
       - /mnt/mpc-shards:rw,noexec,nosuid,size=64m
     volumes:
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
       - mpc_shards_ch:/app/encrypted-shards
     environment:
       - MPC_RUNTIME_MODE=HARDWARE_ENCLAVE
@@ -367,8 +367,8 @@ services:
     tmpfs:
       - /opt/kerosene:rw,noexec,nosuid,size=10m
     volumes:
-      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/host/emergency-stop.sh:/opt/kerosene/panic.sh:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
       - tor_socks_ch:/var/run/tor/socks
       - vanguards_state_ch:/var/run/tor/vanguards:ro
       - tor_keys_vault:/vault-onion:ro
@@ -443,7 +443,7 @@ services:
     volumes:
       - pg_data_sg:/var/lib/postgresql/data
       - ../../runtime/postgres/initdb:/docker-entrypoint-initdb.d
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
     networks:
       - net_db_sg
     healthcheck:
@@ -479,7 +479,7 @@ services:
     tmpfs:
       - /mnt/mpc-shards:rw,noexec,nosuid,size=64m
     volumes:
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
       - mpc_shards_sg:/app/encrypted-shards
     environment:
       - MPC_RUNTIME_MODE=HARDWARE_ENCLAVE
@@ -515,8 +515,8 @@ services:
     tmpfs:
       - /opt/kerosene:rw,noexec,nosuid,size=10m
     volumes:
-      - ../../../backend/kerosene/deploy/host/panic.sh:/opt/kerosene/panic.sh:ro
-      - ../../../backend/kerosene/deploy/local/certs:/certs:ro
+      - ../../../infra/runtime/host/emergency-stop.sh:/opt/kerosene/panic.sh:ro
+      - ../../../infra/runtime/local/certs:/certs:ro
       - tor_socks_sg:/var/run/tor/socks
       - vanguards_state_sg:/var/run/tor/vanguards:ro
       - tor_keys_vault:/vault-onion:ro
@@ -577,7 +577,7 @@ services:
       - tor_keys_is:/var/lib/tor/kerosene_service
       - tor_socks_is:/var/run/tor/socks
       - tor_control_is:/var/run/tor/control
-      - ../../../backend/kerosene/deploy/tor/onion_auth_is:/var/lib/tor/onion_auth:ro
+      - ../../../infra/runtime/tor/onion_auth_is:/var/lib/tor/onion_auth:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     networks: [net_tor, tor_egress]
     healthcheck:
@@ -588,7 +588,7 @@ services:
 
   kerosene-vanguards-is:
     build:
-      context: ../../../backend/kerosene/deploy/tor/vanguards
+      context: ../../../infra/runtime/tor/vanguards
       dockerfile: Dockerfile
     container_name: kerosene-vanguards-is
     restart: unless-stopped
@@ -624,7 +624,7 @@ services:
       - tor_keys_ch:/var/lib/tor/kerosene_service
       - tor_socks_ch:/var/run/tor/socks
       - tor_control_ch:/var/run/tor/control
-      - ../../../backend/kerosene/deploy/tor/onion_auth_ch:/var/lib/tor/onion_auth:ro
+      - ../../../infra/runtime/tor/onion_auth_ch:/var/lib/tor/onion_auth:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     networks: [net_tor, tor_egress]
     healthcheck:
@@ -635,7 +635,7 @@ services:
 
   kerosene-vanguards-ch:
     build:
-      context: ../../../backend/kerosene/deploy/tor/vanguards
+      context: ../../../infra/runtime/tor/vanguards
       dockerfile: Dockerfile
     container_name: kerosene-vanguards-ch
     restart: unless-stopped
@@ -671,7 +671,7 @@ services:
       - tor_keys_sg:/var/lib/tor/kerosene_service
       - tor_socks_sg:/var/run/tor/socks
       - tor_control_sg:/var/run/tor/control
-      - ../../../backend/kerosene/deploy/tor/onion_auth_sg:/var/lib/tor/onion_auth:ro
+      - ../../../infra/runtime/tor/onion_auth_sg:/var/lib/tor/onion_auth:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     networks: [net_tor, tor_egress]
     healthcheck:
@@ -682,7 +682,7 @@ services:
 
   kerosene-vanguards-sg:
     build:
-      context: ../../../backend/kerosene/deploy/tor/vanguards
+      context: ../../../infra/runtime/tor/vanguards
       dockerfile: Dockerfile
     container_name: kerosene-vanguards-sg
     restart: unless-stopped

@@ -1,7 +1,7 @@
 # Optional local split-runtime overlay for KFE.
 #
 # Usage:
-#   docker compose -f docker-compose.local.yml -f docker-compose.kfe.local.yml --profile kfe-split up
+#   docker compose -f infra/docker/compose/local.compose.yaml -f infra/docker/compose/local.kfe.compose.yaml --profile kfe-split up
 #
 # This does not route production traffic to KFE yet. It starts KFE as a separate
 # workload on the same shard networks so the team can validate health, rails,

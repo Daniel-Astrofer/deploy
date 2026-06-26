@@ -1,13 +1,6 @@
 # Bitcoin runtime transfer
 
-Source paths:
-
-```text
-backend/kerosene-infrastructure/bitcoin/*
-backend/kerosene-infrastructure/prod/bitcoin/*
-```
-
-Target path:
+Canonical path:
 
 ```text
 infra/runtime/bitcoin/*

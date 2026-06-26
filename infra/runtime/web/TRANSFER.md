@@ -3,7 +3,7 @@
 Source paths:
 
 ```text
-backend/kerosene-infrastructure/web/*
+infra/runtime/web/*
 ```
 
 Target path:

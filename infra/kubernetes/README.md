@@ -10,7 +10,7 @@ A árvore Kubernetes canônica já foi transferida para:
 infra/kubernetes
 ```
 
-Os manifests legados em `backend/kerosene-infrastructure/k8s` continuam
+Os manifests canônicos em `infra/kubernetes` continuam
 presentes para compatibilidade durante a transição.
 
 ## Comandos atuais

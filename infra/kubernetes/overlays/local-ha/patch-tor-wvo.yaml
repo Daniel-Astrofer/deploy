@@ -38,5 +38,5 @@ spec:
             name: torrc-wvo
         - name: tor-hidden-service
           hostPath:
-            path: /home/omega/Kerosene/backend/kerosene/deploy/local/tor/keys/is
+            path: /home/omega/Kerosene/infra/runtime/local/tor/keys/is
             type: Directory

@@ -1,5 +1,5 @@
 # Service contracts for stateful infrastructure. These selectors are compatible
-# with the existing backend/kerosene-infrastructure/prod/k8s StatefulSets while
+# with existing stateful workloads while
 # the new Kustomize stack is being adopted.
 apiVersion: v1
 kind: Service

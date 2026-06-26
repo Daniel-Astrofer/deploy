@@ -1,13 +1,6 @@
 # Observability runtime transfer
 
-Source paths:
-
-```text
-backend/kerosene-infrastructure/observability/*
-backend/kerosene/deploy/observability/*
-```
-
-Target path:
+Canonical path:
 
 ```text
 infra/runtime/observability/*

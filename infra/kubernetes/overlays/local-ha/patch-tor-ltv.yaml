@@ -38,5 +38,5 @@ spec:
             name: torrc-ltv
         - name: tor-hidden-service
           hostPath:
-            path: /home/omega/Kerosene/backend/kerosene/deploy/local/tor/keys/sg
+            path: /home/omega/Kerosene/infra/runtime/local/tor/keys/sg
             type: Directory

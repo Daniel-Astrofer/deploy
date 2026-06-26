@@ -2,7 +2,7 @@
 
 Este diretório é a camada canônica de infraestrutura da Kerosene.
 
-A migração é incremental. Os arquivos operacionais existentes em `backend/kerosene-infrastructure` e alguns artefatos em `backend/kerosene/deploy` continuam válidos durante a transição. Novos contratos e documentação devem nascer aqui.
+A migração é incremental, mas `infra/` é a camada canônica. Duplicatas antigas não devem ser arquivadas: devem ser removidas após validação. Novos contratos e documentação devem nascer aqui.
 
 ## Layout alvo
 
@@ -24,7 +24,7 @@ infra/
 
 ## Estado atual
 
-`infra/` já contém as cópias canônicas dos Dockerfiles, Compose files e
-manifests Kustomize. Os caminhos legados em `backend/kerosene-infrastructure` e
-`backend/kerosene/deploy` continuam válidos como wrappers/compatibilidade
-durante a transição, para não quebrar o ambiente local, KFE ou Kubernetes.
+`infra/` já contém os caminhos canônicos dos Dockerfiles, Compose files e
+manifests Kustomize. Caminhos legados devem permanecer apenas como wrappers
+mínimos quando forem necessários para compatibilidade temporária; duplicatas
+operacionais devem ser apagadas depois da validação.

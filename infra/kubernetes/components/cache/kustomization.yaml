@@ -1,6 +1,5 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Component
 
-# TRANSFER_PENDING
-# Source: backend/kerosene-infrastructure/prod/k8s/redis-sentinel.yaml
+# Cache manifests must live under this component when promoted to canonical infra.
 resources: []

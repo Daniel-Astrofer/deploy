@@ -26,7 +26,7 @@ infra/docker/compose/hardened.compose.yaml
 ```
 
 `infra/docker/images.yaml` aponta para os Dockerfiles canônicos e mantém
-`legacy_dockerfile` para rastrear a origem antiga.
+o caminho canônico do Dockerfile.
 
 ## Layout
 

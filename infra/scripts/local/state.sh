@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-exec "$ROOT/scripts/status-local.sh" "$@"
+LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec bash "$LOCAL_SCRIPT_DIR/control.sh" status "$@"

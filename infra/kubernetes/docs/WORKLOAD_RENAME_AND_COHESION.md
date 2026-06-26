@@ -6,7 +6,7 @@ The Kubernetes workload names were normalized to make the platform topology clea
 - frontend workload: `web-page`
 - cryptographic sidecar workload: `mpc-sidecar`
 
-This affects Deployments, Services, ServiceAccounts, HPA, PDBs, NetworkPolicies, image names, overlay patches and operational scripts under `backend/kerosene-infrastructure/k8s`.
+This affects Deployments, Services, ServiceAccounts, HPA, PDBs, NetworkPolicies, image names, overlay patches and operational scripts under `infra/kubernetes`.
 
 ## Rendered topology
 
@@ -50,14 +50,14 @@ The local overlay keeps insecure gRPC enabled for development only.
 Run:
 
 ```bash
-backend/kerosene-infrastructure/k8s/scripts/validate-k8s-cohesion.sh
-backend/kerosene-infrastructure/k8s/scripts/deploy-local.sh --dry-run
+infra/kubernetes/scripts/validate-k8s-cohesion.sh
+infra/kubernetes/scripts/deploy-local.sh --dry-run
 ```
 
 Before a real local deploy, also check cluster prerequisites:
 
 ```bash
-backend/kerosene-infrastructure/k8s/scripts/check-cluster-prereqs.sh
+infra/kubernetes/scripts/check-cluster-prereqs.sh
 ```
 
 ## Compatibility note
