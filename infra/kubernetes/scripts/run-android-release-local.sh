@@ -8,6 +8,25 @@ FRONTEND_DIR="${REPO_ROOT}/frontend"
 cd "${FRONTEND_DIR}"
 
 export KEROSENE_ALLOW_DEBUG_RELEASE_SIGNING="${KEROSENE_ALLOW_DEBUG_RELEASE_SIGNING:-true}"
+HOST_HOME="${KEROSENE_HOST_HOME:-/home/omega}"
+if [[ -z "${ANDROID_HOME:-}" && -d "$HOST_HOME/Android/Sdk" ]]; then
+  export ANDROID_HOME="$HOST_HOME/Android/Sdk"
+fi
+if [[ -z "${ANDROID_SDK_ROOT:-}" && -n "${ANDROID_HOME:-}" ]]; then
+  export ANDROID_SDK_ROOT="$ANDROID_HOME"
+fi
+if [[ -z "${CARGO_HOME:-}" && -d "$HOST_HOME/.cargo" ]]; then
+  export CARGO_HOME="$HOST_HOME/.cargo"
+fi
+if [[ -z "${RUSTUP_HOME:-}" && -d "$HOST_HOME/.rustup" ]]; then
+  export RUSTUP_HOME="$HOST_HOME/.rustup"
+fi
+if [[ -n "${CARGO_HOME:-}" ]]; then
+  export PATH="$CARGO_HOME/bin:$PATH"
+fi
+if [[ -z "${ADB_VENDOR_KEYS:-}" && -f "$HOST_HOME/.android/adbkey" ]]; then
+  export ADB_VENDOR_KEYS="$HOST_HOME/.android/adbkey"
+fi
 PASSKEY_RP_ID="${PASSKEY_RP_ID:-${FRONTEND_PASSKEY_RP_ID:-kerosene-device}}"
 PASSKEY_ORIGIN="${PASSKEY_ORIGIN:-${FRONTEND_PASSKEY_ORIGIN:-android:apk-key-hash:kerosene}}"
 KUBECTL="${KUBECTL:-kubectl}"
