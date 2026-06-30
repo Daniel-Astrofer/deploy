@@ -27,6 +27,9 @@ fi
 if [[ -z "${ADB_VENDOR_KEYS:-}" && -f "$HOST_HOME/.android/adbkey" ]]; then
   export ADB_VENDOR_KEYS="$HOST_HOME/.android/adbkey"
 fi
+if [[ -z "${KUBECONFIG:-}" && -f "$HOST_HOME/.kube/config" ]]; then
+  export KUBECONFIG="$HOST_HOME/.kube/config"
+fi
 PASSKEY_RP_ID="${PASSKEY_RP_ID:-${FRONTEND_PASSKEY_RP_ID:-kerosene-device}}"
 PASSKEY_ORIGIN="${PASSKEY_ORIGIN:-${FRONTEND_PASSKEY_ORIGIN:-android:apk-key-hash:kerosene}}"
 KUBECTL="${KUBECTL:-kubectl}"
