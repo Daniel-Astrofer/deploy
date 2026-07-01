@@ -7,7 +7,6 @@ OVERLAY="$K8S_DIR/overlays/local-full"
 REPO_ROOT="$(cd "$K8S_DIR/../.." && pwd)"
 WEB_NGINX_CONF="$REPO_ROOT/infra/runtime/web/nginx.k8s.conf"
 KUSTOMIZE="${KUSTOMIZE:-}"
-LOCAL_BROWSER_ORIGINS_CSV="http://localhost:3000,http://localhost:3001,http://localhost:8080,http://localhost:8081,http://localhost:8082,http://localhost:30080,http://localhost:30082,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:8080,http://127.0.0.1:8081,http://127.0.0.1:8082,http://127.0.0.1:30080,http://127.0.0.1:30082"
 
 if [[ ! -d "$OVERLAY" ]]; then
   echo "[!] local-full overlay not found: $OVERLAY" >&2
@@ -33,6 +32,14 @@ require() {
   local pattern="$1"
   if ! grep -qE "$pattern" "$rendered"; then
     echo "[!] Render does not contain required pattern: $pattern" >&2
+    exit 1
+  fi
+}
+
+require_literal() {
+  local needle="$1"
+  if ! grep -Fq -- "$needle" "$rendered"; then
+    echo "[!] Render does not contain required text: $needle" >&2
     exit 1
   fi
 }
@@ -64,7 +71,7 @@ require 'claimName: tor-onion-keys'
 require 'local-full-allow-tor-egress'
 require '^  name: web-page-runtime-config$'
 require 'kerosene-runtime-config.json'
-require '"apiUrl":"http://127.0.0.1:30082"'
+require '"access":"tor-hidden-service-only"'
 require 'mountPath: /usr/share/nginx/html/kerosene-runtime-config.json'
 require '^kind: StatefulSet$'
 require '^  name: mpc-sidecar$'
@@ -72,44 +79,30 @@ require '^  name: local-postgres$'
 require '^  name: local-redis$'
 require '^  name: local-vault$'
 require '^  name: local-bitcoin$'
+require_literal 'wallet="${BITCOIN_RPC_WALLET:-kerosene}"'
+require_literal 'loadwallet "$wallet"'
+require_literal 'createwallet "$wallet" false false'
+require_literal '-rpcwallet="$wallet" getwalletinfo'
 require '^  name: local-lnd-placeholder$'
 require 'image: localhost:5000/kerosene/kfe-service:local'
-require "APP_CORS_ALLOWED_ORIGINS: $LOCAL_BROWSER_ORIGINS_CSV"
-require "WEBAUTHN_ORIGINS: android:apk-key-hash:kerosene,$LOCAL_BROWSER_ORIGINS_CSV"
+require 'APP_CORS_ALLOWED_ORIGINS: http://placeholder.onion'
+require 'WEBAUTHN_ORIGINS: android:apk-key-hash:kerosene,http://placeholder.onion'
 require 'SPRING_PROFILES_ACTIVE: docker,kfe'
 require 'KEROSENE_RUNTIME_ROLE: kfe-service'
 require 'BITCOIN_NETWORK: regtest'
 require 'BITCOIN_RPC_REQUIRED: "false"'
 require 'LIGHTNING_LND_ENABLED: "false"'
+require 'APP_DEV_DEPOSIT_INSTANT_CREDIT_ENABLED: "true"'
 require 'kfe-internal-shared-secret: local-kfe-internal-secret-not-for-production'
-require 'nodePort: 30080'
-require 'nodePort: 30081'
-require 'nodePort: 30082'
 
-if [[ ! -f "$WEB_NGINX_CONF" ]]; then
-  echo "[!] Kubernetes web-page Nginx config not found: $WEB_NGINX_CONF" >&2
+if grep -qE '^  type: (NodePort|LoadBalancer)$' "$rendered"; then
+  echo "[!] local-full must not expose services via clear net." >&2
   exit 1
 fi
-for origin in \
-  'http://localhost:3000' \
-  'http://127.0.0.1:3000' \
-  'http://localhost:3001' \
-  'http://127.0.0.1:3001' \
-  'http://localhost:8080' \
-  'http://127.0.0.1:8080' \
-  'http://localhost:8081' \
-  'http://127.0.0.1:8081' \
-  'http://localhost:8082' \
-  'http://127.0.0.1:8082' \
-  'http://localhost:30080' \
-  'http://127.0.0.1:30080' \
-  'http://localhost:30082' \
-  'http://127.0.0.1:30082'; do
-  if ! grep -Fq "$origin" "$WEB_NGINX_CONF"; then
-    echo "[!] web-page CSP connect-src does not allow local origin: $origin" >&2
-    exit 1
-  fi
-done
+if grep -q 'nodePort:' "$rendered"; then
+  echo "[!] local-full render contains nodePort." >&2
+  exit 1
+fi
 
 if grep -q 'kerosene-app' "$rendered"; then
   echo "[!] Render still contains old workload name kerosene-app" >&2
@@ -121,6 +114,6 @@ if grep -q 'web-admin' "$rendered"; then
 fi
 
 echo "[+] local-full overlay renders successfully."
-echo "[+] Expected access: server NodePort 30080, mpc health NodePort 30081, web-page NodePort 30082."
+echo "[+] Expected access: Tor hidden service only."
 echo "[+] web-page routes /kfe, /api/public/kfe and /api/admin/kfe to kfe-service."
 echo "[+] tor-onion publishes the web-page gateway as a Tor hidden service."

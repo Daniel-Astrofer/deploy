@@ -7,8 +7,8 @@ export KEROSENE_COMPOSE_FILE="${KEROSENE_COMPOSE_FILE:-$ROOT/infra/docker/compos
 export KEROSENE_COMPOSE_LIMITS_FILE="${KEROSENE_COMPOSE_LIMITS_FILE:-$ROOT/infra/docker/compose/local.limits.compose.yaml}"
 KFE_COMPOSE_FILE="${KEROSENE_KFE_COMPOSE_FILE:-$ROOT/infra/docker/compose/local.kfe.compose.yaml}"
 
-# shellcheck source=scripts/backend-common.sh
-source "$ROOT/scripts/backend-common.sh"
+# shellcheck source=infra/scripts/backend-common.sh
+source "$ROOT/infra/scripts/backend-common.sh"
 
 require_docker
 load_backend_env

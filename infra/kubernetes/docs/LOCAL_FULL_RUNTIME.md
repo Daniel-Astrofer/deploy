@@ -55,22 +55,41 @@ another local build does not leak into the Kubernetes frontend.
 
 ```bash
 bash infra/kubernetes/scripts/validate-local-full.sh
-bash infra/kubernetes/scripts/deploy-local-full.sh --dry-run
+bash infra/kubernetes/deploy.sh local-full --dry-run
 ```
 
 ## Deploy
 
-Build/import local application images first, then apply the overlay:
+Use the Kubernetes entrypoint to start the complete local runtime:
+
+```bash
+bash infra/start.sh
+bash infra/deploy.sh
+bash infra/kubernetes/deploy.sh
+bash infra/kubernetes/deploy.sh local-full --wait
+```
+
+Calling the entrypoint with no arguments is equivalent to `local-full --wait`.
+This command validates the overlay, builds/imports local application images into
+the Kubernetes container runtime, applies `overlays/local-full`, waits for
+workloads, and prints the local access URLs.
+If your shell is already in `infra/`, `./deploy.sh` is the equivalent shortcut.
+
+If containerd image import cannot run because `sudo ctr` is unavailable, the
+entrypoint continues with images already present in the cluster. Use
+`--strict-image-import` when you want missing image import to abort the deploy.
+In an interactive terminal, the importer asks for `sudo` credentials before
+building/importing images. After a successful import, the deploy records each
+local workload image ID in the pod template annotation
+`kerosene.io/local-image-id`; Kubernetes rolls out only workloads whose image ID
+changed.
+
+Advanced helper commands remain available for focused troubleshooting:
 
 ```bash
 bash infra/kubernetes/scripts/import-local-docker-images.sh
 bash infra/kubernetes/scripts/deploy-local-full.sh --skip-image-import --wait
-```
-
-Or let the deploy wrapper import images:
-
-```bash
-bash infra/kubernetes/scripts/deploy-local-full.sh --wait
+bash infra/kubernetes/scripts/wait-local-full.sh
 ```
 
 ## Production boundary

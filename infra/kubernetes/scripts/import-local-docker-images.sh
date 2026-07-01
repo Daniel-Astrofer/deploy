@@ -3,11 +3,11 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: infra/kubernetes/scripts/import-local-docker-images.sh [--skip-web-page-build]
+Usage: infra/kubernetes/scripts/import-local-docker-images.sh [--skip-kfe-service-build] [--skip-web-page-build]
 
-Copies local Docker/Compose-built Kerosene images into the Kubernetes containerd
-namespace used by kubelet. This is needed when Kubernetes uses containerd and the
-local development stack was built with Docker Compose.
+Builds local Kerosene images and copies them into the Kubernetes containerd
+namespace used by kubelet. This is needed when Kubernetes uses containerd instead
+of the Docker image store.
 
 Expected targets:
   kerosene/server:local
@@ -26,8 +26,8 @@ USAGE
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-BACKEND_COMMON="$REPO_ROOT/scripts/backend-common.sh"
-FLUTTER_COMMON="$REPO_ROOT/scripts/flutter-common.sh"
+BACKEND_COMMON="$REPO_ROOT/infra/scripts/backend-common.sh"
+FLUTTER_COMMON="$REPO_ROOT/infra/scripts/flutter-common.sh"
 SKIP_WEB_PAGE_BUILD=0
 SKIP_KFE_SERVICE_BUILD=0
 
@@ -41,19 +41,45 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# shellcheck source=scripts/backend-common.sh
+# shellcheck source=infra/scripts/backend-common.sh
 source "$BACKEND_COMMON"
-# shellcheck source=scripts/flutter-common.sh
+# shellcheck source=infra/scripts/flutter-common.sh
 source "$FLUTTER_COMMON"
 
 require_docker
 
-if ! command -v sudo >/dev/null 2>&1; then
-  fail "sudo is required to import images into containerd namespace k8s.io."
-fi
 if ! command -v ctr >/dev/null 2>&1; then
   fail "ctr not found. Install containerd tools first."
 fi
+
+CTR_CMD=()
+
+configure_containerd_access() {
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    CTR_CMD=(ctr)
+    return 0
+  fi
+
+  if ! command -v sudo >/dev/null 2>&1; then
+    fail "sudo is required to import images into containerd namespace k8s.io."
+  fi
+
+  if sudo -n true >/dev/null 2>&1; then
+    CTR_CMD=(sudo -n ctr)
+    return 0
+  fi
+
+  if [[ -t 0 ]]; then
+    info "sudo credentials are required to import images into containerd namespace k8s.io."
+    sudo -v || fail "sudo authentication failed. Re-run after granting sudo access, or use --skip-image-import to keep existing cluster images."
+    CTR_CMD=(sudo ctr)
+    return 0
+  fi
+
+  fail "sudo credentials are required to import images into containerd namespace k8s.io. Run this script from an interactive terminal, grant passwordless sudo for ctr, or re-run the deploy with --skip-image-import."
+}
+
+configure_containerd_access
 
 try_tag_from_compose_service() {
   local target="$1"
@@ -89,6 +115,26 @@ ensure_tag_from_compose_service() {
   fail "Could not find Docker image for $target. Run scripts/start-local.sh once so Compose builds the services."
 }
 
+build_server_image() {
+  local target="kerosene/server:local"
+  local dockerfile="$REPO_ROOT/infra/docker/images/server/Dockerfile"
+  local context="$REPO_ROOT/backend/kerosene"
+
+  if [[ ! -f "$dockerfile" ]]; then
+    fail "Server Dockerfile not found: $dockerfile"
+  fi
+  if [[ ! -d "$context" ]]; then
+    fail "Server build context not found: $context"
+  fi
+
+  if docker image inspect "$target" >/dev/null 2>&1; then
+    info "Rebuilding existing Docker image: $target"
+  fi
+
+  info "Building $target from $dockerfile"
+  docker build -t "$target" -f "$dockerfile" "$context"
+}
+
 build_kfe_service_image() {
   local target="kerosene/kfe-service:local"
   local dockerfile="$REPO_ROOT/infra/docker/images/kfe-service/Dockerfile"
@@ -111,6 +157,26 @@ build_kfe_service_image() {
 
   if [[ ! -f "$dockerfile" ]]; then
     fail "KFE Dockerfile not found: $dockerfile"
+  fi
+
+  info "Building $target from $dockerfile"
+  docker build -t "$target" -f "$dockerfile" "$context"
+}
+
+build_mpc_sidecar_image() {
+  local target="kerosene/mpc-sidecar:local"
+  local dockerfile="$REPO_ROOT/infra/docker/images/mpc-sidecar/Dockerfile"
+  local context="$REPO_ROOT/backend/mpc-sidecar"
+
+  if [[ ! -f "$dockerfile" ]]; then
+    fail "MPC sidecar Dockerfile not found: $dockerfile"
+  fi
+  if [[ ! -d "$context" ]]; then
+    fail "MPC sidecar build context not found: $context"
+  fi
+
+  if docker image inspect "$target" >/dev/null 2>&1; then
+    info "Rebuilding existing Docker image: $target"
   fi
 
   info "Building $target from $dockerfile"
@@ -205,19 +271,12 @@ ensure_local_registry_alias() {
 import_to_k8s_containerd() {
   local image="$1"
   info "Importing $image into containerd namespace k8s.io"
-  docker save "$image" | sudo ctr -n k8s.io images import - >/dev/null
+  docker save "$image" | "${CTR_CMD[@]}" -n k8s.io images import - >/dev/null
 }
 
-ensure_tag_from_compose_service \
-  "kerosene/server:local" \
-  server-wvo server-iw5 server-ltv kerosene-app-is kerosene-app-ch kerosene-app-sg
-
+build_server_image
 build_kfe_service_image
-
-ensure_tag_from_compose_service \
-  "kerosene/mpc-sidecar:local" \
-  mpc-sidecar-wvo mpc-sidecar-iw5 mpc-sidecar-ltv mpc-sidecar-is mpc-sidecar-ch mpc-sidecar-sg
-
+build_mpc_sidecar_image
 build_web_page_image
 build_tor_image
 
@@ -233,6 +292,6 @@ if docker image inspect "kerosene/web-page:local" >/dev/null 2>&1; then
 fi
 
 info "Imported images visible to Kubernetes:"
-sudo ctr -n k8s.io images ls | grep -E 'kerosene/(server|kfe-service|mpc-sidecar|tor|web-page)' || true
+"${CTR_CMD[@]}" -n k8s.io images ls | grep -E 'kerosene/(server|kfe-service|mpc-sidecar|tor|web-page)' || true
 
-info "Done. You can now run: infra/kubernetes/scripts/deploy.sh local"
+info "Done. You can now run: bash infra/start.sh --skip-image-import"

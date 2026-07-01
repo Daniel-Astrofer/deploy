@@ -276,21 +276,70 @@ spec:
         - name: bitcoind
           image: bitcoin/bitcoin:27.0
           imagePullPolicy: IfNotPresent
-          command: ["bitcoind"]
+          command: ["/bin/sh", "-c"]
           args:
-            - -regtest
-            - -datadir=/home/bitcoin/.bitcoin
-            - -server=1
-            - -printtoconsole
-            - -rpcbind=0.0.0.0
-            - -rpcallowip=0.0.0.0/0
-            - -rpcport=8332
-            - -port=8333
-            - -rpcuser=$(BITCOIN_RPC_USER)
-            - -rpcpassword=$(BITCOIN_RPC_PASSWORD)
-            - -zmqpubrawblock=tcp://0.0.0.0:28332
-            - -zmqpubrawtx=tcp://0.0.0.0:28333
+            - |
+              set -eu
+
+              bitcoin_dir="${BITCOIN_DATA_DIR:-/home/bitcoin/.bitcoin}"
+              wallet="${BITCOIN_RPC_WALLET:-kerosene}"
+              rpc_port="${BITCOIN_RPC_PORT:-8332}"
+              p2p_port="${BITCOIN_P2P_PORT:-8333}"
+
+              mkdir -p "$bitcoin_dir"
+
+              bitcoin_cli() {
+                bitcoin-cli -regtest \
+                  -datadir="$bitcoin_dir" \
+                  -rpcport="$rpc_port" \
+                  -rpcuser="$BITCOIN_RPC_USER" \
+                  -rpcpassword="$BITCOIN_RPC_PASSWORD" \
+                  "$@"
+              }
+
+              bitcoind \
+                -regtest \
+                -datadir="$bitcoin_dir" \
+                -server=1 \
+                -printtoconsole \
+                -rpcbind=0.0.0.0 \
+                -rpcallowip=0.0.0.0/0 \
+                -rpcport="$rpc_port" \
+                -port="$p2p_port" \
+                -rpcuser="$BITCOIN_RPC_USER" \
+                -rpcpassword="$BITCOIN_RPC_PASSWORD" \
+                -zmqpubrawblock=tcp://0.0.0.0:28332 \
+                -zmqpubrawtx=tcp://0.0.0.0:28333 &
+              pid="$!"
+
+              stop_bitcoind() {
+                bitcoin_cli stop >/dev/null 2>&1 || true
+                wait "$pid" || true
+              }
+              trap stop_bitcoind INT TERM
+
+              bitcoin_cli -rpcwait getblockchaininfo >/dev/null
+
+              if ! bitcoin_cli listwallets | grep -F "\"$wallet\"" >/dev/null 2>&1; then
+                if bitcoin_cli listwalletdir | grep -F "\"name\": \"$wallet\"" >/dev/null 2>&1; then
+                  bitcoin_cli loadwallet "$wallet" >/dev/null
+                else
+                  bitcoin_cli createwallet "$wallet" false false "${BITCOIN_WALLET_PASSPHRASE:-}" false true true >/dev/null
+                fi
+              fi
+
+              bitcoin_cli -rpcwallet="$wallet" getwalletinfo >/dev/null
+
+              wait "$pid"
           env:
+            - name: BITCOIN_DATA_DIR
+              value: /home/bitcoin/.bitcoin
+            - name: BITCOIN_RPC_WALLET
+              value: kerosene
+            - name: BITCOIN_RPC_PORT
+              value: "8332"
+            - name: BITCOIN_P2P_PORT
+              value: "8333"
             - name: BITCOIN_RPC_USER
               valueFrom:
                 secretKeyRef:
@@ -315,8 +364,18 @@ spec:
               containerPort: 28333
               protocol: TCP
           readinessProbe:
-            tcpSocket:
-              port: rpc
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  wallet="${BITCOIN_RPC_WALLET:-kerosene}"
+                  bitcoin-cli -regtest \
+                    -datadir="${BITCOIN_DATA_DIR:-/home/bitcoin/.bitcoin}" \
+                    -rpcport="${BITCOIN_RPC_PORT:-8332}" \
+                    -rpcuser="$BITCOIN_RPC_USER" \
+                    -rpcpassword="$BITCOIN_RPC_PASSWORD" \
+                    -rpcwallet="$wallet" getwalletinfo >/dev/null
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 18
