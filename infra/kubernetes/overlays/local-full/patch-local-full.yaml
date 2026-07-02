@@ -8,7 +8,7 @@ spec:
     spec:
       containers:
         - name: server
-          imagePullPolicy: Never
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 250m
@@ -27,7 +27,7 @@ spec:
     spec:
       containers:
         - name: kfe-service
-          imagePullPolicy: Never
+          imagePullPolicy: Always
           resources:
             requests:
               cpu: 250m
@@ -46,7 +46,7 @@ spec:
     spec:
       containers:
         - name: web-page
-          imagePullPolicy: Never
+          imagePullPolicy: Always
           volumeMounts:
             - name: web-page-nginx-conf
               mountPath: /etc/nginx/conf.d/default.conf
@@ -149,7 +149,7 @@ data:
   LIGHTNING_LND_HOST: "kerosene-lnd-headless"
   LIGHTNING_LND_PORT: "10009"
   LIGHTNING_LND_TLS_ENABLED: "false"
-  BITCOIN_NETWORK: "regtest"
+  BITCOIN_NETWORK: "testnet4"
   BITCOIN_RPC_ENABLED: "true"
   BITCOIN_RPC_REQUIRED: "false"
   BITCOIN_RPC_PRUNED_REQUIRED: "false"
@@ -157,7 +157,6 @@ data:
   BITCOIN_RPC_WALLET: "kerosene"
   TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
   KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
-  APP_DEV_DEPOSIT_INSTANT_CREDIT_ENABLED: "true"
   BITCOIN_ZMQ_ENABLED: "false"
   BITCOIN_ZMQ_RAWTX: "tcp://bitcoin-core:28332"
   BITCOIN_ZMQ_HASHBLOCK: "tcp://bitcoin-core:28333"
@@ -194,7 +193,7 @@ data:
   LIGHTNING_LND_HOST: "kerosene-lnd-headless"
   LIGHTNING_LND_PORT: "10009"
   LIGHTNING_LND_TLS_ENABLED: "false"
-  BITCOIN_NETWORK: "regtest"
+  BITCOIN_NETWORK: "testnet4"
   BITCOIN_RPC_ENABLED: "true"
   BITCOIN_RPC_REQUIRED: "false"
   BITCOIN_RPC_PRUNED_REQUIRED: "false"
@@ -202,7 +201,6 @@ data:
   BITCOIN_RPC_WALLET: "kerosene"
   TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
   KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
-  APP_DEV_DEPOSIT_INSTANT_CREDIT_ENABLED: "true"
   BITCOIN_ZMQ_ENABLED: "false"
   BITCOIN_ZMQ_RAWTX: "tcp://bitcoin-core:28332"
   BITCOIN_ZMQ_HASHBLOCK: "tcp://bitcoin-core:28333"

@@ -70,7 +70,7 @@ metadata:
   name: server-config
 data:
   SPRING_PROFILES_ACTIVE: "staging"
-  BITCOIN_NETWORK: "signet"
+  BITCOIN_NETWORK: "testnet4"
   REGION: "STAGING"
   AUDIT_SOLVENCY_ENFORCED: "true"
   RELEASE_ATTESTATION_REQUIRED: "false"
@@ -83,7 +83,7 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: "staging,kfe"
   KEROSENE_RUNTIME_ROLE: "kfe-service"
-  BITCOIN_NETWORK: "signet"
+  BITCOIN_NETWORK: "testnet4"
   REGION: "STAGING"
   AUDIT_SOLVENCY_ENFORCED: "true"
   RELEASE_ATTESTATION_REQUIRED: "false"

@@ -43,3 +43,23 @@ spec:
           port: 8081
         - protocol: TCP
           port: 50051
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: local-full-allow-bitcoin-testnet4-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: bitcoin-core
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 48333
+        - protocol: TCP
+          port: 8333

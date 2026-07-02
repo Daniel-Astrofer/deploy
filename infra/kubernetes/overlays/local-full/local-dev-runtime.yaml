@@ -1,3 +1,41 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-postgres-data
+  labels:
+    app: kerosene-db-patroni
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  capacity:
+    storage: 4Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-local
+  hostPath:
+    path: /home/omega/Kerosene/.local/postgres-data
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-postgres-data
+  labels:
+    app: kerosene-db-patroni
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: kerosene-local
+  volumeName: local-postgres-data
+  resources:
+    requests:
+      storage: 4Gi
+---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -31,6 +69,20 @@ spec:
         fsGroup: 70
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: fix-postgres-data-permissions
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - chown -R 70:70 /var/lib/postgresql/data && chmod 700 /var/lib/postgresql/data
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
       containers:
         - name: postgres
           image: postgres:16-alpine
@@ -79,14 +131,14 @@ spec:
               memory: 256Mi
             limits:
               cpu: 1000m
-              memory: 1Gi
+              memory: 3Gi
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
       volumes:
         - name: postgres-data
-          emptyDir:
-            sizeLimit: 2Gi
+          persistentVolumeClaim:
+            claimName: local-postgres-data
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -241,6 +293,43 @@ spec:
               cpu: 500m
               memory: 512Mi
 ---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-bitcoin-data
+  labels:
+    app: kerosene-bitcoin
+    app.kubernetes.io/name: bitcoin-core
+    app.kubernetes.io/component: bitcoin
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  capacity:
+    storage: 12Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-local
+  hostPath:
+    path: /home/omega/Kerosene/.local/bitcoin-data
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-bitcoin-data
+  labels:
+    app: kerosene-bitcoin
+    app.kubernetes.io/name: bitcoin-core
+    app.kubernetes.io/component: bitcoin
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: kerosene-local
+  resources:
+    requests:
+      storage: 12Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -274,7 +363,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: bitcoind
-          image: bitcoin/bitcoin:27.0
+          image: bitcoin/bitcoin:28.0
           imagePullPolicy: IfNotPresent
           command: ["/bin/sh", "-c"]
           args:
@@ -289,7 +378,7 @@ spec:
               mkdir -p "$bitcoin_dir"
 
               bitcoin_cli() {
-                bitcoin-cli -regtest \
+                bitcoin-cli -testnet4 \
                   -datadir="$bitcoin_dir" \
                   -rpcport="$rpc_port" \
                   -rpcuser="$BITCOIN_RPC_USER" \
@@ -298,7 +387,7 @@ spec:
               }
 
               bitcoind \
-                -regtest \
+                -testnet4 \
                 -datadir="$bitcoin_dir" \
                 -server=1 \
                 -printtoconsole \
@@ -370,7 +459,7 @@ spec:
                 - -c
                 - |
                   wallet="${BITCOIN_RPC_WALLET:-kerosene}"
-                  bitcoin-cli -regtest \
+                  bitcoin-cli -testnet4 \
                     -datadir="${BITCOIN_DATA_DIR:-/home/bitcoin/.bitcoin}" \
                     -rpcport="${BITCOIN_RPC_PORT:-8332}" \
                     -rpcuser="$BITCOIN_RPC_USER" \
@@ -395,8 +484,8 @@ spec:
               mountPath: /home/bitcoin/.bitcoin
       volumes:
         - name: bitcoin-data
-          emptyDir:
-            sizeLimit: 2Gi
+          persistentVolumeClaim:
+            claimName: local-bitcoin-data
 ---
 apiVersion: apps/v1
 kind: Deployment

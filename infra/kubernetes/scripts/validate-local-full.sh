@@ -89,10 +89,9 @@ require 'APP_CORS_ALLOWED_ORIGINS: http://placeholder.onion'
 require 'WEBAUTHN_ORIGINS: android:apk-key-hash:kerosene,http://placeholder.onion'
 require 'SPRING_PROFILES_ACTIVE: docker,kfe'
 require 'KEROSENE_RUNTIME_ROLE: kfe-service'
-require 'BITCOIN_NETWORK: regtest'
+require 'BITCOIN_NETWORK: testnet4'
 require 'BITCOIN_RPC_REQUIRED: "false"'
 require 'LIGHTNING_LND_ENABLED: "false"'
-require 'APP_DEV_DEPOSIT_INSTANT_CREDIT_ENABLED: "true"'
 require 'kfe-internal-shared-secret: local-kfe-internal-secret-not-for-production'
 
 if grep -qE '^  type: (NodePort|LoadBalancer)$' "$rendered"; then

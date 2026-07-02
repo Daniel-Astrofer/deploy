@@ -98,7 +98,7 @@ services:
     restart: "no"
     env_file: ../../../backend/kerosene/.env
     environment:
-      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-testnet4}
       - LND_BITCOIN_NODE=${LIGHTNING_LND_BITCOIN_NODE:-bitcoind}
       - LND_GRPC_PORT=${LIGHTNING_LND_PORT:-10009}
       - LND_REST_PORT=${LIGHTNING_LND_REST_PORT:-8080}
@@ -130,7 +130,7 @@ services:
     depends_on:
       bitcoin-core: { condition: service_healthy }
     healthcheck:
-      test: ["CMD-SHELL", "lncli --lnddir=/root/.lnd --rpcserver=127.0.0.1:${LIGHTNING_LND_PORT:-10009} --network=${BITCOIN_NETWORK:-mainnet} getinfo >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "lncli --lnddir=/root/.lnd --rpcserver=127.0.0.1:${LIGHTNING_LND_PORT:-10009} --network=${BITCOIN_NETWORK:-testnet4} getinfo >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 36
@@ -143,7 +143,7 @@ services:
     user: "0:0"
     env_file: ../../../backend/kerosene/.env
     environment:
-      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-testnet4}
       - LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
       - LND_REST_PORT=${LIGHTNING_LND_REST_PORT:-8080}
       - LND_BOOTSTRAP_TIMEOUT_SECONDS=${LIGHTNING_LND_BOOTSTRAP_TIMEOUT_SECONDS:-180}
@@ -163,7 +163,7 @@ services:
     user: "0:0"
     env_file: ../../../backend/kerosene/.env
     environment:
-      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-testnet4}
       - LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
       - LND_REST_PORT=${LIGHTNING_LND_REST_PORT:-8080}
       - LND_BOOTSTRAP_TIMEOUT_SECONDS=${LIGHTNING_LND_BOOTSTRAP_TIMEOUT_SECONDS:-180}
@@ -189,7 +189,7 @@ services:
     restart: "no"
     env_file: ../../../backend/kerosene/.env
     environment:
-      - BITCOIN_CHAIN=${BITCOIN_CHAIN:-mainnet}
+      - BITCOIN_CHAIN=${BITCOIN_CHAIN:-testnet4}
       - BITCOIN_PRUNE_MB=${BITCOIN_PRUNE_MB:-5500}
       - BITCOIN_MAX_MEMPOOL_MB=${BITCOIN_MAX_MEMPOOL_MB:-300}
       - BITCOIN_DBCACHE_MB=${BITCOIN_DBCACHE_MB:-1024}
@@ -225,7 +225,7 @@ services:
     env_file: ../../../backend/kerosene/.env
     command:
       - --network
-      - ${BITCOIN_CHAIN:-mainnet}
+      - ${BITCOIN_CHAIN:-testnet4}
       - --daemon-rpc-addr
       - bitcoin-core:8332
       - --daemon-p2p-addr
@@ -500,7 +500,7 @@ services:
       - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_ENABLED=true
       - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_CONFIRMATION=KEROSENE_LOCAL_RESET_OK
       - SHARD_ATTESTATION_SECRET=${VAULT_CLUSTER_ATTESTATION_SECRET}
-      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-testnet4}
       - BITCOIN_RPC_ENABLED=${BITCOIN_RPC_ENABLED:-true}
       - BITCOIN_RPC_REQUIRED=${BITCOIN_RPC_REQUIRED:-true}
       - BITCOIN_RPC_PRUNED_REQUIRED=${BITCOIN_RPC_PRUNED_REQUIRED:-true}
@@ -532,7 +532,7 @@ services:
       - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
       - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
       - LIGHTNING_LND_TLS_CERT_PATH=/lnd/tls.cert
-      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-mainnet}/admin.macaroon
+      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-testnet4}/admin.macaroon
       - SHARD_IDENTITY_PATH=/opt/kerosene/identity
       - TOR_HEALTH_VANGUARDS_STATE_FILE=/var/run/tor/vanguards/vanguards.state
     networks:
@@ -719,7 +719,7 @@ services:
       - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_ENABLED=true
       - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_CONFIRMATION=KEROSENE_LOCAL_RESET_OK
       - SHARD_ATTESTATION_SECRET=${VAULT_CLUSTER_ATTESTATION_SECRET}
-      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-testnet4}
       - BITCOIN_RPC_ENABLED=${BITCOIN_RPC_ENABLED:-true}
       - BITCOIN_RPC_REQUIRED=${BITCOIN_RPC_REQUIRED:-true}
       - BITCOIN_RPC_PRUNED_REQUIRED=${BITCOIN_RPC_PRUNED_REQUIRED:-true}
@@ -751,7 +751,7 @@ services:
       - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
       - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
       - LIGHTNING_LND_TLS_CERT_PATH=/lnd/tls.cert
-      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-mainnet}/admin.macaroon
+      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-testnet4}/admin.macaroon
       - SHARD_IDENTITY_PATH=/opt/kerosene/identity
       - TOR_HEALTH_VANGUARDS_STATE_FILE=/var/run/tor/vanguards/vanguards.state
     networks:
@@ -938,7 +938,7 @@ services:
       - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_ENABLED=true
       - KEROSENE_LOCAL_ENCRYPTED_DATA_REPAIR_CONFIRMATION=KEROSENE_LOCAL_RESET_OK
       - SHARD_ATTESTATION_SECRET=${VAULT_CLUSTER_ATTESTATION_SECRET}
-      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-mainnet}
+      - BITCOIN_NETWORK=${BITCOIN_NETWORK:-testnet4}
       - BITCOIN_RPC_ENABLED=${BITCOIN_RPC_ENABLED:-true}
       - BITCOIN_RPC_REQUIRED=${BITCOIN_RPC_REQUIRED:-true}
       - BITCOIN_RPC_PRUNED_REQUIRED=${BITCOIN_RPC_PRUNED_REQUIRED:-true}
@@ -970,7 +970,7 @@ services:
       - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
       - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
       - LIGHTNING_LND_TLS_CERT_PATH=/lnd/tls.cert
-      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-mainnet}/admin.macaroon
+      - LIGHTNING_LND_MACAROON_PATH=/lnd/data/chain/bitcoin/${BITCOIN_NETWORK:-testnet4}/admin.macaroon
       - SHARD_IDENTITY_PATH=/opt/kerosene/identity
       - TOR_HEALTH_VANGUARDS_STATE_FILE=/var/run/tor/vanguards/vanguards.state
     networks:

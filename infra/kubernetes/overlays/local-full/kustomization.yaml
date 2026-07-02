@@ -18,10 +18,12 @@ images:
     newName: localhost:5000/kerosene/kfe-service
     newTag: local
   - name: kerosene/server
+    newName: localhost:5000/kerosene/server
     newTag: local
   - name: kerosene/mpc-sidecar
     newTag: local
   - name: kerosene/web-page
+    newName: localhost:5000/kerosene/web-page
     newTag: local
 patches:
   - path: patch-local-full.yaml
