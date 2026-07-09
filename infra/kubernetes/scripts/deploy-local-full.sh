@@ -78,6 +78,21 @@ record_local_image_id() {
   kubectl_cmd -n "$NS" patch "$resource" --type merge -p "$payload" >/dev/null
 }
 
+record_tor_config_hash() {
+  local tor_manifest="$OVERLAY/local-tor-onion.yaml"
+  local config_hash payload
+
+  if [[ ! -f "$tor_manifest" ]]; then
+    echo "[!] Tor manifest not found; cannot record config hash: $tor_manifest" >&2
+    return 0
+  fi
+
+  config_hash="$(sha256sum "$tor_manifest" | awk '{print $1}')"
+  payload="$(printf '{"spec":{"template":{"metadata":{"annotations":{"kerosene.io/tor-config-hash":"%s"}}}}}' "$config_hash")"
+  echo "[*] Recording Tor config hash for deployment/tor-onion"
+  kubectl_cmd -n "$NS" patch deployment/tor-onion --type merge -p "$payload" >/dev/null
+}
+
 record_imported_local_image_ids() {
   record_local_image_id deployment/server kerosene/server:local
   record_local_image_id deployment/kfe-service localhost:5000/kerosene/kfe-service:local
@@ -171,6 +186,7 @@ fi
 echo "[*] Applying local-full overlay"
 kubectl_cmd apply -k "$OVERLAY"
 cleanup_stale_local_full_resources
+record_tor_config_hash
 
 if [[ "$IMAGE_IMPORT_SUCCEEDED" -eq 1 ]]; then
   echo "[*] Recording imported local image ids for Kubernetes rollout detection"

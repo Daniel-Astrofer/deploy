@@ -20,6 +20,16 @@ mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/scripts" "$TMP_DIR/infra/kubernetes/scri
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
 
+cat > "$TMP_DIR/infra/kubernetes/overlays/local-full/local-tor-onion.yaml" <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tor-onion-config
+data:
+  torrc: |
+    HiddenServicePort 80 web-page:8080
+EOF
+
 cat > "$TMP_DIR/infra/scripts/host-services.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -107,6 +117,7 @@ grep -qF 'patch statefulset/mpc-sidecar --type merge -p' "$LOG_FILE" || fail "mp
 grep -qF 'patch deployment/web-page --type merge -p' "$LOG_FILE" || fail "web-page image id was not recorded on the pod template"
 grep -qF 'patch deployment/tor-onion --type merge -p' "$LOG_FILE" || fail "tor-onion image id was not recorded on the pod template"
 grep -qF '"kerosene.io/local-image-id":"sha256:server-image-id"' "$LOG_FILE" || fail "server patch did not include the local image id annotation"
+grep -qF '"kerosene.io/tor-config-hash":"' "$LOG_FILE" || fail "tor-onion config hash was not recorded on the pod template"
 grep -qF 'delete networkpolicy/local-full-allow-nodeport-ingress --ignore-not-found' "$LOG_FILE" || fail "stale NodePort policy cleanup was not attempted"
 
 echo "[PASS] deploy-local-full.sh image rollout annotations"
