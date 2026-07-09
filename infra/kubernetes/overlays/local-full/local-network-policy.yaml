@@ -20,7 +20,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: local-full-allow-nodeport-ingress
+  name: local-full-allow-debug-ingress
 spec:
   podSelector:
     matchExpressions:

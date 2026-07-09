@@ -56,22 +56,20 @@ infra/
 
 ## Kubernetes local
 
-O quorum local oficial usa Kubernetes `local-full`. O gateway principal é:
+O quorum local oficial usa Kubernetes `local-full`. Os Services ficam
+`ClusterIP` e o deploy rejeita `NodePort`/`LoadBalancer`, evitando competir por
+portas já usadas no host. A entrada pública do `local-full` é somente o onion
+publicado pelo `tor-onion`, que encaminha a porta onion `80` para o gateway
+interno `web-page:8080`.
 
-```text
-http://127.0.0.1:30082
+Use o status para ver o endereço atual:
+
+```bash
+bash infra/status.sh
 ```
 
-KFE e web passam pelo `web-page` em `30082`; `3000` é legado/Compose quando
-estiver rodando em paralelo.
-
-Portas NodePort fixas:
-
-```text
-server   30080
-mpc      30081
-web/KFE  30082
-```
+`3000` permanece legado/Compose quando esse runtime separado estiver rodando em
+paralelo; ele não faz parte do contrato Kubernetes `local-full`.
 
 O onion local-full usa chaves persistentes em:
 

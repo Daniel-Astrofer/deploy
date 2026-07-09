@@ -69,8 +69,8 @@ if [[ "\${1:-}" == "config" && "\${2:-}" == "current-context" ]]; then
   echo "test-context"
   exit 0
 fi
-if [[ "\${1:-}" == "cluster-info" ]]; then
-  echo "cluster ok"
+if [[ "\${1:-}" == "get" && "\${2:-}" == "--raw=/readyz" ]]; then
+  echo "ok"
   exit 0
 fi
 if [[ "\${1:-}" == "apply" ]]; then
@@ -79,6 +79,10 @@ if [[ "\${1:-}" == "apply" ]]; then
 fi
 if [[ "\${1:-}" == "-n" && "\${2:-}" == "kerosene-local" && "\${3:-}" == "patch" ]]; then
   echo "patched"
+  exit 0
+fi
+if [[ "\${1:-}" == "-n" && "\${2:-}" == "kerosene-local" && "\${3:-}" == "delete" ]]; then
+  echo "deleted"
   exit 0
 fi
 if [[ "\${1:-}" == "-n" && "\${2:-}" == "kerosene-local" && "\${3:-}" == "get" ]]; then
@@ -95,7 +99,7 @@ chmod +x "$TMP_DIR/bin/kubectl"
 
 : > "$LOG_FILE"
 
-PATH="$TMP_DIR/bin:$PATH" CALL_LOG="$LOG_FILE" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" >/dev/null
+PATH="$TMP_DIR/bin:$PATH" KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" CALL_LOG="$LOG_FILE" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" >/dev/null
 
 grep -qF 'patch deployment/server --type merge -p' "$LOG_FILE" || fail "server image id was not recorded on the pod template"
 grep -qF 'patch deployment/kfe-service --type merge -p' "$LOG_FILE" || fail "kfe-service image id was not recorded on the pod template"
@@ -103,5 +107,6 @@ grep -qF 'patch statefulset/mpc-sidecar --type merge -p' "$LOG_FILE" || fail "mp
 grep -qF 'patch deployment/web-page --type merge -p' "$LOG_FILE" || fail "web-page image id was not recorded on the pod template"
 grep -qF 'patch deployment/tor-onion --type merge -p' "$LOG_FILE" || fail "tor-onion image id was not recorded on the pod template"
 grep -qF '"kerosene.io/local-image-id":"sha256:server-image-id"' "$LOG_FILE" || fail "server patch did not include the local image id annotation"
+grep -qF 'delete networkpolicy/local-full-allow-nodeport-ingress --ignore-not-found' "$LOG_FILE" || fail "stale NodePort policy cleanup was not attempted"
 
 echo "[PASS] deploy-local-full.sh image rollout annotations"

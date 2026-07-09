@@ -29,27 +29,31 @@ It deploys:
 - `Deployment/local-bitcoin`
 - `Deployment/local-lnd-placeholder`
 
-It also provides local-only Kubernetes Secret objects for development, relaxed namespace-internal NetworkPolicy rules, NodePort access, and an `emptyDir` replacement for the MPC shard PVC. This avoids the `StorageClass` blocker on a single-node workstation cluster.
+It also provides local-only Kubernetes Secret objects for development, relaxed namespace-internal NetworkPolicy rules, a Tor-only public entrypoint, and an `emptyDir` replacement for the MPC shard PVC. This avoids the `StorageClass` blocker on a single-node workstation cluster while keeping host ports out of the Kubernetes service contract.
 
 ## Access
 
-After deploy:
+After deploy, public access is only through the Tor hidden service printed by
+`infra/status.sh` or the deploy command. Kubernetes Services remain internal
+`ClusterIP` objects, so local-full does not reserve or compete for fixed host
+ports.
 
 ```text
-server:   http://127.0.0.1:30080
-mpc:      http://127.0.0.1:30081/version
-web-page: http://127.0.0.1:30082
+onion port 80 -> web-page:8080
+web-page     -> server:8080 for Core routes
+web-page     -> kfe-service:8080 for KFE routes
+server       -> mpc-sidecar:50051 and mpc-sidecar:8081 internally
 ```
 
 Use `web-page` for financial routes. The Kubernetes web proxy sends `/kfe/**`,
 `/api/public/kfe/**` and `/api/admin/kfe/**` to `Service/kfe-service`; the
-direct `server` NodePort is Core-only.
+`server` service is not published directly through Tor.
 
 The `web-page` deployment mounts `web-page-runtime-config` at
-`/usr/share/nginx/html/kerosene-runtime-config.json`, pointing the Flutter web
-runtime at `http://127.0.0.1:30082`. The image import script rebuilds the web
-bundle for Kubernetes same-origin routing, so a stale `WEB_API_URL` from
-another local build does not leak into the Kubernetes frontend.
+`/usr/share/nginx/html/kerosene-runtime-config.json`, marking this runtime as
+`tor-hidden-service-only`. The image import script rebuilds the web bundle for
+Kubernetes same-origin routing, so a stale `WEB_API_URL` from another local
+build does not leak into the Kubernetes frontend.
 
 ## Validate only
 

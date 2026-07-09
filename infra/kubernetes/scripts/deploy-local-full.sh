@@ -86,6 +86,10 @@ record_imported_local_image_ids() {
   record_local_image_id deployment/tor-onion kerosene/tor:local
 }
 
+cleanup_stale_local_full_resources() {
+  kubectl_cmd -n "$NS" delete networkpolicy/local-full-allow-nodeport-ingress --ignore-not-found >/dev/null
+}
+
 require_cluster_access() {
   local context
   local deadline now
@@ -166,6 +170,7 @@ fi
 
 echo "[*] Applying local-full overlay"
 kubectl_cmd apply -k "$OVERLAY"
+cleanup_stale_local_full_resources
 
 if [[ "$IMAGE_IMPORT_SUCCEEDED" -eq 1 ]]; then
   echo "[*] Recording imported local image ids for Kubernetes rollout detection"

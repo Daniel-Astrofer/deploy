@@ -94,6 +94,23 @@ require 'BITCOIN_RPC_REQUIRED: "false"'
 require 'LIGHTNING_LND_ENABLED: "false"'
 require 'kfe-internal-shared-secret: local-kfe-internal-secret-not-for-production'
 
+hidden_service_ports="$(grep -E '^[[:space:]]*HiddenServicePort[[:space:]]+' "$rendered" || true)"
+hidden_service_port_count="$(printf '%s\n' "$hidden_service_ports" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+if [[ "$hidden_service_port_count" != "1" ]]; then
+  echo "[!] local-full must expose exactly one Tor hidden service port." >&2
+  printf '%s\n' "$hidden_service_ports" >&2
+  exit 1
+fi
+if ! printf '%s\n' "$hidden_service_ports" | grep -qxE '[[:space:]]*HiddenServicePort 80 web-page:8080'; then
+  echo "[!] local-full Tor hidden service must publish only web-page on onion port 80." >&2
+  printf '%s\n' "$hidden_service_ports" >&2
+  exit 1
+fi
+if grep -qE 'HiddenServicePort[[:space:]]+[0-9]+[[:space:]]+server:8080' "$rendered"; then
+  echo "[!] local-full must not publish server directly through Tor; route through web-page." >&2
+  exit 1
+fi
+
 if grep -qE '^  type: (NodePort|LoadBalancer)$' "$rendered"; then
   echo "[!] local-full must not expose services via clear net." >&2
   exit 1
@@ -109,6 +126,10 @@ if grep -q 'kerosene-app' "$rendered"; then
 fi
 if grep -q 'web-admin' "$rendered"; then
   echo "[!] Render still contains old workload name web-admin" >&2
+  exit 1
+fi
+if grep -q 'local-full-allow-nodeport-ingress' "$rendered"; then
+  echo "[!] Render still contains old local-full NodePort policy name." >&2
   exit 1
 fi
 

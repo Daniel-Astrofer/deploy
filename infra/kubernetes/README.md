@@ -24,12 +24,10 @@ bash infra/status.sh
 ```
 
 `infra/start.sh` valida `overlays/local-full`, constrói/importa imagens locais,
-aplica os manifests, aguarda os workloads e mostra as URLs locais. O gateway
-principal do frontend e KFE fica em:
-
-```text
-http://127.0.0.1:30082
-```
+aplica os manifests, aguarda os workloads e mostra o onion local. Os Services
+do `local-full` ficam `ClusterIP`; o deploy rejeita `NodePort` e
+`LoadBalancer` para não disputar portas do host. O gateway público é o hidden
+service `tor-onion`, com a porta onion `80` encaminhada para `web-page:8080`.
 
 Antes do deploy, o start tenta iniciar `containerd.service`, `docker.service` e
 `kubelet.service` quando estiver em um host systemd. Desative com:
@@ -47,14 +45,6 @@ containerd. Depois de uma importação bem-sucedida, o deploy grava o ID local d
 imagem em `kerosene.io/local-image-id` no template dos pods. Isso força rollout
 quando a imagem muda e mantém os workloads parados quando a imagem continua a
 mesma.
-
-Portas locais fixas:
-
-```text
-server   http://127.0.0.1:30080
-mpc      http://127.0.0.1:30081/version
-web/KFE  http://127.0.0.1:30082
-```
 
 O onion fica estável enquanto as chaves persistidas em
 `/home/omega/.local/state/kerosene/tor/keys/local-full` forem preservadas.
