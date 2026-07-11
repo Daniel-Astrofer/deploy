@@ -30,6 +30,11 @@ bash infra/docker/scripts/compose-local-kfe.sh up -d
 bash infra/docker/scripts/compose-hardened.sh config
 ```
 
+`compose-local-kfe.sh` includes the split KFE overlay. In that mode each shard
+starts an API gateway and its Tor hidden service publishes the gateway: Core
+routes such as `/auth/**` go to `server-*`, while `/kfe/**`,
+`/api/public/kfe/**` and `/api/admin/kfe/**` go to `kfe-service-*`.
+
 ## Próxima etapa
 
 Migrar gradualmente scripts raiz para os wrappers canônicos e remover os Compose

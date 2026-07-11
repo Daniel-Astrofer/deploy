@@ -55,12 +55,15 @@ if [[ "\${1:-}" == "config" && "\${2:-}" == "current-context" ]]; then
   echo "test-context"
   exit 0
 fi
-if [[ "\${1:-}" == "cluster-info" ]]; then
-  echo "cluster ok"
+if [[ "\${1:-}" == "get" && "\${2:-}" == "--raw=/readyz" ]]; then
+  echo "ok"
   exit 0
 fi
 if [[ "\${1:-}" == "apply" ]]; then
   echo "applied"
+  exit 0
+fi
+if [[ "\${1:-}" == "-n" && "\${3:-}" == "delete" ]]; then
   exit 0
 fi
 if [[ "\${1:-}" == "-n" && "\${2:-}" == "kerosene-local" && "\${3:-}" == "get" ]]; then
@@ -76,7 +79,7 @@ EOF
 chmod +x "$TMP_DIR/bin/kubectl"
 
 set +e
-output="$(PATH="$TMP_DIR/bin:$PATH" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" 2>&1)"
+output="$(KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" KEROSENE_KUBERNETES_READY_TIMEOUT=0 PATH="$TMP_DIR/bin:$PATH" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" 2>&1)"
 status=$?
 set -e
 

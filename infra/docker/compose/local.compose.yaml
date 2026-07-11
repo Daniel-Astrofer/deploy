@@ -528,6 +528,8 @@ services:
       - IMAGE_DIGEST=${IMAGE_DIGEST:-unknown}
       - CODE_HASH=${CODE_HASH:-unknown}
       - CONFIG_HASH=${CONFIG_HASH:-unknown}
+      - KFE_INTERNAL_SHARED_SECRET=${KFE_INTERNAL_SHARED_SECRET:-local-kfe-internal-secret-not-for-production}
+      - KFE_REMOTE_BASE_URL=http://kfe-service-wvo:8080
       - TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED=${TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED:-true}
       - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
       - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
@@ -747,6 +749,8 @@ services:
       - IMAGE_DIGEST=${IMAGE_DIGEST:-unknown}
       - CODE_HASH=${CODE_HASH:-unknown}
       - CONFIG_HASH=${CONFIG_HASH:-unknown}
+      - KFE_INTERNAL_SHARED_SECRET=${KFE_INTERNAL_SHARED_SECRET:-local-kfe-internal-secret-not-for-production}
+      - KFE_REMOTE_BASE_URL=http://kfe-service-iw5:8080
       - TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED=${TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED:-true}
       - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
       - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
@@ -966,6 +970,8 @@ services:
       - IMAGE_DIGEST=${IMAGE_DIGEST:-unknown}
       - CODE_HASH=${CODE_HASH:-unknown}
       - CONFIG_HASH=${CONFIG_HASH:-unknown}
+      - KFE_INTERNAL_SHARED_SECRET=${KFE_INTERNAL_SHARED_SECRET:-local-kfe-internal-secret-not-for-production}
+      - KFE_REMOTE_BASE_URL=http://kfe-service-ltv:8080
       - TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED=${TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED:-true}
       - LIGHTNING_LND_ENABLED=${LIGHTNING_LND_ENABLED:-true}
       - LIGHTNING_LND_HOST=${LIGHTNING_LND_HOST:-lnd-bitcoind}
@@ -1024,9 +1030,13 @@ services:
     restart: "no"
     ports:
       - "${WEB_ADMIN_PORT:-3000}:8080"
+    environment:
+      NGINX_ENVSUBST_FILTER: "^KEROSENE_"
+      KEROSENE_CORE_UPSTREAM: server-wvo:8080
+      KEROSENE_KFE_UPSTREAM: server-wvo:8080
     volumes:
       - ../../../frontend/build/web:/usr/share/nginx/html:ro,z
-      - ../../runtime/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro,z
+      - ../../runtime/web/nginx.compose.conf.template:/etc/nginx/templates/default.conf.template:ro,z
       - ../../../release:/release:ro,z
     networks: [net_ingress]
     depends_on:
