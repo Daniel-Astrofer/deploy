@@ -14,6 +14,9 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: web-page
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kfe-service
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx

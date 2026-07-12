@@ -30,6 +30,13 @@ spec:
     - to:
         - podSelector:
             matchLabels:
+              app.kubernetes.io/name: server
+      ports:
+        - protocol: TCP
+          port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
               app.kubernetes.io/name: mpc-sidecar
       ports:
         - protocol: TCP

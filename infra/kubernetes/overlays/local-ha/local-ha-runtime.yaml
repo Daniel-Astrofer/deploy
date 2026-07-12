@@ -771,6 +771,8 @@ spec:
               value: kfe-service
             - name: KFE_INTERNAL_SHARED_SECRET
               value: local-ha-kfe-internal-secret
+            - name: AUTH_REMOTE_BASE_URL
+              value: http://server-ltv:8080
             - name: SERVER_PORT
               value: "8080"
             - name: REGION
@@ -912,6 +914,8 @@ spec:
               value: kfe-service
             - name: KFE_INTERNAL_SHARED_SECRET
               value: local-ha-kfe-internal-secret
+            - name: AUTH_REMOTE_BASE_URL
+              value: http://server-wvo:8080
             - name: SERVER_PORT
               value: "8080"
             - name: REGION
@@ -1402,6 +1406,8 @@ spec:
               value: kfe-service
             - name: KFE_INTERNAL_SHARED_SECRET
               value: local-ha-kfe-internal-secret
+            - name: AUTH_REMOTE_BASE_URL
+              value: http://server-iw5:8080
             - name: SERVER_PORT
               value: "8080"
             - name: REGION
