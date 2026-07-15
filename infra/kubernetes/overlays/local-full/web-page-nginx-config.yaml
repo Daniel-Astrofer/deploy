@@ -78,7 +78,7 @@ data:
         proxy_read_timeout 60s;
       }
 
-      location ~ ^/(auth|notifications|api|sovereignty|actuator)(/|$) {
+      location ~ ^/(auth|notifications|api|sovereignty|actuator|content)(/|$) {
         proxy_pass http://kerosene_core;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

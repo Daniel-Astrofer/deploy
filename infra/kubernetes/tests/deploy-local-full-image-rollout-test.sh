@@ -18,6 +18,7 @@ fail() {
 
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/scripts" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/kubernetes/overlays/local-full"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
+cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
 
 cat > "$TMP_DIR/infra/kubernetes/overlays/local-full/local-tor-onion.yaml" <<'EOF'
@@ -43,6 +44,21 @@ echo "validated"
 EOF
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/validate-local-full.sh"
 
+cat > "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+echo "$TMP_DIR/infra/kubernetes/overlays/local-full"
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh"
+
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "[*] Kubernetes context: test-context"
+exit 0
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh"
+
 cat > "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -57,10 +73,10 @@ echo "docker:$*" >> "$CALL_LOG"
 if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
   image="${*: -1}"
   case "$image" in
-    kerosene/server:local) echo "sha256:server-image-id" ;;
+    localhost:5000/kerosene/server:local) echo "sha256:server-image-id" ;;
     localhost:5000/kerosene/kfe-service:local) echo "sha256:kfe-service-image-id" ;;
     kerosene/mpc-sidecar:local) echo "sha256:mpc-sidecar-image-id" ;;
-    kerosene/web-page:local) echo "sha256:web-page-image-id" ;;
+    localhost:5000/kerosene/web-page:local) echo "sha256:web-page-image-id" ;;
     kerosene/tor:local) echo "sha256:tor-image-id" ;;
     *) echo "unknown image: ${3:-}" >&2; exit 42 ;;
   esac
@@ -109,7 +125,11 @@ chmod +x "$TMP_DIR/bin/kubectl"
 
 : > "$LOG_FILE"
 
-PATH="$TMP_DIR/bin:$PATH" KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" CALL_LOG="$LOG_FILE" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" >/dev/null
+PATH="$TMP_DIR/bin:$PATH" \
+  KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" \
+  CALL_LOG="$LOG_FILE" \
+  KUBECTL=kubectl \
+  "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" >/dev/null
 
 grep -qF 'patch deployment/server --type merge -p' "$LOG_FILE" || fail "server image id was not recorded on the pod template"
 grep -qF 'patch deployment/kfe-service --type merge -p' "$LOG_FILE" || fail "kfe-service image id was not recorded on the pod template"

@@ -3,10 +3,33 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 K8S_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-OVERLAY="$K8S_DIR/overlays/local-full"
 REPO_ROOT="$(cd "$K8S_DIR/../.." && pwd)"
 WEB_NGINX_CONF="$REPO_ROOT/infra/runtime/web/nginx.k8s.conf"
 KUSTOMIZE="${KUSTOMIZE:-}"
+RENDER_ROOT=""
+OVERLAY=""
+
+# shellcheck source=infra/kubernetes/scripts/local-host-env.sh
+source "$SCRIPT_DIR/local-host-env.sh"
+kerosene_load_local_host_env "$REPO_ROOT"
+
+cleanup_validate() {
+  if [[ -n "$RENDER_ROOT" && -d "$RENDER_ROOT" ]]; then
+    rm -rf "$RENDER_ROOT"
+  fi
+  if [[ -n "${rendered:-}" && -f "$rendered" ]]; then
+    rm -f "$rendered"
+  fi
+}
+trap cleanup_validate EXIT
+
+RENDER_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/kerosene-local-full-validate-XXXXXX")"
+OVERLAY="$(
+  KEROSENE_RENDER_ROOT="$RENDER_ROOT" \
+    KEROSENE_HOST_HOME="$KEROSENE_HOST_HOME" \
+    KEROSENE_REPO_ROOT="$KEROSENE_REPO_ROOT" \
+    bash "$SCRIPT_DIR/render-local-full-overlay.sh"
+)"
 
 if [[ ! -d "$OVERLAY" ]]; then
   echo "[!] local-full overlay not found: $OVERLAY" >&2
@@ -24,7 +47,6 @@ build_overlay() {
 }
 
 rendered="$(mktemp "${TMPDIR:-/tmp}/kerosene-local-full.XXXXXX.yaml")"
-trap 'rm -f "$rendered"' EXIT
 
 build_overlay > "$rendered"
 
@@ -66,7 +88,9 @@ require '^  name: tor-onion-keys$'
 require 'mountPath: /var/lib/tor'
 require 'mountPath: /var/lib/tor/kerosene_service'
 require 'name: tor-data'
-require 'path: /home/omega/.local/state/kerosene/tor/keys/local-full'
+require_literal "path: $KEROSENE_LOCAL_ONION_KEYS_PATH"
+require_literal "path: $KEROSENE_LOCAL_POSTGRES_DATA"
+require_literal "path: $KEROSENE_LOCAL_BITCOIN_DATA"
 require 'claimName: tor-onion-keys'
 require 'local-full-allow-tor-egress'
 require '^  name: web-page-runtime-config$'
@@ -90,7 +114,9 @@ require 'WEBAUTHN_ORIGINS: android:apk-key-hash:kerosene,http://placeholder.onio
 require 'SPRING_PROFILES_ACTIVE: docker,kfe'
 require 'KEROSENE_RUNTIME_ROLE: kfe-service'
 require 'BITCOIN_NETWORK: testnet4'
-require 'BITCOIN_RPC_REQUIRED: "false"'
+# Beta testnet: Bitcoin Core is required so financial rails fail closed when down.
+require 'BITCOIN_RPC_REQUIRED: "true"'
+require 'KFE_NETWORK_MONITOR_ENABLED: "true"'
 require 'LIGHTNING_LND_ENABLED: "false"'
 require 'kfe-internal-shared-secret: local-kfe-internal-secret-not-for-production'
 

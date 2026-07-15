@@ -24,12 +24,17 @@ Options:
 USAGE
 }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# Keep absolute paths before sourcing helpers — backend-common.sh overwrites SCRIPT_DIR.
+IMPORT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$IMPORT_SCRIPT_DIR/../../.." && pwd)"
 BACKEND_COMMON="$REPO_ROOT/infra/scripts/backend-common.sh"
 FLUTTER_COMMON="$REPO_ROOT/infra/scripts/flutter-common.sh"
+LOCAL_HOST_ENV="$IMPORT_SCRIPT_DIR/local-host-env.sh"
 SKIP_WEB_PAGE_BUILD=0
 SKIP_KFE_SERVICE_BUILD=0
+IMPORT_MODE="" # kind | containerd
+KIND_BIN=""
+KIND_CLUSTER_NAME="${KEROSENE_KIND_CLUSTER_NAME:-kerosene-local}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -45,18 +50,53 @@ done
 source "$BACKEND_COMMON"
 # shellcheck source=infra/scripts/flutter-common.sh
 source "$FLUTTER_COMMON"
+# shellcheck source=infra/kubernetes/scripts/local-host-env.sh
+source "$LOCAL_HOST_ENV"
+kerosene_load_local_host_env "$REPO_ROOT"
 
 require_docker
 
-if ! command -v ctr >/dev/null 2>&1; then
-  fail "ctr not found. Install containerd tools first."
-fi
-
 CTR_CMD=()
 
-configure_containerd_access() {
+resolve_kind_bin() {
+  if [[ -n "${KIND:-}" && -x "$KIND" ]]; then
+    printf '%s\n' "$KIND"
+    return 0
+  fi
+  if command -v kind >/dev/null 2>&1; then
+    command -v kind
+    return 0
+  fi
+  local candidate
+  for candidate in \
+    "${KEROSENE_HOST_HOME}/.local/bin/kind" \
+    "${HOME:-}/.local/bin/kind" \
+    /usr/local/bin/kind
+  do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+detect_import_mode() {
+  if KIND_BIN="$(resolve_kind_bin 2>/dev/null)" \
+    && "$KIND_BIN" get clusters 2>/dev/null | grep -qx "$KIND_CLUSTER_NAME"; then
+    IMPORT_MODE="kind"
+    info "Import mode: kind load into cluster $KIND_CLUSTER_NAME"
+    return 0
+  fi
+
+  if ! command -v ctr >/dev/null 2>&1; then
+    fail "Neither kind cluster '$KIND_CLUSTER_NAME' nor ctr is available for image import."
+  fi
+
   if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
     CTR_CMD=(ctr)
+    IMPORT_MODE="containerd"
+    info "Import mode: containerd namespace k8s.io"
     return 0
   fi
 
@@ -66,6 +106,8 @@ configure_containerd_access() {
 
   if sudo -n true >/dev/null 2>&1; then
     CTR_CMD=(sudo -n ctr)
+    IMPORT_MODE="containerd"
+    info "Import mode: containerd namespace k8s.io"
     return 0
   fi
 
@@ -73,13 +115,15 @@ configure_containerd_access() {
     info "sudo credentials are required to import images into containerd namespace k8s.io."
     sudo -v || fail "sudo authentication failed. Re-run after granting sudo access, or use --skip-image-import to keep existing cluster images."
     CTR_CMD=(sudo ctr)
+    IMPORT_MODE="containerd"
+    info "Import mode: containerd namespace k8s.io"
     return 0
   fi
 
-  fail "sudo credentials are required to import images into containerd namespace k8s.io. Run this script from an interactive terminal, grant passwordless sudo for ctr, or re-run the deploy with --skip-image-import."
+  fail "sudo credentials are required to import images into containerd namespace k8s.io. Run this script from an interactive terminal, grant passwordless sudo for ctr, use a kind cluster, or re-run the deploy with --skip-image-import."
 }
 
-configure_containerd_access
+detect_import_mode
 
 try_tag_from_compose_service() {
   local target="$1"
@@ -268,8 +312,15 @@ ensure_local_registry_alias() {
   docker tag "$source" "$alias"
 }
 
-import_to_k8s_containerd() {
+import_image() {
   local image="$1"
+
+  if [[ "$IMPORT_MODE" == "kind" ]]; then
+    info "Loading $image into kind cluster $KIND_CLUSTER_NAME"
+    "$KIND_BIN" load docker-image "$image" --name "$KIND_CLUSTER_NAME" >/dev/null
+    return 0
+  fi
+
   info "Importing $image into containerd namespace k8s.io"
   docker save "$image" | "${CTR_CMD[@]}" -n k8s.io images import - >/dev/null
 }
@@ -280,18 +331,29 @@ build_mpc_sidecar_image
 build_web_page_image
 build_tor_image
 
+# local-full kustomization rewrites app images to localhost:5000/*:local
+ensure_local_registry_alias "kerosene/server:local" "localhost:5000/kerosene/server:local"
 ensure_local_registry_alias "kerosene/kfe-service:local" "localhost:5000/kerosene/kfe-service:local"
-
-import_to_k8s_containerd "kerosene/server:local"
-import_to_k8s_containerd "kerosene/kfe-service:local"
-import_to_k8s_containerd "localhost:5000/kerosene/kfe-service:local"
-import_to_k8s_containerd "kerosene/mpc-sidecar:local"
-import_to_k8s_containerd "kerosene/tor:local"
 if docker image inspect "kerosene/web-page:local" >/dev/null 2>&1; then
-  import_to_k8s_containerd "kerosene/web-page:local"
+  ensure_local_registry_alias "kerosene/web-page:local" "localhost:5000/kerosene/web-page:local"
 fi
 
-info "Imported images visible to Kubernetes:"
-"${CTR_CMD[@]}" -n k8s.io images ls | grep -E 'kerosene/(server|kfe-service|mpc-sidecar|tor|web-page)' || true
+import_image "kerosene/server:local"
+import_image "localhost:5000/kerosene/server:local"
+import_image "kerosene/kfe-service:local"
+import_image "localhost:5000/kerosene/kfe-service:local"
+import_image "kerosene/mpc-sidecar:local"
+import_image "kerosene/tor:local"
+if docker image inspect "kerosene/web-page:local" >/dev/null 2>&1; then
+  import_image "kerosene/web-page:local"
+  import_image "localhost:5000/kerosene/web-page:local"
+fi
+
+if [[ "$IMPORT_MODE" == "containerd" ]]; then
+  info "Imported images visible to Kubernetes:"
+  "${CTR_CMD[@]}" -n k8s.io images ls | grep -E 'kerosene/(server|kfe-service|mpc-sidecar|tor|web-page)' || true
+else
+  info "Images loaded into kind cluster $KIND_CLUSTER_NAME"
+fi
 
 info "Done. You can now run: bash infra/start.sh --skip-image-import"

@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=infra/kubernetes/scripts/local-host-env.sh
+source "$SCRIPT_DIR/local-host-env.sh"
+kerosene_load_local_host_env
+
 KUBECTL="${KUBECTL:-kubectl}"
 NS="${KEROSENE_NAMESPACE:-kerosene-local}"
-ONION_KEYS_PATH="${KEROSENE_LOCAL_ONION_KEYS_PATH:-/home/omega/.local/state/kerosene/tor/keys/local-full}"
+ONION_KEYS_PATH="$KEROSENE_LOCAL_ONION_KEYS_PATH"
 KUBECTL_ARGS=()
 if [[ -n "${KUBECONFIG:-}" ]]; then
   KUBECTL_ARGS+=(--kubeconfig "$KUBECONFIG")

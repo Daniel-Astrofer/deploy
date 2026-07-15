@@ -8,7 +8,10 @@ FRONTEND_DIR="${REPO_ROOT}/frontend"
 cd "${FRONTEND_DIR}"
 
 export KEROSENE_ALLOW_DEBUG_RELEASE_SIGNING="${KEROSENE_ALLOW_DEBUG_RELEASE_SIGNING:-true}"
-HOST_HOME="${KEROSENE_HOST_HOME:-/home/omega}"
+# shellcheck source=infra/kubernetes/scripts/local-host-env.sh
+source "${REPO_ROOT}/infra/kubernetes/scripts/local-host-env.sh"
+kerosene_load_local_host_env "$REPO_ROOT"
+HOST_HOME="$KEROSENE_HOST_HOME"
 if [[ -z "${ANDROID_HOME:-}" && -d "$HOST_HOME/Android/Sdk" ]]; then
   export ANDROID_HOME="$HOST_HOME/Android/Sdk"
 fi
@@ -26,9 +29,6 @@ if [[ -n "${CARGO_HOME:-}" ]]; then
 fi
 if [[ -z "${ADB_VENDOR_KEYS:-}" && -f "$HOST_HOME/.android/adbkey" ]]; then
   export ADB_VENDOR_KEYS="$HOST_HOME/.android/adbkey"
-fi
-if [[ -z "${KUBECONFIG:-}" && -f "$HOST_HOME/.kube/config" ]]; then
-  export KUBECONFIG="$HOST_HOME/.kube/config"
 fi
 PASSKEY_RP_ID="${PASSKEY_RP_ID:-${FRONTEND_PASSKEY_RP_ID:-kerosene-device}}"
 PASSKEY_ORIGIN="${PASSKEY_ORIGIN:-${FRONTEND_PASSKEY_ORIGIN:-android:apk-key-hash:kerosene}}"
@@ -75,7 +75,7 @@ discover_kubernetes_onion_url() {
     exec deploy/tor-onion -- sh -c 'cat /var/lib/tor/kerosene_service/hostname' 2>/dev/null || true)"
   if [[ -z "$hostname" ]]; then
     echo "Could not read Kubernetes Tor hostname from deployment/tor-onion in namespace $KEROSENE_NAMESPACE." >&2
-    echo "Run: KUBECONFIG=/home/omega/.kube/config infra/kubernetes/scripts/deploy-local-full.sh --wait" >&2
+    echo "Run: bash infra/deploy.sh --wait" >&2
     return 1
   fi
   normalize_onion_url "$hostname"

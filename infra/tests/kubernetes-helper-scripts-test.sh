@@ -18,6 +18,7 @@ fail() {
 mkdir -p "$TMP_DIR/scripts"
 cp "$REPO_ROOT/infra/kubernetes/scripts/logs.sh" "$TMP_DIR/scripts/logs.sh"
 cp "$REPO_ROOT/infra/kubernetes/scripts/status.sh" "$TMP_DIR/scripts/status.sh"
+cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/scripts/logs.sh" "$TMP_DIR/scripts/status.sh"
 
 cat > "$TMP_DIR/kubectl" <<'EOF'
@@ -83,6 +84,6 @@ grep -qF "Namespace kerosene-local does not exist" <<<"$status_output" || fail "
 : > "$LOG_FILE"
 status_output="$(CALL_LOG="$LOG_FILE" KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" KUBECTL="$TMP_DIR/kubectl" bash "$TMP_DIR/scripts/status.sh" 2>&1)" || fail "status should succeed when namespace exists"
 grep -qF "tor onion: http://teststableonionaddress.onion" <<<"$status_output" || fail "status should show current onion address"
-grep -qF "onion keys: /home/omega/.local/state/kerosene/tor/keys/local-full" <<<"$status_output" || fail "status should show stable onion key path"
+grep -qF "onion keys: $TMP_DIR/no-kube-home/.local/state/kerosene/tor/keys/local-full" <<<"$status_output" || fail "status should show stable onion key path under KEROSENE_HOST_HOME"
 
 echo "[PASS] kubernetes helper scripts"

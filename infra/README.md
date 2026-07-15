@@ -74,11 +74,16 @@ paralelo; ele não faz parte do contrato Kubernetes `local-full`.
 O onion local-full usa chaves persistentes em:
 
 ```text
-/home/omega/.local/state/kerosene/tor/keys/local-full
+$KEROSENE_HOST_HOME/.local/state/kerosene/tor/keys/local-full
 ```
 
-Enquanto esse diretório for preservado, o endereço `.onion` permanece o mesmo.
+Por padrão `KEROSENE_HOST_HOME` é `$HOME` do usuário atual. Enquanto esse
+diretório for preservado, o endereço `.onion` permanece o mesmo.
 `infra/stop.sh` e `infra/recreate.sh` não removem essas chaves.
+
+Se não houver cluster Kubernetes acessível, `infra/deploy.sh` / `infra/start.sh`
+tentam criar um cluster `kind` chamado `kerosene-local` (requer Docker).
+Desative com `KEROSENE_AUTO_CREATE_CLUSTER=0`.
 
 ## Logs
 

@@ -19,25 +19,32 @@ Deploys the complete local Kubernetes runtime into namespace kerosene-local:
 
 Options:
   --dry-run            Validate against the Kubernetes API without persisting resources.
-  --skip-image-import  Do not import kerosene/*:local images into containerd first.
+  --skip-image-import  Do not import kerosene/*:local images into the cluster first.
   --strict-image-import
                        Abort if local image import fails. By default, continue
                        with images already available to the cluster.
   --wait               Wait for workloads after apply.
+
+Environment:
+  KEROSENE_HOST_HOME           Host home used for kubeconfig and onion keys (default: $HOME)
+  KEROSENE_REPO_ROOT           Repository root for hostPath data dirs
+  KEROSENE_AUTO_CREATE_CLUSTER Create a kind cluster when no API is reachable (default: 1)
+  KUBECONFIG                   Explicit kubeconfig path
 USAGE
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 K8S_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INFRA_DIR="$(cd "$K8S_DIR/.." && pwd)"
-OVERLAY="$K8S_DIR/overlays/local-full"
+REPO_ROOT="$(cd "$INFRA_DIR/.." && pwd)"
 KUBECTL="${KUBECTL:-kubectl}"
 NS="kerosene-local"
-HOST_HOME="${KEROSENE_HOST_HOME:-/home/omega}"
-DEFAULT_KUBECONFIG="${KEROSENE_DEFAULT_KUBECONFIG:-$HOST_HOME/.kube/config}"
-if [[ -z "${KUBECONFIG:-}" && -f "$DEFAULT_KUBECONFIG" ]]; then
-  export KUBECONFIG="$DEFAULT_KUBECONFIG"
-fi
+
+# shellcheck source=infra/kubernetes/scripts/local-host-env.sh
+source "$SCRIPT_DIR/local-host-env.sh"
+kerosene_load_local_host_env "$REPO_ROOT"
+kerosene_prepare_local_host_paths
+
 KUBECTL_ARGS=()
 if [[ -n "${KUBECONFIG:-}" ]]; then
   KUBECTL_ARGS+=(--kubeconfig "$KUBECONFIG")
@@ -47,14 +54,42 @@ SKIP_IMAGE_IMPORT=0
 STRICT_IMAGE_IMPORT=0
 WAIT=0
 IMAGE_IMPORT_SUCCEEDED=0
-KUBERNETES_READY_TIMEOUT="${KEROSENE_KUBERNETES_READY_TIMEOUT:-60}"
-KUBERNETES_READY_INTERVAL="${KEROSENE_KUBERNETES_READY_INTERVAL:-2}"
+RENDER_ROOT=""
+WORK_OVERLAY=""
 
 # shellcheck source=infra/scripts/host-services.sh
 source "$INFRA_DIR/scripts/host-services.sh"
 
+cleanup() {
+  if [[ -n "$RENDER_ROOT" && -d "$RENDER_ROOT" ]]; then
+    rm -rf "$RENDER_ROOT"
+  fi
+}
+trap cleanup EXIT
+
 kubectl_cmd() {
   "$KUBECTL" "${KUBECTL_ARGS[@]}" "$@"
+}
+
+refresh_kubectl_args() {
+  KUBECTL_ARGS=()
+  if [[ -n "${KUBECONFIG:-}" ]]; then
+    KUBECTL_ARGS+=(--kubeconfig "$KUBECONFIG")
+  fi
+}
+
+render_overlay() {
+  RENDER_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/kerosene-local-full-XXXXXX")"
+  WORK_OVERLAY="$(
+    KEROSENE_RENDER_ROOT="$RENDER_ROOT" \
+      KEROSENE_HOST_HOME="$KEROSENE_HOST_HOME" \
+      KEROSENE_REPO_ROOT="$KEROSENE_REPO_ROOT" \
+      KEROSENE_LOCAL_ONION_KEYS_PATH="$KEROSENE_LOCAL_ONION_KEYS_PATH" \
+      KEROSENE_LOCAL_POSTGRES_DATA="$KEROSENE_LOCAL_POSTGRES_DATA" \
+      KEROSENE_LOCAL_BITCOIN_DATA="$KEROSENE_LOCAL_BITCOIN_DATA" \
+      bash "$SCRIPT_DIR/render-local-full-overlay.sh"
+  )"
+  echo "[*] Rendered local-full overlay with host paths under $KEROSENE_HOST_HOME"
 }
 
 record_local_image_id() {
@@ -79,7 +114,7 @@ record_local_image_id() {
 }
 
 record_tor_config_hash() {
-  local tor_manifest="$OVERLAY/local-tor-onion.yaml"
+  local tor_manifest="$WORK_OVERLAY/local-tor-onion.yaml"
   local config_hash payload
 
   if [[ ! -f "$tor_manifest" ]]; then
@@ -94,10 +129,10 @@ record_tor_config_hash() {
 }
 
 record_imported_local_image_ids() {
-  record_local_image_id deployment/server kerosene/server:local
+  record_local_image_id deployment/server localhost:5000/kerosene/server:local
   record_local_image_id deployment/kfe-service localhost:5000/kerosene/kfe-service:local
   record_local_image_id statefulset/mpc-sidecar kerosene/mpc-sidecar:local
-  record_local_image_id deployment/web-page kerosene/web-page:local
+  record_local_image_id deployment/web-page localhost:5000/kerosene/web-page:local
   record_local_image_id deployment/tor-onion kerosene/tor:local
 }
 
@@ -106,41 +141,41 @@ cleanup_stale_local_full_resources() {
 }
 
 require_cluster_access() {
-  local context
-  local deadline now
-
-  if ! context="$(kubectl_cmd config current-context 2>/dev/null)"; then
-    cat >&2 <<'EOF'
-[!] Kubernetes API is not reachable or no kubectl context is selected.
-    Check the active context:
-      kubectl config current-context
-    Start or select your local cluster, then retry:
-      bash infra/start.sh
-EOF
+  if ! \
+    KEROSENE_HOST_HOME="$KEROSENE_HOST_HOME" \
+    KEROSENE_REPO_ROOT="$KEROSENE_REPO_ROOT" \
+    KEROSENE_AUTO_CREATE_CLUSTER="$KEROSENE_AUTO_CREATE_CLUSTER" \
+    KEROSENE_KUBERNETES_READY_TIMEOUT="${KEROSENE_KUBERNETES_READY_TIMEOUT:-60}" \
+    KEROSENE_KUBERNETES_READY_INTERVAL="${KEROSENE_KUBERNETES_READY_INTERVAL:-2}" \
+    KEROSENE_KIND_CLUSTER_NAME="$KEROSENE_KIND_CLUSTER_NAME" \
+    KEROSENE_KIND_KUBECONFIG="$KEROSENE_KIND_KUBECONFIG" \
+    KUBECONFIG="${KUBECONFIG:-}" \
+    KUBECTL="$KUBECTL" \
+    bash "$SCRIPT_DIR/ensure-local-cluster.sh"
+  then
     exit 1
   fi
 
-  deadline=$(( $(date +%s) + KUBERNETES_READY_TIMEOUT ))
-  while ! kubectl_cmd get --raw=/readyz >/dev/null 2>&1; do
-    now=$(date +%s)
-    if (( now >= deadline )); then
-      break
-    fi
-    echo "[*] Waiting for Kubernetes API for context: $context"
-    sleep "$KUBERNETES_READY_INTERVAL"
-  done
-
+  # ensure-local-cluster runs in a subshell; re-pick a working kubeconfig here.
   if ! kubectl_cmd get --raw=/readyz >/dev/null 2>&1; then
-    cat >&2 <<EOF
-[!] Kubernetes API is not reachable for context: $context
-    Check cluster status:
-      kubectl cluster-info
-    Start or select your local cluster, then retry:
-      bash infra/start.sh
-EOF
-    exit 1
+    if [[ -f "$KEROSENE_KIND_KUBECONFIG" ]]; then
+      export KUBECONFIG="$KEROSENE_KIND_KUBECONFIG"
+      refresh_kubectl_args
+    elif [[ -f "$KEROSENE_HOST_HOME/.kube/config" ]]; then
+      export KUBECONFIG="$KEROSENE_HOST_HOME/.kube/config"
+      refresh_kubectl_args
+    fi
   fi
 
+  local context
+  if ! context="$(kubectl_cmd config current-context 2>/dev/null)"; then
+    echo "[!] Kubernetes context still missing after cluster ensure." >&2
+    exit 1
+  fi
+  if ! kubectl_cmd get --raw=/readyz >/dev/null 2>&1; then
+    echo "[!] Kubernetes API is not reachable for context: $context" >&2
+    exit 1
+  fi
   echo "[*] Kubernetes context: $context"
 }
 
@@ -158,16 +193,61 @@ done
 
 ensure_local_host_services
 bash "$SCRIPT_DIR/validate-local-full.sh"
+render_overlay
 require_cluster_access
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[*] Server-side dry-run for local-full overlay"
-  kubectl_cmd apply -k "$OVERLAY" --dry-run=server
+  # Server-side dry-run does not create the namespace for later objects in the
+  # same batch. Ensure it exists first so namespaced resources can be validated.
+  if ! kubectl_cmd get namespace "$NS" >/dev/null 2>&1; then
+    echo "[*] Creating namespace $NS so server-side dry-run can validate namespaced objects"
+    kubectl_cmd create namespace "$NS"
+  fi
+  kubectl_cmd apply -k "$WORK_OVERLAY" --server-side --dry-run=server
+  echo "[+] local-full dry-run completed."
   exit 0
 fi
 
+require_local_app_images() {
+  # Abort apply when required local app images are missing. This prevents the
+  # previous failure mode: import dies early, deploy continues, pods sit in
+  # ImagePullBackOff forever.
+  local missing=0
+  local image
+  local required=(
+    "kerosene/server:local"
+    "kerosene/kfe-service:local"
+    "localhost:5000/kerosene/server:local"
+    "localhost:5000/kerosene/kfe-service:local"
+    "kerosene/mpc-sidecar:local"
+    "kerosene/tor:local"
+  )
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "[!] Docker CLI not found; cannot verify local application images." >&2
+    return 1
+  fi
+
+  for image in "${required[@]}"; do
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+      echo "[!] Required local image missing: $image" >&2
+      missing=1
+    fi
+  done
+
+  if [[ "$missing" -eq 1 ]]; then
+    echo "[!] Refusing to apply local-full without the required app images." >&2
+    echo "[!] Fix the image build/import and retry:" >&2
+    echo "      bash infra/kubernetes/scripts/import-local-docker-images.sh" >&2
+    echo "      bash infra/deploy.sh --wait" >&2
+    return 1
+  fi
+  return 0
+}
+
 if [[ "$SKIP_IMAGE_IMPORT" -eq 0 ]]; then
-  echo "[*] Importing local application images into Kubernetes containerd namespace"
+  echo "[*] Importing local application images into the Kubernetes container runtime"
   if bash "$SCRIPT_DIR/import-local-docker-images.sh"; then
     IMAGE_IMPORT_SUCCEEDED=1
   else
@@ -176,15 +256,21 @@ if [[ "$SKIP_IMAGE_IMPORT" -eq 0 ]]; then
       echo "[!] Aborting because --strict-image-import was requested." >&2
       exit 1
     fi
+    echo "[!] Checking whether usable local images already exist..." >&2
+    if ! require_local_app_images; then
+      exit 1
+    fi
     echo "[!] Continuing with images already available to the cluster." >&2
-    echo "[!] If rollout reports ImagePullBackOff or stale images, rerun after importing images with sudo/containerd access." >&2
   fi
 else
   echo "[*] Skipping image import by request"
+  if ! require_local_app_images; then
+    exit 1
+  fi
 fi
 
 echo "[*] Applying local-full overlay"
-kubectl_cmd apply -k "$OVERLAY"
+kubectl_cmd apply -k "$WORK_OVERLAY"
 cleanup_stale_local_full_resources
 record_tor_config_hash
 
@@ -209,6 +295,10 @@ fi
 
 echo "[+] local-full deployment submitted."
 echo "[+] clear-net service exposure: disabled"
+echo "[+] host data:"
+echo "    postgres: $KEROSENE_LOCAL_POSTGRES_DATA"
+echo "    bitcoin:  $KEROSENE_LOCAL_BITCOIN_DATA"
+echo "    onion keys: $KEROSENE_LOCAL_ONION_KEYS_PATH"
 if kubectl_cmd -n "$NS" get deploy/tor-onion >/dev/null 2>&1; then
   onion_hostname="$(kubectl_cmd -n "$NS" exec deploy/tor-onion -- sh -c 'cat /var/lib/tor/kerosene_service/hostname' 2>/dev/null || true)"
   if [[ -n "$onion_hostname" ]]; then

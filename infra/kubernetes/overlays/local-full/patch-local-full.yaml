@@ -8,7 +8,9 @@ spec:
     spec:
       containers:
         - name: server
-          imagePullPolicy: Always
+          # kind load injects images into the node; Never avoids pull against
+          # a non-existent localhost:5000 registry on the workstation cluster.
+          imagePullPolicy: Never
           resources:
             requests:
               cpu: 250m
@@ -27,7 +29,7 @@ spec:
     spec:
       containers:
         - name: kfe-service
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           resources:
             requests:
               cpu: 250m
@@ -46,7 +48,7 @@ spec:
     spec:
       containers:
         - name: web-page
-          imagePullPolicy: Always
+          imagePullPolicy: Never
           volumeMounts:
             - name: web-page-nginx-conf
               mountPath: /etc/nginx/conf.d/default.conf
@@ -151,7 +153,8 @@ data:
   LIGHTNING_LND_TLS_ENABLED: "false"
   BITCOIN_NETWORK: "testnet4"
   BITCOIN_RPC_ENABLED: "true"
-  BITCOIN_RPC_REQUIRED: "false"
+  # Beta testnet: fail closed if Bitcoin Core is unreachable.
+  BITCOIN_RPC_REQUIRED: "true"
   BITCOIN_RPC_PRUNED_REQUIRED: "false"
   BITCOIN_RPC_URL: "http://bitcoin-core:8332"
   BITCOIN_RPC_WALLET: "kerosene"
@@ -195,12 +198,18 @@ data:
   LIGHTNING_LND_TLS_ENABLED: "false"
   BITCOIN_NETWORK: "testnet4"
   BITCOIN_RPC_ENABLED: "true"
-  BITCOIN_RPC_REQUIRED: "false"
+  BITCOIN_RPC_REQUIRED: "true"
   BITCOIN_RPC_PRUNED_REQUIRED: "false"
   BITCOIN_RPC_URL: "http://bitcoin-core:8332"
   BITCOIN_RPC_WALLET: "kerosene"
   TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
   KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
+  KFE_BITCOIN_CORE_WALLETS_BOOTSTRAP_ENABLED: "true"
+  KFE_BITCOIN_VALIDATE_NETWORK_ENABLED: "true"
+  KFE_NETWORK_MONITOR_ENABLED: "true"
+  KFE_NETWORK_MONITOR_FIXED_DELAY_MS: "15000"
+  KFE_NETWORK_MONITOR_INITIAL_DELAY_MS: "10000"
+  KFE_NETWORK_MONITOR_ONCHAIN_MIN_CONFIRMATIONS: "1"
   KFE_PAYMENT_REQUEST_MONITOR_FIXED_DELAY_MS: "3000"
   KFE_PAYMENT_REQUEST_MONITOR_INITIAL_DELAY_MS: "2000"
   BITCOIN_ZMQ_ENABLED: "false"
@@ -214,3 +223,18 @@ data:
   RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
   KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED: "true"
   QUORUM_ALLOW_LOCAL_SIMULATION: "true"
+  # On-chain outbound: local Bitcoin Core is a first-class PSBT signer seat (walletprocesspsbt).
+  # Production multiparty deploys set QUORUM_PSBT_SIGNER_URLS and raise required signatures.
+  QUORUM_PSBT_LOCAL_CORE_SIGNER_ENABLED: "true"
+  QUORUM_PSBT_REQUIRED_SIGNATURES: "1"
+  QUORUM_PSBT_LOCAL_CORE_SIGNER_ID: "bitcoin-core-wallet"
+  QUORUM_PSBT_REQUIRE_SIGNER_IDENTITY: "false"
+  # Beta onramp directory only — third-party links, Kerosene does not process fiat.
+  # Keys map to provider aliases in the Flutter receive gateway (moonpay, transak, …)
+  # plus generic buy/sell/help.
+  KFE_ONRAMP_URL_BUY: "https://www.bitcoin.com/get-started/how-to-buy-bitcoin/"
+  KFE_ONRAMP_URL_SELL: "https://www.bitcoin.com/get-started/how-to-sell-bitcoin/"
+  KFE_ONRAMP_URL_HELP: "https://bitcoin.org/en/exchanges"
+  KFE_ONRAMP_URL_MOONPAY: "https://www.moonpay.com/buy/btc"
+  KFE_ONRAMP_URL_TRANSAK: "https://global.transak.com/"
+  KFE_ONRAMP_URL_ONRAMPER: "https://www.onramper.com/"

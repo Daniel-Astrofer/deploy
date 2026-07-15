@@ -23,6 +23,7 @@ assert_contains() {
 
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/scripts" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/kubernetes/overlays/local-full"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
+cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
 
 cat > "$TMP_DIR/infra/scripts/host-services.sh" <<'EOF'
@@ -40,20 +41,44 @@ echo "validated"
 EOF
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/validate-local-full.sh"
 
+cat > "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+echo "$TMP_DIR/infra/kubernetes/overlays/local-full"
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh"
+
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+cat >&2 <<'MSG'
+[!] Kubernetes API is not reachable or no kubectl context is selected.
+    Check the active context:
+      kubectl config current-context
+    Start or select your local cluster, then retry:
+      bash infra/start.sh
+MSG
+exit 1
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh"
+
 cat > "$TMP_DIR/bin/kubectl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ "${1:-}" == "config" && "${2:-}" == "current-context" ]]; then
-  echo "error: current-context is not set" >&2
-  exit 1
-fi
 echo "unexpected kubectl call: $*" >&2
 exit 42
 EOF
 chmod +x "$TMP_DIR/bin/kubectl"
 
 set +e
-output="$(KEROSENE_KUBERNETES_READY_TIMEOUT=0 KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" PATH="$TMP_DIR/bin:$PATH" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" --dry-run 2>&1)"
+output="$(
+  KEROSENE_AUTO_CREATE_CLUSTER=0 \
+  KEROSENE_KUBERNETES_READY_TIMEOUT=0 \
+  KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" \
+  PATH="$TMP_DIR/bin:$PATH" \
+  KUBECTL=kubectl \
+  "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" --dry-run 2>&1
+)"
 status=$?
 set -e
 
@@ -65,20 +90,52 @@ assert_contains "$output" "host services checked"
 
 mkdir -p "$TMP_DIR/with-kube-home/.kube"
 touch "$TMP_DIR/with-kube-home/.kube/config"
+
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "[*] Kubernetes context: fake-context"
+exit 0
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh"
+
 cat > "$TMP_DIR/bin/kubectl" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "$*" >> "$CALL_LOG"
-if [[ "${1:-}" == "--kubeconfig" && "${3:-}" == "config" && "${4:-}" == "current-context" ]]; then
-  echo "fake-context"
-  exit 0
+
+# Strip leading --kubeconfig <path> so later parsing is uniform.
+if [[ "${1:-}" == "--kubeconfig" ]]; then
+  shift 2
 fi
-if [[ "${1:-}" == "--kubeconfig" && "${3:-}" == "get" && "${4:-}" == "--raw=/readyz" ]]; then
-  exit 0
-fi
-if [[ "${1:-}" == "--kubeconfig" && "${3:-}" == "apply" ]]; then
-  exit 0
-fi
+
+case "${1:-}" in
+  config)
+    if [[ "${2:-}" == "current-context" ]]; then
+      echo "fake-context"
+      exit 0
+    fi
+    ;;
+  get)
+    if [[ "${2:-}" == "--raw=/readyz" ]]; then
+      exit 0
+    fi
+    if [[ "${2:-}" == "namespace" || "${2:-}" == "ns" ]]; then
+      # Namespace not yet present on first dry-run.
+      exit 1
+    fi
+    ;;
+  create)
+    if [[ "${2:-}" == "namespace" ]]; then
+      echo "namespace created"
+      exit 0
+    fi
+    ;;
+  apply)
+    exit 0
+    ;;
+esac
+
 echo "unexpected kubectl call: $*" >&2
 exit 42
 EOF
@@ -86,8 +143,15 @@ chmod +x "$TMP_DIR/bin/kubectl"
 
 CALL_LOG="$TMP_DIR/kubectl-default.log"
 : > "$CALL_LOG"
-output="$(KEROSENE_HOST_HOME="$TMP_DIR/with-kube-home" PATH="$TMP_DIR/bin:$PATH" CALL_LOG="$CALL_LOG" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" --dry-run 2>&1)" || fail "deploy-local-full.sh should use default host kubeconfig"
+output="$(
+  KEROSENE_HOST_HOME="$TMP_DIR/with-kube-home" \
+  PATH="$TMP_DIR/bin:$PATH" \
+  CALL_LOG="$CALL_LOG" \
+  KUBECTL=kubectl \
+  "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" --dry-run 2>&1
+)" || fail "deploy-local-full.sh should use default host kubeconfig"
 assert_contains "$output" "Kubernetes context: fake-context"
-grep -qF -- "--kubeconfig $TMP_DIR/with-kube-home/.kube/config config current-context" "$CALL_LOG" || fail "deploy should pass the default host kubeconfig to kubectl"
+grep -qF -- "--kubeconfig $TMP_DIR/with-kube-home/.kube/config" "$CALL_LOG" \
+  || fail "deploy should pass the default host kubeconfig to kubectl"
 
 echo "[PASS] deploy-local-full.sh cluster preflight"

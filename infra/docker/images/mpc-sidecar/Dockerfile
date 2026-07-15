@@ -6,9 +6,10 @@ WORKDIR /app
 # Install protobuf tooling for generated gRPC bindings.
 RUN apk add --no-cache git build-base protoc protobuf-dev
 
-# Install protoc generators
-RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+# Pin protoc generators to versions compatible with Go 1.24.
+# (@latest protoc-gen-go-grpc requires Go >= 1.25 and breaks the local build.)
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.5 && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
 
 COPY go.mod go.sum* ./
 RUN go mod download

@@ -47,7 +47,10 @@ quando a imagem muda e mantém os workloads parados quando a imagem continua a
 mesma.
 
 O onion fica estável enquanto as chaves persistidas em
-`/home/omega/.local/state/kerosene/tor/keys/local-full` forem preservadas.
+`$HOME/.local/state/kerosene/tor/keys/local-full` (ou
+`KEROSENE_LOCAL_ONION_KEYS_PATH`) forem preservadas. Paths de hostPath do
+overlay local-full são reescritos automaticamente a partir de `$HOME` e da
+raiz do repositório.
 
 ## Helpers internos
 

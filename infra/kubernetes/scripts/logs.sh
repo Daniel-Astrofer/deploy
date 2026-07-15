@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." 2>/dev/null && pwd || pwd)"
+# shellcheck source=infra/kubernetes/scripts/local-host-env.sh
+source "$SCRIPT_DIR/local-host-env.sh"
+kerosene_load_local_host_env "$REPO_ROOT"
+
 KUBECTL="${KUBECTL:-kubectl}"
 NS="${KEROSENE_NAMESPACE:-kerosene-local}"
 TAIL="${KEROSENE_LOG_TAIL:-200}"
@@ -11,17 +17,10 @@ TARGET_SET=0
 OUTPUT_DIR=""
 LOG_RECONNECT="${KEROSENE_LOG_RECONNECT:-1}"
 LOG_RECONNECT_DELAY="${KEROSENE_LOG_RECONNECT_DELAY:-2}"
-HOST_HOME="${KEROSENE_HOST_HOME:-/home/omega}"
-DEFAULT_KUBECONFIG="${KEROSENE_DEFAULT_KUBECONFIG:-$HOST_HOME/.kube/config}"
-if [[ -z "${KUBECONFIG:-}" && -f "$DEFAULT_KUBECONFIG" ]]; then
-  export KUBECONFIG="$DEFAULT_KUBECONFIG"
-fi
 KUBECTL_ARGS=()
 if [[ -n "${KUBECONFIG:-}" ]]; then
   KUBECTL_ARGS+=(--kubeconfig "$KUBECONFIG")
 fi
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." 2>/dev/null && pwd || pwd)"
 
 CORE_TARGETS=(server kfe-service web-page mpc-sidecar tor-onion)
 FULL_TARGETS=(server kfe-service web-page mpc-sidecar tor-onion local-postgres local-redis local-vault local-bitcoin local-lnd-placeholder)

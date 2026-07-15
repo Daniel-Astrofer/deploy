@@ -24,6 +24,7 @@ assert_contains() {
 
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/scripts" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/kubernetes/overlays/local-full"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
+cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh"
 
 cat > "$TMP_DIR/infra/scripts/host-services.sh" <<'EOF'
@@ -38,6 +39,21 @@ set -euo pipefail
 echo "validated"
 EOF
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/validate-local-full.sh"
+
+cat > "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+echo "$TMP_DIR/infra/kubernetes/overlays/local-full"
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh"
+
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "[*] Kubernetes context: test-context"
+exit 0
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh"
 
 cat > "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -79,7 +95,13 @@ EOF
 chmod +x "$TMP_DIR/bin/kubectl"
 
 set +e
-output="$(KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" KEROSENE_KUBERNETES_READY_TIMEOUT=0 PATH="$TMP_DIR/bin:$PATH" KUBECTL=kubectl "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" 2>&1)"
+output="$(
+  KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" \
+  KEROSENE_KUBERNETES_READY_TIMEOUT=0 \
+  PATH="$TMP_DIR/bin:$PATH" \
+  KUBECTL=kubectl \
+  "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" 2>&1
+)"
 status=$?
 set -e
 
@@ -87,6 +109,7 @@ set -e
 
 assert_contains "$output" "Image import failed."
 assert_contains "$output" "Continuing with images already available to the cluster."
-grep -qxF "apply -k $TMP_DIR/infra/kubernetes/overlays/local-full" "$LOG_FILE" || fail "overlay was not applied after import fallback"
+grep -qxF "apply -k $TMP_DIR/infra/kubernetes/overlays/local-full" "$LOG_FILE" \
+  || fail "overlay was not applied after import fallback"
 
 echo "[PASS] deploy-local-full.sh image import fallback"
