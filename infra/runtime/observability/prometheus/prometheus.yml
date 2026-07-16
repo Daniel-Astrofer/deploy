@@ -1,6 +1,10 @@
 global:
   scrape_interval: 15s
 
+rule_files:
+  - /etc/prometheus/financial-alerts.yml
+  - /etc/prometheus/kfe-balance-alerts.yml
+
 scrape_configs:
   - job_name: kerosene-app
     metrics_path: /actuator/prometheus
@@ -9,3 +13,10 @@ scrape_configs:
           - kerosene-app-is:8080
           - kerosene-app-ch:8080
           - kerosene-app-sg:8080
+
+  # Docker compose / local-full style service names (optional; ignored if DNS missing).
+  - job_name: kerosene-kfe
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets:
+          - kfe-service:8080

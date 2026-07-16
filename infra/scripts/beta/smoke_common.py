@@ -42,6 +42,7 @@ def http_json(
     body: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
     expected: int | tuple[int, ...] = 200,
+    timeout: float = 45,
 ) -> dict[str, Any]:
     data = None if body is None else json.dumps(body).encode("utf-8")
     req_headers = {"Accept": "application/json"}
@@ -51,7 +52,7 @@ def http_json(
         req_headers.update(headers)
     req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=45) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             status = resp.status
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:

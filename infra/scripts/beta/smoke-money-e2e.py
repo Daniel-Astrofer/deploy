@@ -21,6 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from smoke_common import (  # noqa: E402
     KFE,
+    KUBECTL,
+    NS,
     SERVER,
     auth_headers,
     bitcoin_cli,
@@ -33,6 +35,7 @@ from smoke_common import (  # noqa: E402
     stop_port_forwards,
     warn,
 )
+import subprocess
 
 FUND_SATS = int(os.environ.get("SMOKE_FUND_SATS", "50000"))  # 0.0005 BTC
 POLL_SECONDS = int(os.environ.get("SMOKE_POLL_SECONDS", "90"))
@@ -43,6 +46,53 @@ def envelope_data(resp: dict) -> object:
     if "data" in resp:
         return resp["data"]
     return resp
+
+
+def psql_count_credit_movements_for_txid(txid: str) -> dict[str, int] | None:
+    """Count AVAILABLE-side credit movements linked to transactions with this blockchain txid."""
+    sql = (
+        "SELECT bm.movement_type, COUNT(*) "
+        "FROM financial.balance_movements bm "
+        "JOIN financial.transactions_master t ON t.id = bm.transaction_id "
+        f"WHERE t.blockchain_txid = '{txid}' "
+        "AND bm.movement_type IN ("
+        "'CREDIT_INBOUND','CREDIT_PAYMENT_REQUEST',"
+        "'CREDIT_CUSTODIAL_DEPOSIT','CREDIT','CREDIT_KEROSENE_FEE'"
+        ") GROUP BY bm.movement_type;"
+    )
+    cmd = [
+        KUBECTL,
+        "-n",
+        NS,
+        "exec",
+        "local-postgres-0",
+        "--",
+        "psql",
+        "-U",
+        "kerosene",
+        "-d",
+        "kerosene",
+        "-t",
+        "-A",
+        "-F",
+        ",",
+        "-c",
+        sql,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return None
+    out: dict[str, int] = {}
+    for line in (result.stdout or "").strip().splitlines():
+        line = line.strip()
+        if not line or "," not in line:
+            continue
+        mtype, cnt = line.split(",", 1)
+        try:
+            out[mtype] = int(cnt)
+        except ValueError:
+            continue
+    return out
 
 
 def main() -> None:
@@ -203,6 +253,19 @@ def main() -> None:
                 f"(status={last_status}). Testnet confirms can lag; "
                 "address+txid funding still validates create/fund path."
             )
+
+        # --- dual-credit guard: available credit movements for this chain tx ≤ 1 each type ---
+        try:
+            credit_rows = psql_count_credit_movements_for_txid(txid)
+            if credit_rows is not None:
+                for mtype, cnt in credit_rows.items():
+                    if cnt > 1:
+                        fail(f"dual credit detected type={mtype} count={cnt} txid={txid}")
+                ok(f"credit movement counts ok for fund tx: {credit_rows}")
+            else:
+                warn("could not query balance_movements (psql); skip dual-credit assert")
+        except Exception as exc:  # noqa: BLE001 — smoke must not crash on optional assert infra
+            warn(f"dual-credit assert skipped: {exc}")
 
         # --- configure app pin (needed for transfers) ---
         pin_resp = http_json(

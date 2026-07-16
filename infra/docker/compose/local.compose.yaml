@@ -1055,6 +1055,8 @@ services:
       - "${PROMETHEUS_PORT:-19090}:9090"
     volumes:
       - ../../runtime/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+      - ../../runtime/observability/prometheus/financial-alerts.yml:/etc/prometheus/financial-alerts.yml:ro,z
+      - ../../runtime/observability/prometheus/kfe-balance-alerts.yml:/etc/prometheus/kfe-balance-alerts.yml:ro,z
       - prometheus_data:/prometheus
     networks: [net_ingress, net_tor]
     depends_on:

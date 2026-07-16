@@ -1,0 +1,93 @@
+# KFE dual-ledger / cold-balance alerts.
+# Metric names follow Micrometer → Prometheus: dots become underscores, counters get _total.
+# Counters are registered lazily on first increment — rules tolerate missing series.
+
+groups:
+  - name: kerosene-kfe-balance
+    rules:
+      - alert: KfeCustodialBalanceDrift
+        expr: increase(kfe_balance_drift_events_total[30m]) > 0
+        for: 15m
+        labels:
+          severity: high
+          domain: kfe-balance
+        annotations:
+          summary: "Custodial available vs observed drift above threshold"
+          description: >-
+            KfeBalanceReconciliationJob recorded dual-ledger drift events for 15m+.
+            available_sats and observed_sats diverge beyond drift-threshold-sats.
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md#custodial-drift"
+
+      - alert: KfeLockedFundsStuck
+        expr: increase(kfe_balance_locked_stuck_total[30m]) > 0
+        for: 10m
+        labels:
+          severity: high
+          domain: kfe-balance
+        annotations:
+          summary: "Wallets with stuck locked_sats and open EXECUTING/RECON txs"
+          description: >-
+            Locked funds remain with long-running outbound/reconciling transactions.
+            Do not auto-unlock — follow runbook.
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md#locked-stuck"
+
+      - alert: KfeDualCreditSkipSpike
+        # High skip rate is healthy (idempotency working). Spike *with* concurrent
+        # available growth anomalies is the risk — this alert is informational/high.
+        expr: increase(kfe_credit_dual_skip_total[15m]) > 50
+        for: 10m
+        labels:
+          severity: medium
+          domain: kfe-balance
+        annotations:
+          summary: "High dual-path credit skip volume"
+          description: >-
+            Many credit attempts were skipped because a movement already existed.
+            Expected under retries; investigate if user balances look wrong.
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md#dual-credit"
+
+      - alert: KfeOptimisticDeferredSpike
+        expr: increase(kfe_zmq_optimistic_deferred_total[15m]) > 30
+        for: 15m
+        labels:
+          severity: medium
+          domain: kfe-balance
+        annotations:
+          summary: "ZMQ optimistic observed writes frequently deferred"
+          description: >-
+            OPTIMISTIC_DELTA probes are being refused (zero wipe, clobber-live, etc.).
+            Full cold observe should still heal; check scantxoutset / ZMQ health.
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md#optimistic-deferred"
+
+      - alert: KfeColdProbeDeferredDominance
+        # When deferred writes dominate written for LIVE/OPTIMISTIC cold probes.
+        expr: |
+          (
+            sum(increase(kfe_cold_probe_total{result="deferred"}[30m]))
+            /
+            clamp_min(sum(increase(kfe_cold_probe_total[30m])), 1)
+          ) > 0.8
+          and sum(increase(kfe_cold_probe_total[30m])) > 20
+        for: 20m
+        labels:
+          severity: medium
+          domain: kfe-balance
+        annotations:
+          summary: "Cold/on-chain probes mostly deferred"
+          description: >-
+            More than 80% of balance probes in 30m were deferred. Chain may be
+            busy (scantxoutset) or quality gates are blocking all writes.
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md#probe-deferred"
+
+      - alert: KfeFeeIdempotentSkipNoise
+        expr: increase(kfe_fee_skip_idempotent_total[1h]) > 100
+        for: 30m
+        labels:
+          severity: low
+          domain: kfe-balance
+        annotations:
+          summary: "Very high kerosene fee idempotent skips"
+          description: >-
+            Fee settlement is repeatedly skipping already-settled fees. Usually
+            healthy; if SYSTEM_PROFIT available is wrong, audit CREDIT_KEROSENE_FEE rows.
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md#fee-idempotent"
