@@ -401,8 +401,9 @@ spec:
                 -port="$p2p_port" \
                 -rpcuser="$BITCOIN_RPC_USER" \
                 -rpcpassword="$BITCOIN_RPC_PASSWORD" \
-                -zmqpubrawblock=tcp://0.0.0.0:28332 \
-                -zmqpubrawtx=tcp://0.0.0.0:28333 &
+                -zmqpubrawtx=tcp://0.0.0.0:28332 \
+                -zmqpubhashblock=tcp://0.0.0.0:28333 \
+                -zmqpubrawblock=tcp://0.0.0.0:28334 &
               pid="$!"
 
               stop_bitcoind() {
