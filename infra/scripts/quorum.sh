@@ -44,7 +44,8 @@ stop_quorum() {
   scale_if_present deployment/local-redis 0
   scale_if_present deployment/local-vault 0
   scale_if_present deployment/local-bitcoin 0
-  scale_if_present deployment/local-lnd-placeholder 0
+  scale_if_present deployment/local-lnd 0
+  scale_if_present deployment/local-lnd-peer 0
   echo "[+] Local quorum workloads stopped. Persistent local data is preserved."
 }
 

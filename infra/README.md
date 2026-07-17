@@ -97,7 +97,7 @@ bash infra/logs.sh --follow
 Esse comando cria um diretório em `infra/runtime/logs/kubernetes/<timestamp>/`
 com `server.log`, `kfe-service.log`, `web-page.log`, `mpc-sidecar.log`,
 `tor-onion.log`, `local-postgres.log`, `local-redis.log`, `local-vault.log`,
-`local-bitcoin.log`, `local-lnd-placeholder.log` e `index.txt`.
+`local-bitcoin.log`, `local-lnd.log`, `local-lnd-peer.log` e `index.txt`.
 
 Para logs de um serviço só:
 

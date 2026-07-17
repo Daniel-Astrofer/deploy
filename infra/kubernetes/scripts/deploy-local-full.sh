@@ -14,7 +14,7 @@ Deploys the complete local Kubernetes runtime into namespace kerosene-local:
   - Redis
   - Vault dev
   - Bitcoin Core testnet4
-  - LND local placeholder
+  - LND (testnet4) + peer for local liquidity
   - Tor hidden service for the web-page API gateway
   - Grafana + Prometheus (namespace monitoring; always ensured)
 
@@ -215,12 +215,56 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
+# True if the image exists in the local Docker engine.
+local_docker_has_image() {
+  local image="$1"
+  command -v docker >/dev/null 2>&1 || return 1
+  docker image inspect "$image" >/dev/null 2>&1
+}
+
+# True if the image is already loaded into the kind node containerd (k8s.io).
+# Host Docker can be empty after a failed rebuild while kind still has usable tags.
+local_kind_has_image() {
+  local image="$1"
+  local kind_name="${KEROSENE_KIND_CLUSTER_NAME:-kerosene-local}"
+  local node="kerosene-local-control-plane"
+  local candidates=("$image")
+
+  # crictl/ctr usually store short docker.io names with an explicit registry prefix.
+  if [[ "$image" != */*/* && "$image" == */* ]]; then
+    candidates+=("docker.io/$image")
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    return 1
+  fi
+  if ! docker inspect "$node" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if docker exec "$node" crictl inspecti "$candidate" >/dev/null 2>&1; then
+      return 0
+    fi
+    if docker exec "$node" ctr -n k8s.io images check "$candidate" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 require_local_app_images() {
   # Abort apply when required local app images are missing. This prevents the
   # previous failure mode: import dies early, deploy continues, pods sit in
   # ImagePullBackOff forever.
+  #
+  # Accept either host Docker tags (normal import path) or images already present
+  # in the kind node. Builds write to Docker on /var; when that disk is full the
+  # rebuild fails even though kind still holds the last good tags.
   local missing=0
   local image
+  local found_where
   local required=(
     "kerosene/server:local"
     "kerosene/kfe-service:local"
@@ -236,17 +280,30 @@ require_local_app_images() {
   fi
 
   for image in "${required[@]}"; do
-    if ! docker image inspect "$image" >/dev/null 2>&1; then
+    found_where=""
+    if local_docker_has_image "$image"; then
+      found_where="docker"
+    elif local_kind_has_image "$image"; then
+      found_where="kind"
+    else
       echo "[!] Required local image missing: $image" >&2
       missing=1
+      continue
+    fi
+    if [[ "$found_where" == "kind" ]]; then
+      echo "[*] Found $image in kind node (host Docker copy not required)"
     fi
   done
 
   if [[ "$missing" -eq 1 ]]; then
     echo "[!] Refusing to apply local-full without the required app images." >&2
     echo "[!] Fix the image build/import and retry:" >&2
+    echo "      # If /var is full (Docker data-root), free space or relocate Docker first:" >&2
+    echo "      df -h /var && docker system df" >&2
+    echo "      docker builder prune -af" >&2
     echo "      bash infra/kubernetes/scripts/import-local-docker-images.sh" >&2
     echo "      bash infra/deploy.sh --wait" >&2
+    echo "[!] Or deploy with images already in kind: bash infra/deploy.sh --skip-image-import --wait" >&2
     return 1
   fi
   return 0

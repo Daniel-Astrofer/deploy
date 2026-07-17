@@ -332,6 +332,9 @@ metadata:
 spec:
   accessModes: ["ReadWriteOnce"]
   storageClassName: kerosene-local
+  # Bind the static hostPath PV explicitly (Retain reclaim leaves PV Released
+  # after PVC delete; volumeName avoids waiting on a missing StorageClass).
+  volumeName: local-bitcoin-data
   resources:
     requests:
       storage: 400Gi

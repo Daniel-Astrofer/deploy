@@ -24,7 +24,8 @@ wait_for statefulset local-postgres
 wait_for deployment local-redis
 wait_for deployment local-vault
 wait_for deployment local-bitcoin
-wait_for deployment local-lnd-placeholder
+wait_for deployment local-lnd
+wait_for deployment local-lnd-peer
 wait_for statefulset mpc-sidecar
 wait_for deployment server
 wait_for deployment kfe-service

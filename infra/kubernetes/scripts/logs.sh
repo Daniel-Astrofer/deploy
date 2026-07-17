@@ -23,7 +23,7 @@ if [[ -n "${KUBECONFIG:-}" ]]; then
 fi
 
 CORE_TARGETS=(server kfe-service web-page mpc-sidecar tor-onion)
-FULL_TARGETS=(server kfe-service web-page mpc-sidecar tor-onion local-postgres local-redis local-vault local-bitcoin local-lnd-placeholder)
+FULL_TARGETS=(server kfe-service web-page mpc-sidecar tor-onion local-postgres local-redis local-vault local-bitcoin local-lnd local-lnd-peer)
 
 usage() {
   cat <<'USAGE'
@@ -33,7 +33,7 @@ Targets:
   all, full        Complete local-full runtime.
   core             server, kfe-service, web-page, mpc-sidecar, tor-onion.
   server, kfe-service, web-page, mpc-sidecar, tor-onion
-  local-postgres, local-redis, local-vault, local-bitcoin, local-lnd-placeholder
+  local-postgres, local-redis, local-vault, local-bitcoin, local-lnd, local-lnd-peer
 
 Examples:
   bash infra/logs.sh
@@ -163,7 +163,8 @@ resource_for() {
     redis|local-redis) echo "deployment/local-redis" ;;
     vault|local-vault) echo "deployment/local-vault" ;;
     bitcoin|local-bitcoin) echo "deployment/local-bitcoin" ;;
-    lnd|local-lnd-placeholder) echo "deployment/local-lnd-placeholder" ;;
+    lnd|local-lnd) echo "deployment/local-lnd" ;;
+    lnd-peer|local-lnd-peer) echo "deployment/local-lnd-peer" ;;
     *)
       return 1
       ;;

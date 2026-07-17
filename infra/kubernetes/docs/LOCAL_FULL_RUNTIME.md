@@ -27,7 +27,8 @@ It deploys:
 - `Deployment/local-redis`
 - `Deployment/local-vault`
 - `Deployment/local-bitcoin`
-- `Deployment/local-lnd-placeholder`
+- `Deployment/local-lnd`
+- `Deployment/local-lnd-peer`
 
 It also provides local-only Kubernetes Secret objects for development, relaxed namespace-internal NetworkPolicy rules, a Tor-only public entrypoint, and an `emptyDir` replacement for the MPC shard PVC. This avoids the `StorageClass` blocker on a single-node workstation cluster while keeping host ports out of the Kubernetes service contract.
 
