@@ -10,6 +10,10 @@ rule_files:
 scrape_configs:
   - job_name: kerosene-app
     metrics_path: /actuator/prometheus
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '^system_.*'
+        action: drop
     static_configs:
       - targets:
           - kerosene-app-is:8080
@@ -19,6 +23,10 @@ scrape_configs:
   # Docker compose / local-full style service names (optional; ignored if DNS missing).
   - job_name: kerosene-kfe
     metrics_path: /actuator/prometheus
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: '^system_.*'
+        action: drop
     static_configs:
       - targets:
           - kfe-service:8080
