@@ -4,6 +4,8 @@ global:
 rule_files:
   - /etc/prometheus/financial-alerts.yml
   - /etc/prometheus/kfe-balance-alerts.yml
+  - /etc/prometheus/bitcoin-node-storage-alerts.yml
+  - /etc/prometheus/kfe-lightning-alerts.yml
 
 scrape_configs:
   - job_name: kerosene-app

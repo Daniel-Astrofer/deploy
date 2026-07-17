@@ -6,6 +6,7 @@ resources:
   - namespace.yaml
   - local-dev-secrets.yaml
   - local-dev-runtime.yaml
+  - local-lnd-peer.yaml
   - local-network-policy.yaml
   - local-tor-onion.yaml
   - web-page-nginx-config.yaml

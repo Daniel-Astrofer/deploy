@@ -119,4 +119,12 @@ echo "[*] Waiting for core workloads..."
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
 "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/mpc-sidecar --timeout=10m
 
+# Local (and any cluster with helm) also keeps Grafana + Prometheus up with the server.
+if [[ "$ENVIRONMENT" == "local" || "${KEROSENE_ENSURE_MONITORING:-0}" == "1" ]]; then
+  echo "[*] Ensuring Grafana + Prometheus (monitoring namespace)"
+  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/ensure-local-monitoring.sh" || {
+    echo "[!] Monitoring stack ensure failed (non-fatal for core API)." >&2
+  }
+fi
+
 echo "[+] $ENVIRONMENT deploy completed."

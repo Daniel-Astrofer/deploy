@@ -16,6 +16,7 @@ Deploys the complete local Kubernetes runtime into namespace kerosene-local:
   - Bitcoin Core testnet4
   - LND local placeholder
   - Tor hidden service for the web-page API gateway
+  - Grafana + Prometheus (namespace monitoring; always ensured)
 
 Options:
   --dry-run            Validate against the Kubernetes API without persisting resources.
@@ -30,6 +31,11 @@ Environment:
   KEROSENE_REPO_ROOT           Repository root for hostPath data dirs
   KEROSENE_AUTO_CREATE_CLUSTER Create a kind cluster when no API is reachable (default: 1)
   KUBECONFIG                   Explicit kubeconfig path
+  KEROSENE_SKIP_MONITORING=1              Skip Grafana/Prometheus ensure
+  KEROSENE_SKIP_MONITORING_PORT_FORWARD=1 Skip only local port-forwards
+  GRAFANA_ADMIN_PASSWORD                  Default: admin
+  GRAFANA_LOCAL_PORT                      Default: 3000
+  PROMETHEUS_LOCAL_PORT                   Default: 9090
 USAGE
 }
 
@@ -292,6 +298,13 @@ fi
 if [[ "$WAIT" -eq 1 ]]; then
   KUBECONFIG="${KUBECONFIG:-}" KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/wait-local-full.sh"
 fi
+
+# Always bring up Grafana + Prometheus with the local server stack.
+echo "[*] Ensuring Grafana + Prometheus (monitoring namespace)"
+KUBECONFIG="${KUBECONFIG:-}" KUBECTL="$KUBECTL" \
+  bash "$SCRIPT_DIR/ensure-local-monitoring.sh" || {
+    echo "[!] Monitoring stack ensure failed (non-fatal for core API)." >&2
+  }
 
 echo "[+] local-full deployment submitted."
 echo "[+] clear-net service exposure: disabled"

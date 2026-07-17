@@ -1,0 +1,42 @@
+# Bitcoin Core full-blocks-from-now storage alerts (adendo 2026-07-16).
+# Requires node_exporter on the Bitcoin host (filesystem metrics).
+# Volume label examples: mountpoint="/data/bitcoin" or device matching bitcoin datadir.
+
+groups:
+  - name: kerosene-bitcoin-node-storage
+    rules:
+      - alert: BitcoinNodeDiskAlmostFull
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint=~".*bitcoin.*|.*bitcoind.*|/data|/var/lib/bitcoin"}
+            /
+            node_filesystem_size_bytes{mountpoint=~".*bitcoin.*|.*bitcoind.*|/data|/var/lib/bitcoin"}
+          ) < 0.15
+        for: 15m
+        labels:
+          severity: high
+          domain: bitcoin-storage
+        annotations:
+          summary: "Bitcoin node filesystem under 15% free"
+          description: >-
+            Full-blocks-from-now retention will grow continuously. Expand disk or
+            triage prune policy before the node fills and stalls IBD/RPC.
+          runbook: "docs/kfe/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md#node-storage"
+
+      - alert: BitcoinNodeDiskCritical
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint=~".*bitcoin.*|.*bitcoind.*|/data|/var/lib/bitcoin"}
+            /
+            node_filesystem_size_bytes{mountpoint=~".*bitcoin.*|.*bitcoind.*|/data|/var/lib/bitcoin"}
+          ) < 0.08
+        for: 5m
+        labels:
+          severity: critical
+          domain: bitcoin-storage
+        annotations:
+          summary: "Bitcoin node filesystem under 8% free"
+          description: >-
+            Critical free space on Bitcoin datadir. Plan expansion immediately;
+            do not re-enable aggressive prune without ops approval.
+          runbook: "docs/kfe/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md#node-storage"

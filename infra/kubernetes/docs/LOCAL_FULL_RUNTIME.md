@@ -106,18 +106,42 @@ Do not promote `local-full` to production.
 - Vault dev mode;
 - `emptyDir` storage;
 - relaxed namespace-internal network rules;
-- Bitcoin regtest;
-- LND disabled in the server and KFE configs with a TCP placeholder for service-contract completeness.
+- Bitcoin testnet4;
+- Real LND (`local-lnd`) on testnet4 with KFE REST enabled (see below).
 
 Production must continue using the hardened `production` overlay with real Secrets, real storage, immutable image digests, real Vault, real Bitcoin/LND, and production mTLS.
 
-## Why LND is a placeholder locally
+## Local LND (real node)
 
-The backend can boot and the Kubernetes Service contract is satisfied locally, but a fully initialized LND node requires wallet bootstrap, macaroon distribution, TLS material, channel state, and Bitcoin funding workflow. That belongs in a later dedicated `local-lnd` phase. Until then, local-full disables LND in `server-config` via:
+`local-full` now runs a real LND node (`Deployment/local-lnd`) against the in-cluster Bitcoin Core **testnet4** backend:
 
-```text
-LIGHTNING_LND_ENABLED=false
-LIGHTNING_LND_TLS_ENABLED=false
+- image: `lightninglabs/lnd:v0.20.1-beta`
+- data: PVC `local-lnd-data` → hostPath `.local/lnd-data`
+- wallet bootstrap sidecar unlocks/init with `kerosene-lnd-secrets.wallet-password`
+- KFE REST: `LIGHTNING_LND_REST_ENABLED=true`, `LIGHTNING_LND_BASE_URL=https://kerosene-lnd-headless:8080`, `LIGHTNING_LND_TLS_INSECURE=true`
+- after first wallet bootstrap, sync the hex macaroon into the secret:
+
+```bash
+./infra/kubernetes/scripts/sync-local-lnd-macaroon.sh
 ```
 
-This keeps the local Kubernetes runtime useful for application, KFE, database, Redis, Vault-dev, Bitcoin-regtest, MPC, service discovery, and network-policy validation without pretending the workstation stack is production-ready Lightning infrastructure.
+### Liquidity (pay / settle)
+
+Paying and settling BOLT11 needs **on-chain funds on LND + at least one channel**. Local-full deploys a second node `local-lnd-peer` as counterparty (namespace-internal) so you do not depend on public testnet liquidity.
+
+```bash
+# After LND is running, fund from platform bitcoind wallet "kerosene" and open a channel:
+bash infra/kubernetes/scripts/bootstrap-local-lightning-liquidity.sh
+
+# Re-sync hex macaroon into KFE secret after wallet re-init:
+bash infra/kubernetes/scripts/sync-local-lnd-macaroon.sh
+```
+
+What the bootstrap does:
+
+1. Sends testnet4 BTC from `bitcoin-core` wallet `kerosene` → platform LND + peer LND  
+2. Connects the two nodes on port 9735  
+3. Opens a channel with `push_amt` so **both outbound and inbound** liquidity exist  
+4. Runs a small payinvoice smoke both directions  
+
+Channel activation waits for **real testnet4 confirmations** (`confirmations_until_active`, usually 1 with `bitcoin.defaultchanconfs=1`). Seed backups live under each LND datadir — local-only, not production custody.

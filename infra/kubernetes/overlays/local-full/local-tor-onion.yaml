@@ -48,7 +48,9 @@ metadata:
     app.kubernetes.io/name: tor-onion
 data:
   torrc: |
-    SocksPort 0
+    # SOCKS for internal clients (server ticker). Hidden service remains ingress-only.
+    # Bind all interfaces so ClusterIP Service can reach the port.
+    SocksPort 0.0.0.0:9050
     HiddenServiceDir /var/lib/tor/kerosene_service/
     HiddenServiceVersion 3
     HiddenServicePort 80 web-page:8080
@@ -70,7 +72,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
   hostPath:
-    path: /home/omega/.local/state/kerosene/tor/keys/local-full
+    path: /home/astrofer/.local/state/kerosene/tor/keys/local-full
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -141,6 +143,10 @@ spec:
           image: kerosene/tor:local
           imagePullPolicy: Never
           command: ["/bin/sh", "/entrypoint.sh"]
+          ports:
+            - name: socks
+              containerPort: 9050
+              protocol: TCP
           readinessProbe:
             exec:
               command:
@@ -189,6 +195,22 @@ spec:
           persistentVolumeClaim:
             claimName: tor-onion-keys
 ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tor-onion
+  labels:
+    app.kubernetes.io/name: tor-onion
+    app.kubernetes.io/component: tor
+spec:
+  selector:
+    app.kubernetes.io/name: tor-onion
+  ports:
+    - name: socks
+      port: 9050
+      targetPort: socks
+      protocol: TCP
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -212,3 +234,24 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
+---
+# Prefer server → Tor SOCKS only. Namespace-internal allow may still union-allow
+# other pods; this documents the intended SOCKS consumer.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: local-full-allow-server-tor-socks
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: server
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tor-onion
+      ports:
+        - protocol: TCP
+          port: 9050

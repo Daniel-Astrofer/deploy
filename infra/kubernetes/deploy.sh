@@ -19,6 +19,12 @@ Environments:
   staging      Apply the staging overlay.
   production   Apply the production overlay.
 
+Local deploys always ensure Grafana + Prometheus in namespace monitoring
+and start local port-forwards (Grafana :3000, Prometheus :9090).
+See scripts/ensure-local-monitoring.sh.
+Skip stack with KEROSENE_SKIP_MONITORING=1; skip only PF with
+KEROSENE_SKIP_MONITORING_PORT_FORWARD=1.
+
 Common options:
   --dry-run            Validate without persisting resources.
   --wait               local-full only: wait for workloads after apply.

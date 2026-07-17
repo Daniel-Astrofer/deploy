@@ -4,7 +4,11 @@ set -eu
 bitcoin_dir="${BITCOIN_DATA_DIR:-/home/bitcoin/.bitcoin}"
 chain="${BITCOIN_CHAIN:-mainnet}"
 wallet="${BITCOIN_RPC_WALLET:-kerosene}"
-prune_mb="${BITCOIN_PRUNE_MB:-5500}"
+# Retention policy (KFE adendo 2026-07-16):
+#   BITCOIN_PRUNE_MB=0  → full blocks from this point forward (prune disabled)
+#   BITCOIN_PRUNE_MB>=550 → classic pruned node (legacy)
+# Does not re-download already-pruned historical blocks.
+prune_mb="${BITCOIN_PRUNE_MB:-0}"
 rpc_port="${BITCOIN_RPC_PORT:-8332}"
 p2p_port="${BITCOIN_P2P_PORT:-8333}"
 wallet_passphrase="${BITCOIN_WALLET_PASSPHRASE:-}"
@@ -15,25 +19,38 @@ reindex_once="${BITCOIN_REINDEX_ONCE:-false}"
 
 case "$prune_mb" in
   ''|*[!0-9]*)
-    echo "BITCOIN_PRUNE_MB must be a numeric value in MiB." >&2
+    echo "BITCOIN_PRUNE_MB must be a numeric value in MiB (0 = full blocks from now)." >&2
     exit 1
     ;;
 esac
 
-if [ "$prune_mb" -lt 550 ]; then
-  echo "BITCOIN_PRUNE_MB must be at least 550 MiB for Bitcoin Core prune mode." >&2
+if [ "$prune_mb" -ne 0 ] && [ "$prune_mb" -lt 550 ]; then
+  echo "BITCOIN_PRUNE_MB must be 0 (full retention) or at least 550 MiB for prune mode." >&2
   exit 1
 fi
 
 mkdir -p "$bitcoin_dir"
+
+if [ "$prune_mb" -eq 0 ]; then
+  # Full block retention going forward. No backfill of previously pruned history.
+  retention_lines="prune=0
+txindex=0
+blockfilterindex=0
+coinstatsindex=0"
+  echo "Bitcoin Core storage policy: full blocks from now (prune disabled). Historical pruned gap is not re-synced."
+else
+  retention_lines="prune=${prune_mb}
+txindex=0
+blockfilterindex=0
+coinstatsindex=0"
+  echo "Bitcoin Core storage policy: pruned at ${prune_mb} MiB."
+fi
+
 cat > "$bitcoin_dir/bitcoin.conf" <<EOF
 server=1
 printtoconsole=1
 listen=1
-prune=${prune_mb}
-txindex=0
-blockfilterindex=0
-coinstatsindex=0
+${retention_lines}
 blocksonly=0
 maxmempool=${max_mempool_mb}
 dbcache=${dbcache_mb}

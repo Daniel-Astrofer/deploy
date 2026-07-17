@@ -130,3 +130,11 @@ spec:
           port: 10009
         - protocol: TCP
           port: 8080
+    # Tor SOCKS5 only — market data (CoinGecko) without clearnet egress from the app.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tor-onion
+      ports:
+        - protocol: TCP
+          port: 9050

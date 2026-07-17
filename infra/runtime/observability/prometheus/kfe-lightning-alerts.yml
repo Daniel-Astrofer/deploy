@@ -1,0 +1,30 @@
+# Lightning / rebalance ops alerts (Micrometer → Prometheus underscores).
+
+groups:
+  - name: kerosene-kfe-lightning
+    rules:
+      - alert: KfeLightningRebalanceFailures
+        expr: increase(kfe_lightning_rebalance_total{result="failed"}[30m]) > 5
+        for: 15m
+        labels:
+          severity: high
+          domain: kfe-lightning
+        annotations:
+          summary: "Elevated Lightning rebalance job failures"
+          description: >-
+            More than 5 rebalance failures in 30m. Check LND routes, Loop daemon,
+            and SYSTEM_PROFIT available balance for fee reserves.
+          runbook: "docs/kfe/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
+
+      - alert: KfeSettlementGateRejectSpike
+        expr: increase(kfe_settlement_gate_total{result="fail"}[15m]) > 20
+        for: 10m
+        labels:
+          severity: medium
+          domain: kfe-lightning
+        annotations:
+          summary: "Binary settlement gate rejecting many submits"
+          description: >-
+            Gate failures spiked (saldo, liquidez, jamming, quorum). Inspect
+            KFE_SETTLEMENT_GATE audit flags.
+          runbook: "docs/kfe/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md"

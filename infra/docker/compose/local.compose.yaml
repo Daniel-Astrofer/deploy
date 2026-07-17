@@ -1057,12 +1057,30 @@ services:
       - ../../runtime/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
       - ../../runtime/observability/prometheus/financial-alerts.yml:/etc/prometheus/financial-alerts.yml:ro,z
       - ../../runtime/observability/prometheus/kfe-balance-alerts.yml:/etc/prometheus/kfe-balance-alerts.yml:ro,z
+      - ../../runtime/observability/prometheus/bitcoin-node-storage-alerts.yml:/etc/prometheus/bitcoin-node-storage-alerts.yml:ro,z
+      - ../../runtime/observability/prometheus/kfe-lightning-alerts.yml:/etc/prometheus/kfe-lightning-alerts.yml:ro,z
       - prometheus_data:/prometheus
     networks: [net_ingress, net_tor]
     depends_on:
       server-wvo: { condition: service_healthy }
       server-iw5: { condition: service_healthy }
       server-ltv: { condition: service_healthy }
+
+  grafana:
+    image: grafana/grafana:10.1.5
+    container_name: kerosene-grafana-local
+    restart: "no"
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../../runtime/observability/grafana/provisioning:/etc/grafana/provisioning:ro,z
+    networks: [net_ingress]
+    depends_on:
+      - prometheus
 
 # ════════════════════════════════════════════════════════════════════════════
 # Volumes
@@ -1104,6 +1122,7 @@ volumes:
   vault_raft_3_data:
   vault_raft_bootstrap:
   prometheus_data:
+  grafana_data:
 
 # ════════════════════════════════════════════════════════════════════════════
 # Networks — each shard is isolated; only net_tor and net_mpc are shared

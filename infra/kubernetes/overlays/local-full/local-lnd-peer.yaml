@@ -1,0 +1,366 @@
+# Second LND node for local-full Lightning payments on testnet4.
+# Provides a counterparty channel so the platform node can pay/receive BOLT11
+# without depending on public testnet liquidity.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-lnd-peer-data
+  labels:
+    app: kerosene-lnd-peer
+    app.kubernetes.io/name: lnd-peer
+    app.kubernetes.io/component: lightning
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-local
+  hostPath:
+    path: /home/astrofer/Kerosene/.local/lnd-peer-data
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: local-lnd-peer-data
+  namespace: kerosene-local
+  labels:
+    app: kerosene-lnd-peer
+    app.kubernetes.io/name: lnd-peer
+    app.kubernetes.io/component: lightning
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: kerosene-local
+  volumeName: local-lnd-peer-data
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-lnd-peer-headless
+  namespace: kerosene-local
+  labels:
+    app: kerosene-lnd-peer
+    app.kubernetes.io/name: lnd-peer
+    app.kubernetes.io/component: lightning
+    app.kubernetes.io/part-of: kerosene
+spec:
+  clusterIP: None
+  selector:
+    app: kerosene-lnd-peer
+  ports:
+    - name: grpc
+      port: 10009
+      targetPort: grpc
+    - name: rest
+      port: 8080
+      targetPort: rest
+    - name: p2p
+      port: 9735
+      targetPort: p2p
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: local-lnd-peer
+  namespace: kerosene-local
+  labels:
+    app: kerosene-lnd-peer
+    app.kubernetes.io/name: lnd-peer
+    app.kubernetes.io/component: lightning
+    app.kubernetes.io/part-of: kerosene
+    kerosene.io/local-dependency: "true"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-lnd-peer
+  template:
+    metadata:
+      labels:
+        app: kerosene-lnd-peer
+        app.kubernetes.io/name: lnd-peer
+        app.kubernetes.io/component: lightning
+        app.kubernetes.io/part-of: kerosene
+        kerosene.io/local-dependency: "true"
+    spec:
+      securityContext:
+        runAsNonRoot: false
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: fix-lnd-data-perms
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "chmod -R a+rwx /root/.lnd || true"]
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+          volumeMounts:
+            - name: lnd-data
+              mountPath: /root/.lnd
+      containers:
+        - name: lnd
+          image: lightninglabs/lnd:v0.20.1-beta
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              lnd_dir="${LND_DATA_DIR:-/root/.lnd}"
+              mkdir -p "$lnd_dir"
+              san_marker="${lnd_dir}/.kerosene-tls-san"
+              san_config="domains=${LND_TLS_EXTRA_DOMAINS};ips=${LND_TLS_EXTRA_IPS}"
+              if [ -f "${lnd_dir}/tls.cert" ] || [ -f "${lnd_dir}/tls.key" ]; then
+                previous="$(cat "$san_marker" 2>/dev/null || true)"
+                if [ "$previous" != "$san_config" ]; then
+                  rm -f "${lnd_dir}/tls.cert" "${lnd_dir}/tls.key"
+                fi
+              fi
+              printf '%s\n' "$san_config" > "$san_marker"
+
+              exec lnd \
+                "--lnddir=${lnd_dir}" \
+                "--rpclisten=0.0.0.0:10009" \
+                "--restlisten=0.0.0.0:8080" \
+                "--listen=0.0.0.0:9735" \
+                "--bitcoin.active" \
+                "--bitcoin.testnet4" \
+                "--bitcoin.node=bitcoind" \
+                "--bitcoind.rpchost=${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}" \
+                "--bitcoind.rpcuser=${BITCOIN_RPC_USER}" \
+                "--bitcoind.rpcpass=${BITCOIN_RPC_PASSWORD}" \
+                "--bitcoind.zmqpubrawblock=${BITCOIN_ZMQ_RAWBLOCK}" \
+                "--bitcoind.zmqpubrawtx=${BITCOIN_ZMQ_RAWTX}" \
+                "--alias=${LND_ALIAS}" \
+                "--color=${LND_COLOR}" \
+                "--accept-keysend" \
+                "--accept-amp" \
+                "--bitcoin.defaultchanconfs=1" \
+                "--maxpendingchannels=10" \
+                "--tlsextradomain=kerosene-lnd-peer-headless" \
+                "--tlsextradomain=local-lnd-peer" \
+                "--tlsextradomain=localhost" \
+                "--tlsextraip=127.0.0.1"
+          env:
+            - name: LND_DATA_DIR
+              value: /root/.lnd
+            - name: LND_ALIAS
+              value: kerosene-local-lnd-peer
+            - name: LND_COLOR
+              value: "#3D5A80"
+            - name: LND_TLS_EXTRA_DOMAINS
+              value: "kerosene-lnd-peer-headless,local-lnd-peer,localhost"
+            - name: LND_TLS_EXTRA_IPS
+              value: "127.0.0.1"
+            - name: BITCOIN_RPC_HOST
+              value: bitcoin-core
+            - name: BITCOIN_RPC_PORT
+              value: "8332"
+            - name: BITCOIN_ZMQ_RAWBLOCK
+              value: "tcp://bitcoin-core:28332"
+            - name: BITCOIN_ZMQ_RAWTX
+              value: "tcp://bitcoin-core:28333"
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-user
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-password
+          ports:
+            - name: grpc
+              containerPort: 10009
+              protocol: TCP
+            - name: rest
+              containerPort: 8080
+              protocol: TCP
+            - name: p2p
+              containerPort: 9735
+              protocol: TCP
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  test -f /root/.lnd/tls.cert && \
+                  test -f /root/.lnd/data/chain/bitcoin/testnet4/admin.macaroon && \
+                  lncli --lnddir=/root/.lnd --network=testnet4 --rpcserver=127.0.0.1:10009 getinfo >/dev/null 2>&1
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 36
+            initialDelaySeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE", "DAC_OVERRIDE", "CHOWN", "FOWNER"]
+          volumeMounts:
+            - name: lnd-data
+              mountPath: /root/.lnd
+        - name: lnd-bootstrap
+          image: curlimages/curl:8.10.1
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              lnd_dir=/lnd
+              network=testnet4
+              rest_port=8080
+              host=127.0.0.1
+              tls_cert="${lnd_dir}/tls.cert"
+              macaroon_path="${lnd_dir}/data/chain/bitcoin/${network}/admin.macaroon"
+              state_url="https://${host}:${rest_port}/v1/state"
+              password_b64="$(printf '%s' "$LND_WALLET_PASSWORD" | base64 | tr -d '\n')"
+
+              echo "LND peer bootstrap waiting for TLS..."
+              while [ ! -f "$tls_cert" ]; do sleep 2; done
+
+              read_state() {
+                curl -sk --connect-timeout 3 "$state_url" 2>/dev/null || true
+              }
+
+              unlock_wallet() {
+                echo "Unlocking LND peer wallet..."
+                curl -sk -X POST \
+                  -H "Content-Type: application/json" \
+                  -d "{\"wallet_password\":\"${password_b64}\"}" \
+                  "https://${host}:${rest_port}/v1/unlockwallet" || true
+              }
+
+              bootstrap_once() {
+                state_json="$(read_state)"
+                case "$state_json" in
+                  *NON_EXISTING*)
+                    echo "Initializing LND peer wallet..."
+                    seed_json="$(curl -sk -X GET "https://${host}:${rest_port}/v1/genseed")"
+                    umask 077
+                    printf '%s\n' "$seed_json" > "${lnd_dir}/kerosene-local-peer-wallet-seed.json"
+                    seed_payload="$(printf '%s' "$seed_json" | tr -d '\n' | sed -n 's/.*"cipher_seed_mnemonic"[[:space:]]*:[[:space:]]*\[\([^]]*\)\].*/[\1]/p')"
+                    if [ -z "$seed_payload" ]; then
+                      echo "Failed to parse seed mnemonic" >&2
+                      echo "$seed_json" >&2
+                      return 1
+                    fi
+                    curl -sk -X POST \
+                      -H "Content-Type: application/json" \
+                      -d "{\"wallet_password\":\"${password_b64}\",\"cipher_seed_mnemonic\":${seed_payload},\"recovery_window\":0}" \
+                      "https://${host}:${rest_port}/v1/initwallet" >/dev/null
+                    ;;
+                  *LOCKED*|*WAITING_TO_START*)
+                    unlock_wallet
+                    ;;
+                  *SERVER_ACTIVE*|*RPC_ACTIVE*|*UNLOCKED*)
+                    echo "LND peer wallet active."
+                    ;;
+                  *)
+                    echo "LND peer state: ${state_json:-unavailable}"
+                    if [ -f "$macaroon_path" ]; then
+                      unlock_wallet
+                    fi
+                    ;;
+                esac
+              }
+
+              for i in $(seq 1 120); do
+                bootstrap_once || true
+                state_json="$(read_state)"
+                case "$state_json" in
+                  *SERVER_ACTIVE*|*RPC_ACTIVE*)
+                    if [ -f "$macaroon_path" ]; then
+                      echo "LND peer ready."
+                      break
+                    fi
+                    ;;
+                esac
+                sleep 2
+              done
+
+              while true; do
+                sleep 15
+                bootstrap_once || true
+              done
+          env:
+            - name: LND_WALLET_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-lnd-secrets
+                  key: wallet-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: lnd-data
+              mountPath: /lnd
+      volumes:
+        - name: lnd-data
+          persistentVolumeClaim:
+            claimName: local-lnd-peer-data
+---
+# Allow LND pods to reach external Lightning peers / DNS seeds on testnet4.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: local-full-allow-lnd-testnet4-egress
+  namespace: kerosene-local
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - lnd
+          - lnd-peer
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 9735
+        - protocol: TCP
+          port: 53
+        - protocol: UDP
+          port: 53
+        # bitcoind already reachable via namespace-internal; keep RPC ports for safety
+        - protocol: TCP
+          port: 8332
+        - protocol: TCP
+          port: 28332
+        - protocol: TCP
+          port: 28333
