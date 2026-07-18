@@ -120,8 +120,82 @@ if [[ "$KERO_ANDROID_USE_EXTERNAL_TOR" == "1" ]]; then
   )
 fi
 
-exec flutter run --release \
+KERO_ANDROID_RUN_MODE="${KERO_ANDROID_RUN_MODE:-profile}" # debug|profile|release
+KERO_ANDROID_TRACE_SKIA="${KERO_ANDROID_TRACE_SKIA:-0}" # 1 enables --trace-skia (can slow raster a lot)
+KERO_ANDROID_VERBOSE="${KERO_ANDROID_VERBOSE:-0}" # 1 enables --verbose
+KERO_ANDROID_HWUI_BARS="${KERO_ANDROID_HWUI_BARS:-1}" # 1 enables Android HWUI bars
+KERO_ANDROID_SCREEN_CAPTURE_UI="${KERO_ANDROID_SCREEN_CAPTURE_UI:-0}" # 1 shows "DADOS" debug overlay
+KERO_ANDROID_PURGE_CACHE="${KERO_ANDROID_PURGE_CACHE:-0}" # 1 enables --purge-persistent-cache
+KERO_ANDROID_ENABLE_IMPELLER="${KERO_ANDROID_ENABLE_IMPELLER:-0}" # 1 enables Impeller, 0 forces Skia on Android
+
+flutter_args=()
+case "${KERO_ANDROID_RUN_MODE}" in
+  debug) flutter_args+=(--debug) ;;
+  release) flutter_args+=(--release) ;;
+  profile) flutter_args+=(--profile) ;;
+  *)
+    echo "Invalid KERO_ANDROID_RUN_MODE=${KERO_ANDROID_RUN_MODE} (expected: debug|profile|release)" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "${KERO_ANDROID_TRACE_SKIA}" == "1" && "${KERO_ANDROID_RUN_MODE}" == "profile" ]]; then
+  flutter_args+=(--trace-skia)
+fi
+if [[ "${KERO_ANDROID_VERBOSE}" == "1" ]]; then
+  flutter_args+=(--verbose)
+fi
+if [[ "${KERO_ANDROID_PURGE_CACHE}" == "1" ]]; then
+  flutter_args+=(--purge-persistent-cache)
+fi
+
+if [[ "${KERO_ANDROID_ENABLE_IMPELLER}" == "1" ]]; then
+  flutter_args+=(--enable-impeller)
+else
+  flutter_args+=(--no-enable-impeller)
+fi
+
+extra_defines=()
+if [[ "${KERO_ANDROID_SCREEN_CAPTURE_UI}" == "1" ]]; then
+  extra_defines+=(--dart-define="SCREEN_CAPTURE_UI=true")
+else
+  # In debug, the app defaults to showing a "DADOS" overlay for goldens export.
+  # Force it off unless explicitly requested so debug UI matches profile/release.
+  extra_defines+=(--dart-define="SCREEN_CAPTURE_UI=false")
+fi
+
+if [[ "${KERO_ANDROID_HWUI_BARS}" == "1" && -n "${ANDROID_SDK_ROOT:-}" ]]; then
+  if command -v adb >/dev/null 2>&1; then
+    adb shell setprop debug.hwui.profile visual_bars >/dev/null 2>&1 || true
+  fi
+fi
+
+echo "Flutter mode: ${KERO_ANDROID_RUN_MODE}"
+if [[ "${KERO_ANDROID_RUN_MODE}" == "debug" ]]; then
+  echo "Hot reload: press 'r' (reload), 'R' (restart) in this terminal."
+  echo "Telemetry: DevTools enabled (debug timings can be noisier than profile)."
+fi
+if [[ "${KERO_ANDROID_RUN_MODE}" == "profile" ]]; then
+  echo "Telemetry: DevTools + service protocol enabled (profile mode)."
+  if [[ "${KERO_ANDROID_TRACE_SKIA}" == "1" ]]; then
+    echo "Telemetry: --trace-skia enabled."
+  fi
+  if [[ "${KERO_ANDROID_PURGE_CACHE}" == "1" ]]; then
+    echo "Telemetry: --purge-persistent-cache enabled."
+  fi
+  if [[ "${KERO_ANDROID_ENABLE_IMPELLER}" == "1" ]]; then
+    echo "Renderer: Impeller enabled."
+  else
+    echo "Renderer: Impeller disabled (Skia)."
+  fi
+fi
+if [[ "${KERO_ANDROID_HWUI_BARS}" == "1" ]]; then
+  echo "Telemetry: Android HWUI visual bars enabled (if supported)."
+fi
+
+exec flutter run "${flutter_args[@]}" \
   "${TOR_DART_DEFINES[@]}" \
+  "${extra_defines[@]}" \
   --dart-define="KERO_NODE_IS_URL=${KERO_NODE_IS_URL}" \
   --dart-define="KERO_NODE_CH_URL=${KERO_NODE_CH_URL}" \
   --dart-define="KERO_NODE_SG_URL=${KERO_NODE_SG_URL}" \
