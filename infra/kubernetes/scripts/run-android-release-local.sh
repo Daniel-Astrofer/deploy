@@ -128,7 +128,10 @@ KERO_ANDROID_SCREEN_CAPTURE_UI="${KERO_ANDROID_SCREEN_CAPTURE_UI:-0}" # 1 shows 
 KERO_ANDROID_PURGE_CACHE="${KERO_ANDROID_PURGE_CACHE:-0}" # 1 enables --purge-persistent-cache
 KERO_ANDROID_ENABLE_IMPELLER="${KERO_ANDROID_ENABLE_IMPELLER:-0}" # 1 enables Impeller, 0 forces Skia on Android
 
-flutter_args=()
+flutter_args=(
+  "--host-vmservice-port=9999"
+  "--disable-service-auth-codes"
+)
 case "${KERO_ANDROID_RUN_MODE}" in
   debug) flutter_args+=(--debug) ;;
   release) flutter_args+=(--release) ;;
