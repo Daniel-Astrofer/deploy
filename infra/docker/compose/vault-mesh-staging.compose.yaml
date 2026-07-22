@@ -1,0 +1,57 @@
+# Staging mesh: TEE mode (SEV stub) — no ATTESTATION_MODE=sim, no LAB_TIMELOCK_SCALE (F8).
+# Real HW: set ATTESTATION_STAGING_STUB=0 and provide platform quote plumbing.
+
+services:
+  vault-1:
+    build:
+      context: ../../../backend/kerosene-vault
+      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+    container_name: kerosene-vault-1-staging
+    environment:
+      VAULT_NODE_ID: vault-1
+      KEROSENE_ENV: staging
+      VAULT_CEREMONY_MODE: staging
+      ATTESTATION_MODE: sev
+      ATTESTATION_STAGING_STUB: "1"
+      LAB_ATTESTATION_ROOT: kerosene-staging-root
+      VAULT_LISTEN_ADDR: 0.0.0.0:7701
+      VAULT_GENESIS_N: "3"
+      VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
+    ports:
+      - "7801:7701"
+
+  vault-2:
+    build:
+      context: ../../../backend/kerosene-vault
+      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+    container_name: kerosene-vault-2-staging
+    environment:
+      VAULT_NODE_ID: vault-2
+      KEROSENE_ENV: staging
+      VAULT_CEREMONY_MODE: staging
+      ATTESTATION_MODE: sev
+      ATTESTATION_STAGING_STUB: "1"
+      LAB_ATTESTATION_ROOT: kerosene-staging-root
+      VAULT_LISTEN_ADDR: 0.0.0.0:7701
+      VAULT_GENESIS_N: "3"
+      VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
+    ports:
+      - "7802:7701"
+
+  vault-3:
+    build:
+      context: ../../../backend/kerosene-vault
+      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+    container_name: kerosene-vault-3-staging
+    environment:
+      VAULT_NODE_ID: vault-3
+      KEROSENE_ENV: staging
+      VAULT_CEREMONY_MODE: staging
+      ATTESTATION_MODE: sev
+      ATTESTATION_STAGING_STUB: "1"
+      LAB_ATTESTATION_ROOT: kerosene-staging-root
+      VAULT_LISTEN_ADDR: 0.0.0.0:7701
+      VAULT_GENESIS_N: "3"
+      VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
+    ports:
+      - "7803:7701"
