@@ -127,9 +127,19 @@ KERO_ANDROID_HWUI_BARS="${KERO_ANDROID_HWUI_BARS:-1}" # 1 enables Android HWUI b
 KERO_ANDROID_SCREEN_CAPTURE_UI="${KERO_ANDROID_SCREEN_CAPTURE_UI:-0}" # 1 shows "DADOS" debug overlay
 KERO_ANDROID_PURGE_CACHE="${KERO_ANDROID_PURGE_CACHE:-0}" # 1 enables --purge-persistent-cache
 KERO_ANDROID_ENABLE_IMPELLER="${KERO_ANDROID_ENABLE_IMPELLER:-0}" # 1 enables Impeller, 0 forces Skia on Android
+# Avoid clashing with primary Linux DDS (9101) when both sessions are up.
+KERO_VM_SERVICE_PORT="${KERO_VM_SERVICE_PORT:-9999}"
+KERO_DDS_PORT="${KERO_DDS_PORT:-9102}"
+
+if ss -ltn "sport = :${KERO_DDS_PORT}" 2>/dev/null | grep -q LISTEN; then
+  echo "[!] DDS port ${KERO_DDS_PORT} already in use." >&2
+  echo "[!] Kill the old Android flutter run, or: KERO_DDS_PORT=9103 $0 ..." >&2
+  exit 1
+fi
 
 flutter_args=(
-  "--host-vmservice-port=9999"
+  "--host-vmservice-port=${KERO_VM_SERVICE_PORT}"
+  "--dds-port=${KERO_DDS_PORT}"
   "--disable-service-auth-codes"
 )
 case "${KERO_ANDROID_RUN_MODE}" in
@@ -174,6 +184,7 @@ if [[ "${KERO_ANDROID_HWUI_BARS}" == "1" && -n "${ANDROID_SDK_ROOT:-}" ]]; then
 fi
 
 echo "Flutter mode: ${KERO_ANDROID_RUN_MODE}"
+echo "DevTools/DDS: vm=${KERO_VM_SERVICE_PORT} dds=${KERO_DDS_PORT} (override with KERO_VM_SERVICE_PORT / KERO_DDS_PORT)"
 if [[ "${KERO_ANDROID_RUN_MODE}" == "debug" ]]; then
   echo "Hot reload: press 'r' (reload), 'R' (restart) in this terminal."
   echo "Telemetry: DevTools enabled (debug timings can be noisier than profile)."

@@ -309,7 +309,7 @@ metadata:
     kerosene.io/local-dependency: "true"
 spec:
   capacity:
-    # Full testnet4 (and room to grow). Data lives on external HDD via bind-mount
+    # Full classic testnet / testnet3 (and room to grow). Data lives on external HDD via bind-mount
     # onto this hostPath — see scripts/migrate-chain-storage-to-hdd.sh
     storage: 400Gi
   accessModes: ["ReadWriteOnce"]
@@ -387,7 +387,7 @@ spec:
               mkdir -p "$bitcoin_dir"
 
               bitcoin_cli() {
-                bitcoin-cli -testnet4 \
+                bitcoin-cli -testnet \
                   -datadir="$bitcoin_dir" \
                   -rpcport="$rpc_port" \
                   -rpcuser="$BITCOIN_RPC_USER" \
@@ -395,14 +395,16 @@ spec:
                   "$@"
               }
 
-              # Full block archive on external HDD (never prune).
+              # Steady-state: pruned classic testnet (no txindex). For faster initial
+              # sync, run: bash infra/kubernetes/scripts/bitcoin-ibd-mode.sh boost
+              # which scales down app pods and raises dbcache/CPU/RAM temporarily.
               bitcoind \
-                -testnet4 \
+                -testnet \
                 -datadir="$bitcoin_dir" \
                 -server=1 \
                 -printtoconsole \
-                -prune=0 \
-                -txindex=1 \
+                -prune=10000 \
+                -txindex=0 \
                 -rpcbind=0.0.0.0 \
                 -rpcallowip=0.0.0.0/0 \
                 -rpcport="$rpc_port" \
@@ -472,7 +474,7 @@ spec:
                 - -c
                 - |
                   wallet="${BITCOIN_RPC_WALLET:-kerosene}"
-                  bitcoin-cli -testnet4 \
+                  bitcoin-cli -testnet \
                     -datadir="${BITCOIN_DATA_DIR:-/home/bitcoin/.bitcoin}" \
                     -rpcport="${BITCOIN_RPC_PORT:-8332}" \
                     -rpcuser="$BITCOIN_RPC_USER" \
@@ -612,7 +614,7 @@ spec:
                 "--restlisten=0.0.0.0:8080" \
                 "--listen=0.0.0.0:9735" \
                 "--bitcoin.active" \
-                "--bitcoin.testnet4" \
+                "--bitcoin.testnet" \
                 "--bitcoin.node=bitcoind" \
                 "--bitcoind.rpchost=${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}" \
                 "--bitcoind.rpcuser=${BITCOIN_RPC_USER}" \
@@ -682,8 +684,8 @@ spec:
                 - -c
                 - |
                   test -f /root/.lnd/tls.cert && \
-                  test -f /root/.lnd/data/chain/bitcoin/testnet4/admin.macaroon && \
-                  lncli --lnddir=/root/.lnd --network=testnet4 --rpcserver=127.0.0.1:10009 getinfo >/dev/null 2>&1
+                  test -f /root/.lnd/data/chain/bitcoin/testnet/admin.macaroon && \
+                  lncli --lnddir=/root/.lnd --network=testnet --rpcserver=127.0.0.1:10009 getinfo >/dev/null 2>&1
             periodSeconds: 10
             timeoutSeconds: 10
             failureThreshold: 36
@@ -711,7 +713,7 @@ spec:
             - |
               set -eu
               lnd_dir=/lnd
-              network=testnet4
+              network=testnet
               rest_port=8080
               host=127.0.0.1
               tls_cert="${lnd_dir}/tls.cert"

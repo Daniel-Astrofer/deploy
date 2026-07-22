@@ -13,8 +13,8 @@ Deploys the complete local Kubernetes runtime into namespace kerosene-local:
   - PostgreSQL
   - Redis
   - Vault dev
-  - Bitcoin Core testnet4
-  - LND (testnet4) + peer for local liquidity
+  - Bitcoin Core classic testnet (testnet3)
+  - LND (testnet) + peer for local liquidity
   - Tor hidden service for the web-page API gateway
   - Grafana + Prometheus (namespace monitoring; always ensured)
 

@@ -58,8 +58,8 @@ ok "tor onion: http://$onion"
 btc_chain="$("$KUBECTL" -n "$NS" exec deploy/local-bitcoin -- sh -c \
   '/opt/bitcoin-28.0/bin/bitcoin-cli -datadir=/home/bitcoin/.bitcoin -rpcuser=kerosene -rpcpassword=kerosene-local-rpc getblockchaininfo' \
   2>/dev/null | python3 -c 'import sys,json; print(json.load(sys.stdin).get("chain",""))' 2>/dev/null || true)"
-[[ "$btc_chain" == "testnet4" ]] || fail "bitcoin chain is '$btc_chain' (expected testnet4)"
-ok "bitcoin chain testnet4"
+[[ "$btc_chain" == "test" ]] || fail "bitcoin chain is '$btc_chain' (expected test / classic testnet3)"
+ok "bitcoin chain test (testnet3)"
 
 echo "[+] smoke-local-full passed"
 echo "[+] next: exercise signup/login via app or authenticated API tests"

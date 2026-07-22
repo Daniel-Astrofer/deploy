@@ -1,4 +1,4 @@
-# Second LND node for local-full Lightning payments on testnet4.
+# Second LND node for local-full Lightning payments on classic testnet (testnet3).
 # Provides a counterparty channel so the platform node can pay/receive BOLT11
 # without depending on public testnet liquidity.
 apiVersion: v1
@@ -138,7 +138,7 @@ spec:
                 "--restlisten=0.0.0.0:8080" \
                 "--listen=0.0.0.0:9735" \
                 "--bitcoin.active" \
-                "--bitcoin.testnet4" \
+                "--bitcoin.testnet" \
                 "--bitcoin.node=bitcoind" \
                 "--bitcoind.rpchost=${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}" \
                 "--bitcoind.rpcuser=${BITCOIN_RPC_USER}" \
@@ -201,8 +201,8 @@ spec:
                 - -c
                 - |
                   test -f /root/.lnd/tls.cert && \
-                  test -f /root/.lnd/data/chain/bitcoin/testnet4/admin.macaroon && \
-                  lncli --lnddir=/root/.lnd --network=testnet4 --rpcserver=127.0.0.1:10009 getinfo >/dev/null 2>&1
+                  test -f /root/.lnd/data/chain/bitcoin/testnet/admin.macaroon && \
+                  lncli --lnddir=/root/.lnd --network=testnet --rpcserver=127.0.0.1:10009 getinfo >/dev/null 2>&1
             periodSeconds: 10
             timeoutSeconds: 10
             failureThreshold: 36
@@ -230,7 +230,7 @@ spec:
             - |
               set -eu
               lnd_dir=/lnd
-              network=testnet4
+              network=testnet
               rest_port=8080
               host=127.0.0.1
               tls_cert="${lnd_dir}/tls.cert"
@@ -330,11 +330,11 @@ spec:
           persistentVolumeClaim:
             claimName: local-lnd-peer-data
 ---
-# Allow LND pods to reach external Lightning peers / DNS seeds on testnet4.
+# Allow LND pods to reach external Lightning peers / DNS seeds on classic testnet.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: local-full-allow-lnd-testnet4-egress
+  name: local-full-allow-lnd-testnet-egress
   namespace: kerosene-local
 spec:
   podSelector:

@@ -4,7 +4,7 @@ set -euo pipefail
 NS="${KEROSENE_NAMESPACE:-kerosene-local}"
 POD="$(kubectl -n "$NS" get po -l app=kerosene-lnd -o jsonpath='{.items[0].metadata.name}')"
 HEX="$(kubectl -n "$NS" exec "$POD" -c lnd -- sh -c \
-  'od -An -tx1 /root/.lnd/data/chain/bitcoin/testnet4/admin.macaroon | tr -d " \n"')"
+  'od -An -tx1 /root/.lnd/data/chain/bitcoin/testnet/admin.macaroon | tr -d " \n"')"
 if [ "${#HEX}" -lt 32 ]; then
   echo "Failed to read admin macaroon hex from $POD" >&2
   exit 1

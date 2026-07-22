@@ -115,7 +115,7 @@ require 'APP_CORS_ALLOWED_ORIGINS: http://placeholder.onion'
 require 'WEBAUTHN_ORIGINS: android:apk-key-hash:kerosene,http://placeholder.onion'
 require 'SPRING_PROFILES_ACTIVE: docker,kfe'
 require 'KEROSENE_RUNTIME_ROLE: kfe-service'
-require 'BITCOIN_NETWORK: testnet4'
+require 'BITCOIN_NETWORK: testnet'
 # Beta testnet: Bitcoin Core is required so financial rails fail closed when down.
 require 'BITCOIN_RPC_REQUIRED: "true"'
 require 'KFE_NETWORK_MONITOR_ENABLED: "true"'

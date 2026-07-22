@@ -47,7 +47,7 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: local-full-allow-bitcoin-testnet4-egress
+  name: local-full-allow-bitcoin-testnet-egress
 spec:
   podSelector:
     matchLabels:
@@ -59,7 +59,8 @@ spec:
         - ipBlock:
             cidr: 0.0.0.0/0
       ports:
+        # Classic testnet (testnet3) default P2P; local bitcoind also binds 8333.
         - protocol: TCP
-          port: 48333
+          port: 18333
         - protocol: TCP
           port: 8333

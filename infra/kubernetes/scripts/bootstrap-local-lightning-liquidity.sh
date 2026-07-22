@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fund local LND nodes from platform bitcoind (testnet4) and open a channel
+# Fund local LND nodes from platform bitcoind (classic testnet) and open a channel
 # so KFE can pay/settle Lightning invoices.
 #
 # Usage:
@@ -31,17 +31,17 @@ need_cmd python3
 
 lncli_main() {
   kubectl -n "$NS" exec deploy/local-lnd -c lnd -- \
-    lncli --lnddir=/root/.lnd --network=testnet4 "$@"
+    lncli --lnddir=/root/.lnd --network=testnet "$@"
 }
 
 lncli_peer() {
   kubectl -n "$NS" exec deploy/local-lnd-peer -c lnd -- \
-    lncli --lnddir=/root/.lnd --network=testnet4 "$@"
+    lncli --lnddir=/root/.lnd --network=testnet "$@"
 }
 
 btc() {
   kubectl -n "$NS" exec deploy/local-bitcoin -- sh -c \
-    "bitcoin-cli -testnet4 -datadir=/home/bitcoin/.bitcoin -rpcport=8332 \
+    "bitcoin-cli -testnet -datadir=/home/bitcoin/.bitcoin -rpcport=8332 \
       -rpcuser=\"\$BITCOIN_RPC_USER\" -rpcpassword=\"\$BITCOIN_RPC_PASSWORD\" \
       -rpcwallet=${BITCOIN_WALLET} $*"
 }
@@ -89,7 +89,7 @@ wait_lnd_balance() {
     fi
     sleep 15
   done
-  die "timeout waiting for $side on-chain funds (need real testnet4 confs)"
+  die "timeout waiting for $side on-chain funds (need real testnet confs)"
 }
 
 wait_active_channel() {
@@ -105,7 +105,7 @@ wait_active_channel() {
     fi
     sleep 15
   done
-  die "timeout waiting for active channel (testnet4 confirmations)"
+  die "timeout waiting for active channel (testnet confirmations)"
 }
 
 # --- ensure peer deployment ---
