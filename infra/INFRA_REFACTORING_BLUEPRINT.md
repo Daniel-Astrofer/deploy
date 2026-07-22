@@ -166,7 +166,7 @@ infra/
       local.compose.yaml
       local.kfe.compose.yaml
       local.limits.compose.yaml
-      hardened.compose.yaml
+      hardened.compose.yaml  # (ops-private; not in public tree)
     scripts/
       build-image.sh
 

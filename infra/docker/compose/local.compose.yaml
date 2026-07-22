@@ -73,21 +73,18 @@ services:
       retries: 120
     depends_on: [kerosene-vault]
 
+  # Vault arming script lives outside the public repo (ops-only).
+  # This no-op keeps compose graphs valid; provide a private arm script when needed.
   kerosene-vault-arm:
     image: curlimages/curl:8.10.1
     container_name: kerosene-vault-arm-local
     restart: "no"
-    env_file: ../../../backend/kerosene/.env
-    environment:
-      - VAULT_URL=http://kerosene-vault:8090/v1/vault/arm
-      - VAULT_ARM_MAX_WAIT_SECONDS=120
-      - VAULT_ARM_DIRECTORS=${VAULT_ARM_DIRECTORS:-director-1,director-2}
-      - DIRECTOR_1_ARM_SIGNATURE=${DIRECTOR_1_ARM_SIGNATURE}
-      - DIRECTOR_2_ARM_SIGNATURE=${DIRECTOR_2_ARM_SIGNATURE}
-      - DIRECTOR_3_ARM_SIGNATURE=${DIRECTOR_3_ARM_SIGNATURE:-}
-    volumes:
-      - ../../../scripts/arm-vault-compose.sh:/arm-vault.sh:ro,z
-    entrypoint: ["sh", "/arm-vault.sh"]
+    entrypoint:
+      - sh
+      - -c
+      - |
+        echo "kerosene-vault-arm: public tree has no arm-vault script; skipping."
+        exit 0
     networks: [net_vault]
     depends_on:
       kerosene-vault: { condition: service_started }

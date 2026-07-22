@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 usage() {
   cat <<'USAGE'
-Usage: infra/kubernetes/deploy.sh [local|local-full|staging|production] [options]
+Usage: infra/kubernetes/deploy.sh [local|local-full|staging] [options]
 
 Canonical local Kubernetes startup:
   bash infra/start.sh
@@ -17,7 +17,8 @@ Environments:
   local        Apply the lightweight local overlay.
   local-full   Build/import local images, apply the complete local runtime, and optionally wait.
   staging      Apply the staging overlay.
-  production   Apply the production overlay.
+
+Production overlays/helpers are kept outside the public repository.
 
 Local deploys always ensure Grafana + Prometheus in namespace monitoring
 and start local port-forwards (Grafana :3000, Prometheus :9090).

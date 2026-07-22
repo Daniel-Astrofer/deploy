@@ -10,7 +10,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 legacy_server="kerosene-app"
 legacy_page="web-admin"
 
-for env in local staging production; do
+for env in local staging; do
   manifest="$TMP_DIR/$env.yaml"
   "$KUBECTL" kustomize "$K8S_ROOT/overlays/$env" > "$manifest"
 
@@ -54,4 +54,5 @@ if find "$K8S_ROOT/base" -maxdepth 1 -type d \( -name "$legacy_server" -o -name 
   exit 1
 fi
 
-echo "[+] Kubernetes cohesion validation passed for local, staging and production."
+echo "[+] Kubernetes cohesion validation passed for local and staging."
+echo "[*] Production overlay is intentionally outside the public repository."

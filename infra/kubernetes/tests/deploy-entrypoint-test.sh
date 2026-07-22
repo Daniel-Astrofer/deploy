@@ -30,7 +30,7 @@ cat > "$TMP_DIR/infra/kubernetes/scripts/deploy.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  echo "generic deploy help: local staging production"
+  echo "generic deploy help: local staging"
   exit 0
 fi
 echo "generic:$*" >> "$CALL_LOG"

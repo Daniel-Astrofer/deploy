@@ -14,8 +14,9 @@ Arquivos canônicos:
 infra/docker/compose/local.compose.yaml
 infra/docker/compose/local.limits.compose.yaml
 infra/docker/compose/local.kfe.compose.yaml
-infra/docker/compose/hardened.compose.yaml
 ```
+
+A topologia `hardened` fica fora do repositório público (ops privado).
 
 Os caminhos legados continuam presentes para compatibilidade com scripts antigos.
 
@@ -27,7 +28,6 @@ Use os wrappers em `infra/docker/scripts` para operar Compose a partir da nova c
 bash infra/docker/scripts/compose-local.sh up -d
 bash infra/docker/scripts/compose-local.sh ps
 bash infra/docker/scripts/compose-local-kfe.sh up -d
-bash infra/docker/scripts/compose-hardened.sh config
 ```
 
 `compose-local-kfe.sh` includes the split KFE overlay. In that mode each shard

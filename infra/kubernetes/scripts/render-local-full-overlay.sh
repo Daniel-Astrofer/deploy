@@ -20,6 +20,17 @@ if [[ ! -d "$OVERLAY_SRC" ]]; then
   exit 1
 fi
 
+SECRETS_FILE="$OVERLAY_SRC/local-dev-secrets.yaml"
+SECRETS_EXAMPLE="$OVERLAY_SRC/local-dev-secrets.example.yaml"
+if [[ ! -f "$SECRETS_FILE" ]]; then
+  if [[ ! -f "$SECRETS_EXAMPLE" ]]; then
+    echo "[!] Missing $SECRETS_EXAMPLE" >&2
+    exit 1
+  fi
+  cp "$SECRETS_EXAMPLE" "$SECRETS_FILE"
+  echo "[*] Created gitignored $SECRETS_FILE from example" >&2
+fi
+
 WORK_ROOT="${KEROSENE_RENDER_ROOT:-$(mktemp -d "${TMPDIR:-/tmp}/kerosene-local-full-XXXXXX")}"
 WORK_K8S="$WORK_ROOT/kubernetes"
 WORK_OVERLAY="$WORK_K8S/overlays/local-full"

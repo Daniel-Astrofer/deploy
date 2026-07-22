@@ -2,6 +2,15 @@
 
 Esta é a raiz canônica para Kubernetes/Kustomize da Kerosene.
 
+## Escopo público
+
+Este repositório publica overlays **local**, **local-full** e **staging**, mais a `base/`.
+Overlays de **produção**, scripts `arm-vault*`, `panic`/`emergency` operacionais e o compose
+`hardened` ficam em checkout de ops privado — não versionar secrets reais nem onions vivos aqui.
+
+Secrets locais: copie `overlays/local-full/local-dev-secrets.example.yaml` para
+`local-dev-secrets.yaml` (gitignored). O `render-local-full-overlay.sh` faz isso automaticamente.
+
 ## Estado atual
 
 A árvore Kubernetes canônica fica em:

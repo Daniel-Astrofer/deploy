@@ -13,7 +13,6 @@ migrados gradualmente. Use os wrappers canônicos em `infra/docker/scripts`:
 ```bash
 bash infra/docker/scripts/compose-local.sh ps
 bash infra/docker/scripts/compose-local-kfe.sh ps
-bash infra/docker/scripts/compose-hardened.sh config
 ```
 
 Arquivos Compose canônicos:
@@ -22,8 +21,9 @@ Arquivos Compose canônicos:
 infra/docker/compose/local.compose.yaml
 infra/docker/compose/local.limits.compose.yaml
 infra/docker/compose/local.kfe.compose.yaml
-infra/docker/compose/hardened.compose.yaml
 ```
+
+`hardened` e overlays de produção ficam fora do repositório público.
 
 `infra/docker/images.yaml` aponta para os Dockerfiles canônicos e mantém
 o caminho canônico do Dockerfile.
@@ -43,7 +43,6 @@ infra/docker/
     local.compose.yaml
     local.limits.compose.yaml
     local.kfe.compose.yaml
-    hardened.compose.yaml
   images.yaml
 ```
 

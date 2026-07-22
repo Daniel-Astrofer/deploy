@@ -110,7 +110,7 @@ Do not promote `local-full` to production.
 - Bitcoin testnet4;
 - Real LND (`local-lnd`) on testnet4 with KFE REST enabled (see below).
 
-Production must continue using the hardened `production` overlay with real Secrets, real storage, immutable image digests, real Vault, real Bitcoin/LND, and production mTLS.
+Production must use a private ops overlay with real Secrets, real storage, immutable image digests, real Vault, real Bitcoin/LND, and production mTLS. That overlay is intentionally not shipped in this public repository.
 
 ## Local LND (real node)
 

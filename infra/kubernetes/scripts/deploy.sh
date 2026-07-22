@@ -3,17 +3,18 @@ set -euo pipefail
 
 usage() {
   cat <<USAGE
-Usage: $0 <local|staging|production> [--dry-run]
+Usage: $0 <local|staging> [--dry-run]
 
-Required for production unless the overlay was already edited:
+Optional:
   SERVER_IMAGE=registry/server@sha256:...
   KFE_SERVICE_IMAGE=registry/kfe-service@sha256:...
   MPC_SIDECAR_IMAGE=registry/mpc-sidecar@sha256:...
   WEB_PAGE_IMAGE=registry/web-page@sha256:...
 
-Optional:
   KUBECTL=kubectl
   KUSTOMIZE=kustomize
+
+Production deploy overlays and helpers are intentionally outside this public tree.
 USAGE
 }
 
@@ -28,7 +29,11 @@ fi
 case "$ENVIRONMENT" in
   local) NAMESPACE="kerosene-local" ;;
   staging) NAMESPACE="kerosene-staging" ;;
-  production) NAMESPACE="kerosene-production" ;;
+  production)
+    echo "Production overlay is not shipped in the public repository." >&2
+    echo "Use a private ops checkout for production deploys." >&2
+    exit 2
+    ;;
   *) echo "Unsupported environment: $ENVIRONMENT" >&2; usage; exit 2 ;;
 esac
 
@@ -84,12 +89,6 @@ fi
 
 MANIFEST="$TMP_DIR/manifest.yaml"
 "$KUBECTL" kustomize "$WORK_OVERLAY" > "$MANIFEST"
-
-if [[ "$ENVIRONMENT" == "production" ]] && grep -q 'replace-me' "$MANIFEST"; then
-  echo "Refusing production deploy with replace-me image tags." >&2
-  echo "Set SERVER_IMAGE, KFE_SERVICE_IMAGE, MPC_SIDECAR_IMAGE and WEB_PAGE_IMAGE to immutable tags or digests." >&2
-  exit 3
-fi
 
 echo "[*] Validating rendered manifest for namespace $NAMESPACE..."
 "$KUBECTL" apply --dry-run=client -f "$MANIFEST" >/dev/null
