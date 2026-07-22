@@ -1,0 +1,13 @@
+User kerosene
+SocksPort unix:/var/run/tor/socks/tor.sock WorldWritable
+ControlSocket /var/run/tor/control/control
+ControlSocketsGroupWritable 1
+CookieAuthentication 1
+CookieAuthFile /var/run/tor/control/control_auth_cookie
+CookieAuthFileGroupReadable 1
+HiddenServiceDir /var/lib/tor/kerosene_service/
+HiddenServiceVersion 3
+HiddenServicePort 80 10.241.0.12:8080
+Log notice stdout
+DataDirectory /var/lib/tor
+NumCPUs 1
