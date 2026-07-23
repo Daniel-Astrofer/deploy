@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-FROM rust:1.85-bookworm AS build
+# Keep toolchain compatible with dependency requirements (some crates require rustc >= 1.86/1.88).
+FROM rust:1.88-bookworm AS build
 WORKDIR /src
 ARG CARGO_FEATURES=
 COPY Cargo.toml ./
