@@ -6,7 +6,7 @@ usage() {
 Usage: $0 <namespace> <component> [mode]
 
 component:
-  server | web-page | mpc-sidecar
+  server | web-page | kfe-service
 
 mode:
   rollout      Restart controller safely. Default.
@@ -16,7 +16,7 @@ mode:
 Examples:
   $0 kerosene-production server rollout
   $0 kerosene-production server pods
-  $0 kerosene-production mpc-sidecar one-pod
+  $0 kerosene-production kfe-service one-pod
 USAGE
 }
 
@@ -31,8 +31,7 @@ if [[ -z "$NAMESPACE" || -z "$COMPONENT" ]]; then
 fi
 
 case "$COMPONENT" in
-  server|web-page) KIND="deployment" ;;
-  mpc-sidecar) KIND="statefulset" ;;
+  server|web-page|kfe-service) KIND="deployment" ;;
   *) echo "Unsupported component: $COMPONENT" >&2; usage; exit 2 ;;
 esac
 

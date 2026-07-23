@@ -457,8 +457,6 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: VAULT_ENABLED
-              value: "false"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required
@@ -568,8 +566,6 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: VAULT_ENABLED
-              value: "false"
             - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
               value: "180000"
             - name: TOR_HEALTH_REQUIRED
@@ -703,8 +699,6 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: VAULT_ENABLED
-              value: "false"
             - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
               value: "180000"
             - name: TOR_HEALTH_REQUIRED
@@ -996,8 +990,6 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: VAULT_ENABLED
-              value: "false"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required
@@ -1107,8 +1099,6 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: VAULT_ENABLED
-              value: "false"
             - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
               value: "180000"
             - name: TOR_HEALTH_REQUIRED
@@ -1400,8 +1390,6 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: VAULT_ENABLED
-              value: "false"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required

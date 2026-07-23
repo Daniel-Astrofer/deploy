@@ -12,8 +12,6 @@ images:
     newTag: staging
   - name: kerosene/server
     newTag: staging
-  - name: kerosene/mpc-sidecar
-    newTag: staging
   - name: kerosene/web-page
     newTag: staging
 patches:

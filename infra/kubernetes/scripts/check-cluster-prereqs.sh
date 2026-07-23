@@ -14,7 +14,7 @@ echo "[*] Kerosene namespaces"
 
 echo "[*] StorageClasses"
 if ! "$KUBECTL" get storageclass; then
-  echo "[!] No StorageClass detected. mpc-sidecar PVCs may stay Pending."
+  echo "[!] No StorageClass detected. PersistentVolumeClaims may stay Pending."
 fi
 
 echo "[*] IngressClasses"

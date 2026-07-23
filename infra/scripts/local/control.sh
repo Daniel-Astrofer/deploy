@@ -36,15 +36,14 @@ Examples:
   infra/scripts/local/control.sh backup-db
   infra/scripts/local/control.sh migrate-db
   infra/scripts/local/control.sh repair-bitcoin --reindex
-  infra/scripts/local/recreate-mpc-sidecars.sh
 EOF
 }
 
 apply_global_option() {
   case "$1" in
     --kfe)
-      KEROSENE_COMPOSE_EXTRA_FILES="${KEROSENE_COMPOSE_EXTRA_FILES:+$KEROSENE_COMPOSE_EXTRA_FILES:}$INFRA_DIR/docker/compose/local.kfe.compose.yaml"
-      export KEROSENE_COMPOSE_EXTRA_FILES
+      echo "[!] --kfe overlay removed; local compose defaults to vault-mesh-lab." >&2
+      echo "[!] Use KEROSENE_COMPOSE_FILE=infra/docker/compose/vault-mesh-lab.compose.yaml" >&2
       return 0
       ;;
     --no-limits)
@@ -255,7 +254,6 @@ case "$command" in
   backup-db|db-backup) exec bash "$LOCAL_SCRIPT_DIR/db-backup.sh" "$@" ;;
   migrate-db|db-migrate) exec bash "$LOCAL_SCRIPT_DIR/db-migrate.sh" "$@" ;;
   repair-bitcoin|repair-lnd) exec bash "$LOCAL_SCRIPT_DIR/repair-bitcoin.sh" "$@" ;;
-  recreate-mpc|recreate-mpc-sidecars) exec bash "$LOCAL_SCRIPT_DIR/recreate-mpc-sidecars.sh" "$@" ;;
   -h|--help|help) usage ;;
   *) fail "Unknown local infra command: $command" ;;
 esac

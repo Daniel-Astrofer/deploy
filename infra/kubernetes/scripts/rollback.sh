@@ -7,8 +7,7 @@ REVISION="${3:-}"
 KUBECTL="${KUBECTL:-kubectl}"
 
 case "$COMPONENT" in
-  server|web-page) KIND="deployment" ;;
-  mpc-sidecar) KIND="statefulset" ;;
+  server|web-page|kfe-service) KIND="deployment" ;;
   *) echo "Unsupported component: $COMPONENT" >&2; exit 2 ;;
 esac
 

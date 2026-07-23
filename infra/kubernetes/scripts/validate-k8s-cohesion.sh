@@ -18,7 +18,6 @@ for env in local staging; do
     'kind: Deployment|  name: server' \
     'kind: Deployment|  name: kfe-service' \
     'kind: Deployment|  name: web-page' \
-    'kind: StatefulSet|  name: mpc-sidecar' \
     'kind: Service|  name: server' \
     'kind: Service|  name: kfe-service' \
     'kind: Service|  name: web-page' \
@@ -31,6 +30,11 @@ for env in local staging; do
       exit 1
     fi
   done
+
+  if grep -qE 'name: mpc-sidecar$' "$manifest"; then
+    echo "mpc-sidecar must not appear in $env render (vault-mesh cutover)" >&2
+    exit 1
+  fi
 
   if grep -qE "${legacy_server}|${legacy_page}" "$manifest"; then
     echo "Legacy workload name found in rendered $env manifest" >&2

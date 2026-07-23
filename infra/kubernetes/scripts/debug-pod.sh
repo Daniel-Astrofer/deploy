@@ -6,7 +6,7 @@ usage() {
 Usage: $0 <namespace> <component> [--shell|--logs|--describe|--port-forward]
 
 component:
-  server | web-page | mpc-sidecar
+  server | web-page | kfe-service
 
 Modes:
   --logs          Current and previous logs. Default.
@@ -41,7 +41,7 @@ fi
 case "$COMPONENT" in
   server) CONTAINER="server"; LOCAL_PORT=18080; REMOTE_PORT=8080 ;;
   web-page) CONTAINER="web-page"; LOCAL_PORT=18081; REMOTE_PORT=8080 ;;
-  mpc-sidecar) CONTAINER="mpc-sidecar"; LOCAL_PORT=18082; REMOTE_PORT=8081 ;;
+  kfe-service) CONTAINER="kfe-service"; LOCAL_PORT=18082; REMOTE_PORT=8080 ;;
   *) echo "Unsupported component: $COMPONENT" >&2; usage; exit 2 ;;
 esac
 

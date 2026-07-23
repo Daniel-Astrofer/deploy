@@ -108,9 +108,9 @@ services = {
         "codeHash": "sha256:" + source_hash,
         "configHash": "sha256:" + config_hash,
     },
-    "mpc-sidecar": {
-        "image": os.environ.get("MPC_SIDECAR_IMAGE", "mpc-sidecar"),
-        "imageDigest": os.environ.get("MPC_IMAGE_DIGEST", "unknown"),
+    "kerosene-vault": {
+        "image": os.environ.get("KEROSENE_VAULT_IMAGE", "kerosene-vault"),
+        "imageDigest": os.environ.get("VAULT_IMAGE_DIGEST", "unknown"),
         "gitCommit": git_commit,
         "buildTime": build_time,
         "codeHash": "sha256:" + source_hash,
