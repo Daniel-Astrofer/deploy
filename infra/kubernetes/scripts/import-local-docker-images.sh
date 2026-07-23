@@ -165,12 +165,21 @@ build_server_image() {
   local target="kerosene/server:local"
   local dockerfile="$REPO_ROOT/infra/docker/images/server/Dockerfile"
   local context="$REPO_ROOT/backend/kerosene"
+  local web_admin_build="$context/web-admin-build"
 
   if [[ ! -f "$dockerfile" ]]; then
     fail "Server Dockerfile not found: $dockerfile"
   fi
   if [[ ! -d "$context" ]]; then
     fail "Server build context not found: $context"
+  fi
+
+  # The server Dockerfile embeds the Flutter web-admin bundle from
+  # `backend/kerosene/web-admin-build/`. In dev machines, that directory may
+  # be absent until someone runs the Flutter build once.
+  if [[ ! -f "$web_admin_build/index.html" ]]; then
+    info "web-admin-build missing; building Flutter web admin bundle (no-jar) to $web_admin_build"
+    bash "$REPO_ROOT/infra/kubernetes/scripts/build-web-admin-backend.sh" --no-jar
   fi
 
   if docker image inspect "$target" >/dev/null 2>&1; then
