@@ -33,7 +33,9 @@ x-vault-lab-env: &vault-lab-env
   # Lab-only secrets — override via host env; never reuse in production.
   BITCOIN_NETWORK: testnet3
   VAULT_AUTH_MODE: static_token
-  VAULT_DKG_MODE: dealer_lab
+  # Lab must run without dealer_lab; the container image is intentionally
+  # compiled without dealer_lab for production-path safety.
+  VAULT_DKG_MODE: distributed_wire
   VAULT_API_TOKEN: ${VAULT_API_TOKEN:-kerosene-vault-lab-only}
   VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:-kerosene-vault-lab-passphrase}
   VAULT_DATA_DIR: /var/lib/kerosene-vault
