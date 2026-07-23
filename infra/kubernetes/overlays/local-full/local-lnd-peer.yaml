@@ -112,6 +112,56 @@ spec:
           volumeMounts:
             - name: lnd-data
               mountPath: /root/.lnd
+        - name: wait-bitcoin-rpc
+          image: curlimages/curl:8.10.1
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              deadline=$(( $(date +%s) + ${BITCOIN_RPC_WAIT_TIMEOUT_SECONDS:-180} ))
+              payload='{"jsonrpc":"1.0","id":"lnd-wait","method":"getblockchaininfo","params":[]}'
+              while :; do
+                resp="$(curl -sS --max-time 2 --fail \
+                  -u "${BITCOIN_RPC_USER}:${BITCOIN_RPC_PASSWORD}" \
+                  -H "Content-Type: application/json" \
+                  --data "$payload" \
+                  "http://${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}/" 2>/dev/null || true)"
+
+                if echo "$resp" | grep -Eq '"initialblockdownload"[[:space:]]*:[[:space:]]*false'; then
+                  echo "bitcoin-core RPC ready (initialblockdownload=false)"
+                  exit 0
+                fi
+
+                if [ "$(date +%s)" -ge "$deadline" ]; then
+                  echo "Timed out waiting for bitcoin-core RPC readiness" >&2
+                  exit 1
+                fi
+
+                sleep 2
+              done
+          env:
+            - name: BITCOIN_RPC_HOST
+              value: bitcoin-core
+            - name: BITCOIN_RPC_PORT
+              value: "8332"
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-user
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-password
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              cpu: 50m
+              memory: 64Mi
       containers:
         - name: lnd
           image: lightninglabs/lnd:v0.20.1-beta
