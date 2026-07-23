@@ -152,6 +152,14 @@ data:
   TICKER_COINGECKO_ENABLED: "true"
   TICKER_PROXY_SOCKS_HOST: "tor-onion"
   TICKER_PROXY_SOCKS_PORT: "9050"
+  # Security material (local-only): in prod this must come from injected secrets.
+  # Spring binds these env vars to:
+  #   api.secret.aes.secret
+  #   api.secret.token.secret
+  #   api.secret.pepper.secret
+  API_SECRET_AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+  API_SECRET_TOKEN_SECRET: "kerosene-local-token-secret"
+  API_SECRET_PEPPER_SECRET: "kerosene-local-pepper-secret"
 ---
 apiVersion: v1
 kind: ConfigMap
