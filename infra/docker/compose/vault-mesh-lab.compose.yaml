@@ -40,6 +40,8 @@ x-vault-lab-env: &vault-lab-env
   # Vaults do NOT run a day cron — kfe/ops call vote+advance.
   # VAULT_RESHARE_POLICY: daily
   # Anti-nonce: durable local log + quorum HTTP /v1/anti-nonce/prepare among VAULT_SEED_PEERS.
+  # Explicit domestic lab tier (honest: not SEV). Production native uses software + AEAD.
+  VAULT_NODE_TIER: domestic
   ATTESTATION_MODE: sim
   LAB_ATTESTATION_ROOT: kerosene-lab-root
   VAULT_LISTEN_ADDR: 0.0.0.0:7701
