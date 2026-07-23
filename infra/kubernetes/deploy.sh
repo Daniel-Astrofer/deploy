@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# ROOT is the repository root derived from this script's location.
+ROOT="$REPO_ROOT"
+
 usage() {
   cat <<'USAGE'
 Usage: infra/kubernetes/deploy.sh [local|local-full|staging] [options]
