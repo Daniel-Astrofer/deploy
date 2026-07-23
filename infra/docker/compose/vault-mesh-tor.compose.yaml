@@ -4,33 +4,32 @@
 # Goals:
 #   - VAULT_DKG_MODE=distributed_wire (same production FROST path; no dealer)
 #   - Vault API not published on host clearnet
-#   - Peers dialed as http://<v3onion>:7701 via socks5h
+#   - Peers dialed as https://<v3onion>:7701 via socks5h (mTLS) or http://… (lab token smoke)
 #   - Longer HTTP timeouts/retries so DKG feels Tor latency/circuit drops
 #
-# Bring-up (repo root):
-#   ./backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh
+# Auth profiles (env):
+#   Lab variability smoke (default): VAULT_AUTH_MODE=static_token
+#   Ceremony / staging / production path:
+#     VAULT_AUTH_MODE=mtls + lab-certs; peer verify = onion_or_spiffe (SPIFFE URI or .onion SAN)
+#     VAULT_AUTH_MODE=mtls ./backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh
 #
-# Or manually:
-#   docker compose -f infra/docker/compose/vault-mesh-tor.compose.yaml up --build -d tor-1 tor-2 tor-3
-#   # wait for hostname files, export VAULT{1,2,3}_ONION, then up vaults
-#
-# Lab auth = static_token (Tor variability exercise). Production ceremony = mTLS + Tor
-# (see backend/kerosene-vault/docs/CEREMONY_TOR.md). Domestic + SEV seating unchanged.
+# Docs: backend/kerosene-vault/docs/CEREMONY_TOR.md + MTLS_SPIFFE_LAYOUT.md
 
 name: vault-mesh-tor
 
 x-vault-tor-env: &vault-tor-env
   BITCOIN_NETWORK: testnet3
-  KEROSENE_ENV: lab
-  VAULT_CEREMONY_MODE: lab
+  KEROSENE_ENV: ${KEROSENE_ENV:-lab}
+  VAULT_CEREMONY_MODE: ${VAULT_CEREMONY_MODE:-lab}
   VAULT_TRANSPORT: tor
-  VAULT_AUTH_MODE: static_token
+  # Lab smoke default = static_token. Ceremony: VAULT_AUTH_MODE=mtls (staging/prod refuse token).
+  VAULT_AUTH_MODE: ${VAULT_AUTH_MODE:-static_token}
   VAULT_DKG_MODE: distributed_wire
   VAULT_API_TOKEN: ${VAULT_API_TOKEN:-kerosene-vault-lab-only}
   VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:-kerosene-vault-lab-passphrase}
   VAULT_DATA_DIR: /var/lib/kerosene-vault
   VAULT_NODE_TIER: domestic
-  ATTESTATION_MODE: sim
+  ATTESTATION_MODE: ${ATTESTATION_MODE:-sim}
   LAB_ATTESTATION_ROOT: kerosene-tor-lab-root
   VAULT_LISTEN_ADDR: 0.0.0.0:7701
   VAULT_GENESIS_N: "3"
@@ -39,6 +38,13 @@ x-vault-tor-env: &vault-tor-env
   VAULT_HTTP_MAX_RETRIES: "5"
   VAULT_HTTP_RETRY_BASE_MS: "750"
   VAULT_HTTP_RETRY_JITTER_MS: "750"
+  VAULT_TLS_VERIFY_MODE: ${VAULT_TLS_VERIFY_MODE:-onion_or_spiffe}
+  VAULT_TLS_PEER_SPIFFE_ID: ${VAULT_TLS_PEER_SPIFFE_ID:-spiffe://kerosene.lab/vault/server}
+  VAULT_TLS_CERT_PATH: ${VAULT_TLS_CERT_PATH:-/certs/vault-server.crt}
+  VAULT_TLS_KEY_PATH: ${VAULT_TLS_KEY_PATH:-/certs/vault-server.key}
+  VAULT_TLS_CLIENT_CA_PATH: ${VAULT_TLS_CLIENT_CA_PATH:-/certs/ca.crt}
+  VAULT_TLS_CLIENT_CERT_PATH: ${VAULT_TLS_CLIENT_CERT_PATH:-/certs/vault-client.crt}
+  VAULT_TLS_CLIENT_KEY_PATH: ${VAULT_TLS_CLIENT_KEY_PATH:-/certs/vault-client.key}
   # Never set VAULT_CLEARNET_PUBLISH=1 here.
 
 x-tor-image: &tor-image
@@ -49,10 +55,8 @@ x-tor-image: &tor-image
 
 networks:
   vault-private:
-    # Vaults talk only to their Tor sidecar on this net (no host port publish).
     driver: bridge
   tor-egress:
-    # Tor daemons need Internet egress for real circuits.
     driver: bridge
 
 services:
@@ -106,13 +110,13 @@ services:
       <<: *vault-tor-env
       VAULT_NODE_ID: vault-1
       VAULT_SOCKS_PROXY: socks5h://tor-1:9050
-      # Filled by lab_dkg_wire_tor.sh after onion discovery (compose variable substitution).
+      # Scheme upgraded to https by vault when VAULT_AUTH_MODE=mtls.
       VAULT_SEED_PEERS: vault-2=http://${VAULT2_ONION:?set VAULT2_ONION}:7701,vault-3=http://${VAULT3_ONION:?set VAULT3_ONION}:7701
     volumes:
       - vault-1-tor-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     networks:
       - vault-private
-    # Intentionally no host ports — private mesh only.
 
   vault-2:
     build:
@@ -128,6 +132,7 @@ services:
       VAULT_SEED_PEERS: vault-1=http://${VAULT1_ONION:?set VAULT1_ONION}:7701,vault-3=http://${VAULT3_ONION:?set VAULT3_ONION}:7701
     volumes:
       - vault-2-tor-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     networks:
       - vault-private
 
@@ -145,6 +150,7 @@ services:
       VAULT_SEED_PEERS: vault-1=http://${VAULT1_ONION:?set VAULT1_ONION}:7701,vault-2=http://${VAULT2_ONION:?set VAULT2_ONION}:7701
     volumes:
       - vault-3-tor-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     networks:
       - vault-private
 
