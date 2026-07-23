@@ -33,6 +33,10 @@ x-vault-lab-env: &vault-lab-env
   VAULT_API_TOKEN: ${VAULT_API_TOKEN:-kerosene-vault-lab-only}
   VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:-kerosene-vault-lab-passphrase}
   VAULT_DATA_DIR: /var/lib/kerosene-vault
+  # Optional: daily Intent + Taproot FROST share refresh on /v1/day/advance.
+  # Default is manual (no crypto on day advance until POST /v1/reshare/trigger).
+  # Vaults do NOT run a day cron — kfe/ops call vote+advance.
+  # VAULT_RESHARE_POLICY: daily
   # Anti-nonce: durable local log + quorum HTTP /v1/anti-nonce/prepare among VAULT_SEED_PEERS.
   ATTESTATION_MODE: sim
   LAB_ATTESTATION_ROOT: kerosene-lab-root
