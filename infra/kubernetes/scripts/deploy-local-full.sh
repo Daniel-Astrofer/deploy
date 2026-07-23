@@ -20,7 +20,7 @@ Deploys the complete local Kubernetes runtime into namespace kerosene-local:
 Legacy NOT started: mpc-sidecar, HashiCorp Vault wallet-arming.
 
 Options:
-  --dry-run            Validate against the Kubernetes API without persisting resources.
+  --dry-run            Server-side dry-run (SSA) with stable field-manager and --force-conflicts.
   --skip-image-import  Do not import kerosene/*:local images into the cluster first.
   --strict-image-import
                        Abort if local image import fails. By default, continue
@@ -242,7 +242,8 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "[*] Creating namespace $NS so server-side dry-run can validate namespaced objects"
     kubectl_cmd create namespace "$NS"
   fi
-  kubectl_cmd apply -k "$WORK_OVERLAY" --server-side --dry-run=server
+  kubectl_cmd apply -k "$WORK_OVERLAY" --server-side --dry-run=server \
+    --field-manager=kerosene-local-full --force-conflicts
   echo "[+] local-full dry-run completed."
   exit 0
 fi
