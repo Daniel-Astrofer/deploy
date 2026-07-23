@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-exec "$ROOT/infra/kubernetes/deploy.sh" "$@"
+exec "$REPO_ROOT/infra/kubernetes/deploy.sh" "$@"
