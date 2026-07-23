@@ -1,0 +1,21 @@
+## Tor sidecar for vault mesh Tor lab / private ceremony.
+## HiddenService publishes vault HTTP; SocksPort for outbound onion dials.
+## Do NOT publish vault clearnet ports — only SOCKS on localhost for operators.
+
+User kerosene
+SocksPort 0.0.0.0:9050
+SocksPolicy accept 10.0.0.0/8
+SocksPolicy accept 172.16.0.0/12
+SocksPolicy accept 192.168.0.0/16
+SocksPolicy accept 127.0.0.0/8
+SocksPolicy reject *
+
+HiddenServiceDir /var/lib/tor/kerosene_service/
+HiddenServiceVersion 3
+# Target overridden per-compose via volume mount of this file with vault-N hostname.
+HiddenServicePort 7701 vault-1:7701
+
+Log notice stdout
+DataDirectory /var/lib/tor
+NumCPUs 1
+SafeSocks 1

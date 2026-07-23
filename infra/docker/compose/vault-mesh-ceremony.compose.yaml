@@ -1,31 +1,34 @@
-# Production-native vault ceremony compose (same binary + FROST distributed_wire as lab).
-# Lab ≠ go-live: this profile refuses sim/dealer/stub; domestic software attestation is first-class.
+# Gate visualize: production-grade binary flags on a private LAN (published ports).
+# Lab ≠ go-live. Real genesis ceremony over Tor = vault-mesh-tor.compose.yaml
+# (see backend/kerosene-vault/docs/CEREMONY_TOR.md).
 #
-# All-domestic (Ryzen / home PC, no SEV):
-#   docker compose -f infra/docker/compose/vault-mesh-ceremony.compose.yaml up --build
-#   VAULT_CEREMONY_MODE=production VAULT_DKG_MODE=distributed_wire \
-#     ATTESTATION_MODE=software VAULT_NODE_TIER=domestic \
-#     VAULT_GENESIS_N=3 VAULT_SEED_PEERS='...' \
-#     ./scripts/genesis_ceremony_checklist.sh
-#   VAULT_AUTH_MODE=mtls VAULT_TLS_CLIENT_CERT=... VAULT_TLS_CLIENT_KEY=... VAULT_TLS_CA=... \
-#     ./backend/kerosene-vault/scripts/genesis_dkg_wire.sh
+# This profile uses ceremony_mode=staging + clearnet so LAN Gate visualize still boots.
+# Production checklist (`VAULT_CEREMONY_MODE=production`) requires Tor + onion peers and
+# refuses VAULT_CLEARNET_PUBLISH — use vault-mesh-tor (or host Tor) for go-live.
 #
-# Mixed SEV-priority: set VAULT_PEER_TIERS=vault-epyc=sev on every node; seating prefers SEV.
-# Never set ATTESTATION_STAGING_STUB=1 here. Never claim sev without /dev/sev-guest.
+# LAN Gate visualize:
+#   VAULT_DATA_PASSPHRASE=... docker compose -f infra/docker/compose/vault-mesh-ceremony.compose.yaml up --build
+#   ./backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh  # if needed
+#   VAULT_AUTH_MODE=mtls ... ./backend/kerosene-vault/scripts/genesis_dkg_wire.sh
 #
-# Certs: reuse ./backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh for Gate visualize;
-# production ceremony must use operational CA / SPIRE (see MTLS_SPIFFE_LAYOUT.md).
+# Real Tor ceremony:
+#   ./backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh
+#   VAULT_CEREMONY_MODE=production VAULT_TRANSPORT=tor VAULT_SOCKS_PROXY=... \
+#     VAULT_SEED_PEERS='...onion...' ./backend/kerosene-vault/scripts/genesis_ceremony_checklist.sh
+#
+# Mixed SEV-priority: VAULT_PEER_TIERS=vault-epyc=sev. Never ATTESTATION_STAGING_STUB=1 for prod.
+# Certs: gen_lab_mtls_certs.sh for Gate; ops CA / SPIRE for production (MTLS_SPIFFE_LAYOUT.md).
 
 x-vault-ceremony-env: &vault-ceremony-env
   BITCOIN_NETWORK: testnet3
-  KEROSENE_ENV: production
-  VAULT_CEREMONY_MODE: production
+  KEROSENE_ENV: staging
+  VAULT_CEREMONY_MODE: staging
   VAULT_DKG_MODE: distributed_wire
   VAULT_NODE_TIER: domestic
   ATTESTATION_MODE: software
   VAULT_SHARE_STORE: aead_disk
   VAULT_AUTH_MODE: mtls
-  # Local Gate visualize over LAN; real go-live sets VAULT_TRANSPORT=tor + SOCKS.
+  # LAN Gate visualize only — production go-live uses VAULT_TRANSPORT=tor (vault-mesh-tor).
   VAULT_TRANSPORT: clearnet
   VAULT_LISTEN_ADDR: 0.0.0.0:7701
   VAULT_GENESIS_N: "3"
@@ -50,7 +53,6 @@ services:
       <<: *vault-ceremony-env
       VAULT_NODE_ID: vault-1
       VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
-      # Optional mixed: VAULT_PEER_TIERS: vault-2=sev
     volumes:
       - vault-1-ceremony-data:/var/lib/kerosene-vault
       - ../../../backend/kerosene-vault/lab-certs:/certs:ro

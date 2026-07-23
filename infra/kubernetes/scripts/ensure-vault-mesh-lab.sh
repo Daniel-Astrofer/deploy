@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start the lab vault mesh (testnet3 + static_token) used by local-full / deploy.sh.
+# Starts the lab vault mesh (testnet3 + static_token) used by local-full / deploy.sh.
 # Canonical definition: infra/docker/compose/vault-mesh-lab.compose.yaml
 # Staging/prod-like mTLS mesh is NOT the default here — see vault-mesh-staging.compose.yaml
 # and set KEROSENE_VAULT_MESH_PROFILE=staging only when certs are available.
+#
+# Real Tor private mesh (ceremony / Tor variability) is a separate profile:
+#   infra/docker/compose/vault-mesh-tor.compose.yaml
+#   ./backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh
+# This script does NOT start Tor mesh — deploy.sh remains clearnet lab visualize.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
