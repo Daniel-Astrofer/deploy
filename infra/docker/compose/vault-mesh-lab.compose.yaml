@@ -57,7 +57,7 @@ services:
   vault-1:
     build:
       context: ../../../backend/kerosene-vault
-      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-1-lab
     environment:
       <<: *vault-lab-env
@@ -71,7 +71,7 @@ services:
   vault-2:
     build:
       context: ../../../backend/kerosene-vault
-      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-2-lab
     environment:
       <<: *vault-lab-env
@@ -85,7 +85,7 @@ services:
   vault-3:
     build:
       context: ../../../backend/kerosene-vault
-      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-3-lab
     environment:
       <<: *vault-lab-env
