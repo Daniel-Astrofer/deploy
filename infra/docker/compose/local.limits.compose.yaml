@@ -90,12 +90,19 @@ x-small-job-limits: &small-job-limits
         memory: "${KEROSENE_LOCAL_JOB_MEMORY:-192M}"
 
 services:
-  kerosene-vault:
+  # Rust vault-mesh nodes (names match vault-mesh-*.compose.yaml).
+  kerosene-vault-1-lab:
     <<: *vault-limits
-  kerosene-tor-vault:
-    <<: *tor-limits
-  kerosene-vault-arm:
-    <<: *small-job-limits
+  kerosene-vault-2-lab:
+    <<: *vault-limits
+  kerosene-vault-3-lab:
+    <<: *vault-limits
+  kerosene-vault-1-staging:
+    <<: *vault-limits
+  kerosene-vault-2-staging:
+    <<: *vault-limits
+  kerosene-vault-3-staging:
+    <<: *vault-limits
 
   lnd-neutrino:
     <<: *lnd-limits

@@ -236,10 +236,9 @@ Imagens do quorum local:
 ```text
 kerosene/server
 kerosene/kfe-service
-kerosene/mpc-sidecar
+kerosene/kerosene-vault
 kerosene/web-page
 kerosene/tor
-kerosene/vault
 ```
 
 O contrato de imagens pode continuar em:

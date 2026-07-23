@@ -2,13 +2,11 @@
 
 `infra/docker/images.yaml` é o contrato canônico de imagens da Kerosene.
 
-Ele define nome da imagem, tag local, Dockerfile e contexto de build para os workloads principais: `server`, `kfe-service`, `mpc-sidecar`, `vault`, `tor` e `web-page`.
+Ele define nome da imagem, tag local, Dockerfile e contexto de build para os workloads principais: `server`, `kfe-service`, `kerosene-vault`, `tor` e `web-page`.
 
 ## Estado atual
 
-Os Dockerfiles e Compose files canônicos já vivem em `infra/docker`. Os caminhos
-legados continuam presentes para compatibilidade enquanto scripts antigos são
-migrados gradualmente. Use os wrappers canônicos em `infra/docker/scripts`:
+Os Dockerfiles e Compose files canônicos já vivem em `infra/docker`. Use os wrappers canônicos em `infra/docker/scripts`:
 
 ```bash
 bash infra/docker/scripts/compose-local.sh ps
@@ -18,15 +16,14 @@ bash infra/docker/scripts/compose-local-kfe.sh ps
 Arquivos Compose canônicos:
 
 ```text
-infra/docker/compose/local.compose.yaml
+infra/docker/compose/vault-mesh-lab.compose.yaml
+infra/docker/compose/vault-mesh-staging.compose.yaml
+infra/docker/compose/vault-mesh-tor.compose.yaml
+infra/docker/compose/vault-mesh-ceremony.compose.yaml
 infra/docker/compose/local.limits.compose.yaml
-infra/docker/compose/local.kfe.compose.yaml
 ```
 
 `hardened` e overlays de produção ficam fora do repositório público.
-
-`infra/docker/images.yaml` aponta para os Dockerfiles canônicos e mantém
-o caminho canônico do Dockerfile.
 
 ## Layout
 
@@ -35,14 +32,12 @@ infra/docker/
   images/
     server/Dockerfile
     kfe-service/Dockerfile
-    mpc-sidecar/Dockerfile
-    vault/Dockerfile
+    kerosene-vault/Dockerfile
     tor/Dockerfile
     web-page/Dockerfile
   compose/
-    local.compose.yaml
+    vault-mesh-*.compose.yaml
     local.limits.compose.yaml
-    local.kfe.compose.yaml
   images.yaml
 ```
 
