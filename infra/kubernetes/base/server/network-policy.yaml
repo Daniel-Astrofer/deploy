@@ -37,15 +37,6 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: mpc-sidecar
-      ports:
-        - protocol: TCP
-          port: 50051
-        - protocol: TCP
-          port: 8081
-    - to:
-        - podSelector:
-            matchLabels:
               app.kubernetes.io/name: postgres
       ports:
         - protocol: TCP

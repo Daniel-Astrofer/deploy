@@ -21,16 +21,6 @@ images:
     context: backend/kerosene
     owner: kfe
 
-  mpc-sidecar:
-    image: kerosene/mpc-sidecar
-    local_tag: local
-    dockerfile: infra/docker/images/mpc-sidecar/Dockerfile
-    context: backend/mpc-sidecar
-    owner: mpc
-    notes: >-
-      REMOVED from deploy.sh / local-full. See backend/mpc-sidecar/REMOVED.txt.
-      Settlement uses kerosene-vault mesh (vault-mesh-lab.compose.yaml).
-
   kerosene-vault:
     image: kerosene/kerosene-vault
     local_tag: local

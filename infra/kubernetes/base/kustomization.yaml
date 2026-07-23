@@ -7,7 +7,6 @@ resources:
   - dependency-services
   - server
   - kfe-service
-  - mpc-sidecar
   - web-page
 labels:
   - pairs:

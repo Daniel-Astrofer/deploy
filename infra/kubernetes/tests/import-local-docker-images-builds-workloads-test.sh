@@ -19,20 +19,17 @@ fail() {
 mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/scripts" \
   "$TMP_DIR/infra/docker/images/server" \
   "$TMP_DIR/infra/docker/images/kfe-service" \
-  "$TMP_DIR/infra/docker/images/mpc-sidecar" \
   "$TMP_DIR/infra/docker/images/web-page" \
   "$TMP_DIR/infra/docker/images/tor" \
   "$TMP_DIR/infra/runtime/tor" \
   "$TMP_DIR/infra/runtime/web" \
-  "$TMP_DIR/backend/kerosene" \
-  "$TMP_DIR/backend/mpc-sidecar"
+  "$TMP_DIR/backend/kerosene"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
 cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
 touch \
   "$TMP_DIR/infra/docker/images/server/Dockerfile" \
   "$TMP_DIR/infra/docker/images/kfe-service/Dockerfile" \
-  "$TMP_DIR/infra/docker/images/mpc-sidecar/Dockerfile" \
   "$TMP_DIR/infra/docker/images/web-page/Dockerfile" \
   "$TMP_DIR/infra/docker/images/tor/Dockerfile" \
   "$TMP_DIR/infra/runtime/web/nginx.k8s.conf"

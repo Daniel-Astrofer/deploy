@@ -15,13 +15,11 @@ infra/docker/compose/vault-mesh-lab.compose.yaml      # deploy.sh settlement (te
 infra/docker/compose/vault-mesh-staging.compose.yaml  # mTLS staging (opt-in)
 infra/docker/compose/vault-mesh-tor.compose.yaml      # real Tor private mesh + distributed_wire
 infra/docker/compose/vault-mesh-ceremony.compose.yaml # production-native flags (pair with Tor for go-live)
-infra/docker/compose/local.compose.yaml               # legado (não usado por deploy)
 infra/docker/compose/local.limits.compose.yaml
-infra/docker/compose/local.kfe.compose.yaml
 ```
 
 `bash infra/deploy.sh` starts **vault-mesh-lab** (kerosene-vault ×3, clearnet ports) and enables
-kfe vaultmesh (`mesh-only=true`). Do not start mpc-sidecar for that path.
+kfe vaultmesh (`mesh-only=true`). Legacy `local.compose.yaml` / `mpc-sidecar` compose paths are removed.
 
 **Real genesis ceremony over Tor** is **not** started by deploy.sh — use
 `vault-mesh-tor.compose.yaml` + `backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh`

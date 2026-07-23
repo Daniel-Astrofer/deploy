@@ -47,8 +47,12 @@ run_grep_check \
 
 
 : > "$TMP"
-if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.kfe\.' backend/kerosene/src/main/java backend/kerosene/src/test/java 2>/dev/null \
-  | grep -v '/source/kfe/' > "$TMP"; then
+if grep -RIn --exclude-dir=.git --exclude-dir=build -E 'import (source\.kfe\.|com\.kerosene\.kfe\.)' \
+  backend/kerosene/kerosene-app/src/main/java \
+  backend/kerosene/kerosene-contracts/src/main/java \
+  backend/kerosene/kerosene-shared/src/main/java \
+  2>/dev/null \
+  | grep -vE '/(source/kfe|com/kerosene/kfe)/' > "$TMP"; then
   :
 else
   : > "$TMP"
@@ -65,7 +69,12 @@ fi
 
 
 : > "$TMP"
-if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.auth\.' backend/kerosene/kfe-service/src/main/java/source/kfe backend/kerosene/kfe-service/src/test/java/source/kfe 2>/dev/null > "$TMP"; then
+if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.auth\.' \
+  backend/kerosene/kfe-service/src/main/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/main/java/source/kfe \
+  backend/kerosene/kfe-service/src/test/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/test/java/source/kfe \
+  2>/dev/null > "$TMP"; then
   :
 else
   : > "$TMP"
@@ -82,7 +91,12 @@ fi
 
 
 : > "$TMP"
-if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.notification\.' backend/kerosene/kfe-service/src/main/java/source/kfe backend/kerosene/kfe-service/src/test/java/source/kfe 2>/dev/null > "$TMP"; then
+if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.notification\.' \
+  backend/kerosene/kfe-service/src/main/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/main/java/source/kfe \
+  backend/kerosene/kfe-service/src/test/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/test/java/source/kfe \
+  2>/dev/null > "$TMP"; then
   :
 else
   : > "$TMP"
@@ -99,7 +113,12 @@ fi
 
 
 : > "$TMP"
-if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.security\.' backend/kerosene/kfe-service/src/main/java/source/kfe backend/kerosene/kfe-service/src/test/java/source/kfe 2>/dev/null > "$TMP"; then
+if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.security\.' \
+  backend/kerosene/kfe-service/src/main/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/main/java/source/kfe \
+  backend/kerosene/kfe-service/src/test/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/test/java/source/kfe \
+  2>/dev/null > "$TMP"; then
   :
 else
   : > "$TMP"
@@ -116,7 +135,12 @@ fi
 
 
 : > "$TMP"
-if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.sovereign\.' backend/kerosene/kfe-service/src/main/java/source/kfe backend/kerosene/kfe-service/src/test/java/source/kfe 2>/dev/null > "$TMP"; then
+if grep -RIn --exclude-dir=.git --exclude-dir=build 'import source\.sovereign\.' \
+  backend/kerosene/kfe-service/src/main/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/main/java/source/kfe \
+  backend/kerosene/kfe-service/src/test/java/com/kerosene/kfe \
+  backend/kerosene/kfe-service/src/test/java/source/kfe \
+  2>/dev/null > "$TMP"; then
   :
 else
   : > "$TMP"
@@ -134,13 +158,13 @@ fi
 
 run_grep_check \
   "kerosene-contracts must not depend on implementation packages" \
-  -RInE --exclude-dir=.git --exclude-dir=build 'import (source\.(kfe|auth|notification|security|sovereign)\.|org\.springframework\.|jakarta\.persistence\.|javax\.persistence\.)' backend/kerosene/kerosene-contracts/src/main/java
+  -RInE --exclude-dir=.git --exclude-dir=build 'import (source\.(kfe|auth|notification|security|sovereign)\.|com\.kerosene\.kfe\.|org\.springframework\.|jakarta\.persistence\.|javax\.persistence\.)' backend/kerosene/kerosene-contracts/src/main/java
 
 
 
 run_grep_check \
   "kerosene-shared must not depend on implementation packages" \
-  -RInE --exclude-dir=.git --exclude-dir=build 'import source\.(kfe|auth|notification|security|sovereign)\.' backend/kerosene/kerosene-shared/src/main/java
+  -RInE --exclude-dir=.git --exclude-dir=build 'import (source\.(kfe|auth|notification|security|sovereign)\.|com\.kerosene\.kfe\.)' backend/kerosene/kerosene-shared/src/main/java
 
 run_grep_check \
   "legacy financial API routes must not exist in executable code" \

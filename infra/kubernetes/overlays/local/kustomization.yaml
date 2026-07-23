@@ -12,8 +12,6 @@ images:
     newTag: local
   - name: kerosene/server
     newTag: local
-  - name: kerosene/mpc-sidecar
-    newTag: local
   - name: kerosene/web-page
     newTag: local
 patches:

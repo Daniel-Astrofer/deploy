@@ -17,22 +17,6 @@ spec:
               cpu: 1000m
               memory: 1536Mi
 ---
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mpc-sidecar
-spec:
-  template:
-    spec:
-      containers:
-        - name: mpc-sidecar
-          imagePullPolicy: Never
-          env:
-            - name: MPC_ALLOW_INSECURE_GRPC
-              value: "true"
-            - name: MPC_REQUIRE_MASTER_KEY
-              value: "false"
----
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -60,7 +44,6 @@ data:
   AUDIT_SOLVENCY_ENFORCED: "false"
   RELEASE_ATTESTATION_REQUIRED: "false"
   RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
-  MPC_SIDECAR_TLS_ENABLED: "false"
 
 ---
 apiVersion: apps/v1
@@ -110,11 +93,9 @@ data:
   AUDIT_SOLVENCY_ENFORCED: "false"
   RELEASE_ATTESTATION_REQUIRED: "false"
   RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
-  KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED: "true"
-  MPC_SIDECAR_TLS_ENABLED: "false"
+  KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED: "false"
+  KFE_MPC_SIGNING_ENABLED: "false"
   TOR_HEALTH_REQUIRED: "false"
-  VAULT_RAFT_ENABLED: "false"
-  VAULT_RAFT_REQUIRED: "false"
   LIGHTNING_LND_ENABLED: "false"
   LIGHTNING_LND_TLS_ENABLED: "false"
   BITCOIN_RPC_REQUIRED: "false"
