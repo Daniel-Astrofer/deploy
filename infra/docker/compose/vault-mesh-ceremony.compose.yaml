@@ -7,8 +7,8 @@
 # refuses VAULT_CLEARNET_PUBLISH — use vault-mesh-tor (or host Tor) for go-live.
 #
 # LAN Gate visualize:
+#   infra/scripts/gen-ceremony-mtls.sh   # unique SPIFFE + audit keys → ceremony-certs/
 #   VAULT_DATA_PASSPHRASE=... docker compose -f infra/docker/compose/vault-mesh-ceremony.compose.yaml up --build
-#   ./backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh  # if needed
 #   VAULT_AUTH_MODE=mtls ... ./backend/kerosene-vault/scripts/genesis_dkg_wire.sh
 #
 # Real Tor ceremony:
@@ -17,7 +17,8 @@
 #     VAULT_SEED_PEERS='...onion...' ./backend/kerosene-vault/scripts/genesis_ceremony_checklist.sh
 #
 # Mixed SEV-priority: VAULT_PEER_TIERS=vault-epyc=sev. Never ATTESTATION_STAGING_STUB=1 for prod.
-# Certs: gen_lab_mtls_certs.sh for Gate; ops CA / SPIRE for production (MTLS_SPIFFE_LAYOUT.md).
+# Certs: gen_ceremony_mtls_certs.sh (unique SPIFFE) or gen_lab_mtls_certs.sh for Gate;
+# ops SPIRE drop-in uses same URI layout (MTLS_SPIFFE_LAYOUT.md). Audit keys: gen_mesh_audit_keys.sh.
 
 x-vault-ceremony-env: &vault-ceremony-env
   BITCOIN_NETWORK: testnet3
@@ -35,11 +36,15 @@ x-vault-ceremony-env: &vault-ceremony-env
   VAULT_DATA_DIR: /var/lib/kerosene-vault
   VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:?set VAULT_DATA_PASSPHRASE}
   LAB_ATTESTATION_ROOT: kerosene-ceremony-root
-  VAULT_TLS_CERT_PATH: ${VAULT_TLS_CERT_PATH:-/certs/vault-server.crt}
-  VAULT_TLS_KEY_PATH: ${VAULT_TLS_KEY_PATH:-/certs/vault-server.key}
-  VAULT_TLS_CLIENT_CA_PATH: ${VAULT_TLS_CLIENT_CA_PATH:-/certs/ca.crt}
-  VAULT_TLS_CLIENT_CERT_PATH: ${VAULT_TLS_CLIENT_CERT_PATH:-/certs/vault-client.crt}
-  VAULT_TLS_CLIENT_KEY_PATH: ${VAULT_TLS_CLIENT_KEY_PATH:-/certs/vault-client.key}
+  VAULT_MTLS_TRUST_DOMAIN: ${VAULT_MTLS_TRUST_DOMAIN:-kerosene.ceremony}
+  # Per-node SPIFFE allowlist (unique). Override after gen_ceremony_mtls_certs.sh.
+  VAULT_TLS_PEER_SPIFFE_ID: ${VAULT_TLS_PEER_SPIFFE_ID:-spiffe://kerosene.ceremony/vault/vault-1,spiffe://kerosene.ceremony/vault/vault-2,spiffe://kerosene.ceremony/vault/vault-3}
+  VAULT_TLS_CERT_PATH: ${VAULT_TLS_CERT_PATH:-/certs/server.crt}
+  VAULT_TLS_KEY_PATH: ${VAULT_TLS_KEY_PATH:-/certs/server.key}
+  VAULT_TLS_CLIENT_CA_PATH: ${VAULT_TLS_CLIENT_CA_PATH:-/ca/ca.crt}
+  VAULT_TLS_CLIENT_CERT_PATH: ${VAULT_TLS_CLIENT_CERT_PATH:-/certs/client.crt}
+  VAULT_TLS_CLIENT_KEY_PATH: ${VAULT_TLS_CLIENT_KEY_PATH:-/certs/client.key}
+  VAULT_AUDIT_PUBKEYS_PATH: ${VAULT_AUDIT_PUBKEYS_PATH:-/audit/allowlist.txt}
 
 services:
   vault-1:
@@ -55,7 +60,9 @@ services:
       VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
     volumes:
       - vault-1-ceremony-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/nodes/vault-1:/certs:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/ca.crt:/ca/ca.crt:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/audit:/audit:ro
     ports:
       - "7701:7701"
 
@@ -72,7 +79,9 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
     volumes:
       - vault-2-ceremony-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/nodes/vault-2:/certs:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/ca.crt:/ca/ca.crt:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/audit:/audit:ro
     ports:
       - "7702:7701"
 
@@ -89,7 +98,9 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
     volumes:
       - vault-3-ceremony-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/nodes/vault-3:/certs:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/ca.crt:/ca/ca.crt:ro
+      - ../../../backend/kerosene-vault/ceremony-certs/audit:/audit:ro
     ports:
       - "7703:7701"
 
