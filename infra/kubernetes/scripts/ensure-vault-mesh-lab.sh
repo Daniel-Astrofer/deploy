@@ -138,10 +138,10 @@ wait_tor_onions() {
 start_tor_mesh() {
   echo "[*] Starting Tor sidecars from $COMPOSE_FILE" >&2
   pushd "$COMPOSE_DIR" >/dev/null
-  docker compose -f "$COMPOSE_FILE" up -d --build tor-1 tor-2 tor-3 >&2
+  docker compose --project-directory "$COMPOSE_DIR" -f "$COMPOSE_FILE" up -d --build tor-1 tor-2 tor-3 >&2
   wait_tor_onions
   echo "[*] Starting vaults with onion peer seeds (distributed_wire, no clearnet vault ports)" >&2
-  docker compose -f "$COMPOSE_FILE" up -d --build vault-1 vault-2 vault-3 >&2
+  docker compose --project-directory "$COMPOSE_DIR" -f "$COMPOSE_FILE" up -d --build vault-1 vault-2 vault-3 >&2
   popd >/dev/null
 
   # Best-effort health via host SOCKS (published 127.0.0.1:19051).
@@ -186,7 +186,7 @@ if [[ "$PROFILE" == "tor" ]]; then
   start_tor_mesh
 else
   pushd "$COMPOSE_DIR" >/dev/null
-  docker compose -f "$COMPOSE_FILE" up -d --build >&2
+  docker compose --project-directory "$COMPOSE_DIR" -f "$COMPOSE_FILE" up -d --build >&2
   popd >/dev/null
 
   # Wait briefly for vault-1 HTTP on the published lab port.
