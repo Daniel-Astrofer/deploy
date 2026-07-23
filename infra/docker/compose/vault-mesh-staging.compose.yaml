@@ -1,6 +1,10 @@
-# Staging mesh: TEE mode (SEV stub) — no ATTESTATION_MODE=sim, no LAB_TIMELOCK_SCALE (F8).
+# Staging mesh: TEE path exercise (SEV stub by default) — no ATTESTATION_MODE=sim, no LAB_TIMELOCK_SCALE (F8).
 # testnet3 only until Production Gate + explicit mainnet flag.
-# Real HW: set ATTESTATION_STAGING_STUB=0 and provide platform quote plumbing.
+# Real HW SEV: set ATTESTATION_STAGING_STUB=0 and provide platform quote plumbing.
+#
+# Prod operators are mostly domestic PCs (TPM), not EPYC/SEV — see VAULT_MESH_PLAN.md §3.1.
+# This compose validates the SEV/staging path; it does NOT mean every ceremony node must be SEV.
+# Native ceremony may be all-domestic; SEV nodes get seating priority when present.
 #
 # Lab-only defaults below are for local staging visualization — NOT production go-live.
 # Staging must NOT set VAULT_DKG_MODE=dealer_lab (production-path refuse).

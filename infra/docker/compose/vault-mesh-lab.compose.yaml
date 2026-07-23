@@ -1,6 +1,8 @@
 # Lab-only visualization of the production-grade vault binary (MODE=lab-visualize).
 # NOT a go-live / production profile — Lab P0 ≠ Production Gate.
 # Uses dealer_lab + static_token + AEAD disk; production builds must refuse these.
+# Mirrors domestic-majority ops (no SEV required on every node); SEV is a preferred upgrade
+# with seating priority — VAULT_MESH_PLAN.md §3.1.
 #
 # Bring up:
 #   docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml up --build
