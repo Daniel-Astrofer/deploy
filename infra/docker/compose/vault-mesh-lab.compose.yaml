@@ -6,6 +6,14 @@
 #   docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml up --build
 # Smoke:
 #   ./backend/kerosene-vault/scripts/lab_testnet3_smoke.sh
+#
+# --- Over-wire distributed DKG (3 containers, no dealer) ---
+# Set on each service (or override):
+#   VAULT_DKG_MODE=distributed_wire
+#   VAULT_AUTH_MODE=static_token   # lab peer auth; keep same VAULT_API_TOKEN on all
+# Then run:
+#   ./backend/kerosene-vault/scripts/lab_dkg_wire.sh
+# In-process fallback (single process, no peer HTTP): VAULT_DKG_MODE=distributed
 
 x-vault-lab-env: &vault-lab-env
   # Lab-only secrets — override via host env; never reuse in production.
