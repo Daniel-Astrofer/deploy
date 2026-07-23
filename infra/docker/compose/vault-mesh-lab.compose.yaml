@@ -1,5 +1,25 @@
-# Lab skeleton: N vault images simulating mesh peers (F1–F6).
-# Real Tor/FROST crypto vendors come later — protocol paths are real in-process.
+# Lab-only visualization of the production-grade vault binary (MODE=lab-visualize).
+# NOT a go-live / production profile — Lab P0 ≠ Production Gate.
+# Uses dealer_lab + static_token + AEAD disk; production builds must refuse these.
+#
+# Bring up:
+#   docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml up --build
+# Smoke:
+#   ./backend/kerosene-vault/scripts/lab_testnet3_smoke.sh
+
+x-vault-lab-env: &vault-lab-env
+  # Lab-only secrets — override via host env; never reuse in production.
+  BITCOIN_NETWORK: testnet3
+  VAULT_AUTH_MODE: static_token
+  VAULT_DKG_MODE: dealer_lab
+  VAULT_API_TOKEN: ${VAULT_API_TOKEN:-kerosene-vault-lab-only}
+  VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:-kerosene-vault-lab-passphrase}
+  VAULT_DATA_DIR: /var/lib/kerosene-vault
+  ATTESTATION_MODE: sim
+  LAB_ATTESTATION_ROOT: kerosene-lab-root
+  VAULT_LISTEN_ADDR: 0.0.0.0:7701
+  VAULT_GENESIS_N: "3"
+  LAB_TIMELOCK_SCALE: "0"
 
 services:
   vault-1:
@@ -8,13 +28,11 @@ services:
       dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-1-lab
     environment:
+      <<: *vault-lab-env
       VAULT_NODE_ID: vault-1
-      ATTESTATION_MODE: sim
-      LAB_ATTESTATION_ROOT: kerosene-lab-root
-      VAULT_LISTEN_ADDR: 0.0.0.0:7701
-      VAULT_GENESIS_N: "3"
-      LAB_TIMELOCK_SCALE: "0"
       VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
+    volumes:
+      - vault-1-lab-data:/var/lib/kerosene-vault
     ports:
       - "7701:7701"
 
@@ -24,13 +42,11 @@ services:
       dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-2-lab
     environment:
+      <<: *vault-lab-env
       VAULT_NODE_ID: vault-2
-      ATTESTATION_MODE: sim
-      LAB_ATTESTATION_ROOT: kerosene-lab-root
-      VAULT_LISTEN_ADDR: 0.0.0.0:7701
-      VAULT_GENESIS_N: "3"
-      LAB_TIMELOCK_SCALE: "0"
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
+    volumes:
+      - vault-2-lab-data:/var/lib/kerosene-vault
     ports:
       - "7702:7701"
 
@@ -40,12 +56,15 @@ services:
       dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-3-lab
     environment:
+      <<: *vault-lab-env
       VAULT_NODE_ID: vault-3
-      ATTESTATION_MODE: sim
-      LAB_ATTESTATION_ROOT: kerosene-lab-root
-      VAULT_LISTEN_ADDR: 0.0.0.0:7701
-      VAULT_GENESIS_N: "3"
-      LAB_TIMELOCK_SCALE: "0"
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
+    volumes:
+      - vault-3-lab-data:/var/lib/kerosene-vault
     ports:
       - "7703:7701"
+
+volumes:
+  vault-1-lab-data:
+  vault-2-lab-data:
+  vault-3-lab-data:
