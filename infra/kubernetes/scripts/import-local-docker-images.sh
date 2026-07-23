@@ -166,6 +166,7 @@ build_server_image() {
   local dockerfile="$REPO_ROOT/infra/docker/images/server/Dockerfile"
   local context="$REPO_ROOT/backend/kerosene"
   local web_admin_build="$context/web-admin-build"
+  local frontend_web_bundle="$REPO_ROOT/frontend/build/web"
 
   if [[ ! -f "$dockerfile" ]]; then
     fail "Server Dockerfile not found: $dockerfile"
@@ -178,8 +179,15 @@ build_server_image() {
   # `backend/kerosene/web-admin-build/`. In dev machines, that directory may
   # be absent until someone runs the Flutter build once.
   if [[ ! -f "$web_admin_build/index.html" ]]; then
-    info "web-admin-build missing; building Flutter web admin bundle (no-jar) to $web_admin_build"
-    bash "$REPO_ROOT/infra/kubernetes/scripts/build-web-admin-backend.sh" --no-jar
+    if [[ -f "$frontend_web_bundle/index.html" ]]; then
+      info "web-admin-build missing; copying Flutter bundle from $frontend_web_bundle"
+      rm -rf -- "$web_admin_build"
+      mkdir -p "$web_admin_build"
+      cp -R "$frontend_web_bundle"/. "$web_admin_build"/
+    else
+      info "web-admin-build missing; building Flutter web admin bundle (no-jar) to $web_admin_build"
+      bash "$REPO_ROOT/infra/kubernetes/scripts/build-web-admin-backend.sh" --no-jar
+    fi
   fi
 
   if docker image inspect "$target" >/dev/null 2>&1; then
