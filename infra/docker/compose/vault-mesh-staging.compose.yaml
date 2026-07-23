@@ -5,8 +5,31 @@
 # Lab-only defaults below are for local staging visualization — NOT production go-live.
 # Staging must NOT set VAULT_DKG_MODE=dealer_lab (production-path refuse).
 #
-# mTLS (default): generate materials first:
-#   ./backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh
+# --- mTLS end-to-end (default) ---
+# 1) Materialize certs (SPIFFE-like layout under lab-certs/spiffe/):
+#      ./backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh
+#    Short-lived leaf rotation (reuses CA):
+#      VAULT_LAB_MTLS_TTL_HOURS=24 ./backend/kerosene-vault/scripts/rotate_lab_mtls_certs.sh
+#    Docs: backend/kerosene-vault/docs/MTLS_SPIFFE_LAYOUT.md
+# 2) Bring up mesh (HTTPS + client cert required):
+#      docker compose -f infra/docker/compose/vault-mesh-staging.compose.yaml up --build
+# 3) Point kfe at vault with client TLS (go-live props):
+#      --spring.config.additional-location=classpath:kfe-service-vaultmesh-go-live.properties
+#    Props (env overrides):
+#      KFE_VAULTMESH_BASE_URL=https://127.0.0.1:7801
+#      KFE_VAULTMESH_TLS_ENABLED=true
+#      KFE_VAULTMESH_TLS_CERT_PATH=.../lab-certs/vault-client.crt
+#      KFE_VAULTMESH_TLS_KEY_PATH=.../lab-certs/vault-client.pkcs8.key
+#      KFE_VAULTMESH_TLS_CA_PATH=.../lab-certs/ca.crt
+#    Or PKCS12:
+#      KFE_VAULTMESH_TLS_KEYSTORE_PATH=.../lab-certs/kfe-client.p12
+#      KFE_VAULTMESH_TLS_TRUSTSTORE_PATH=.../lab-certs/truststore.p12
+#      KFE_VAULTMESH_TLS_KEYSTORE_PASSWORD=changeit
+#      KFE_VAULTMESH_TLS_TRUSTSTORE_PASSWORD=changeit
+#    Do not set KFE_VAULTMESH_API_TOKEN under mTLS (vault refuses X-Vault-Token).
+# 4) Smoke (client cert):
+#      curl --cert lab-certs/vault-client.crt --key lab-certs/vault-client.key \
+#           --cacert lab-certs/ca.crt https://127.0.0.1:7801/v1/health
 
 x-vault-staging-env: &vault-staging-env
   BITCOIN_NETWORK: testnet3
