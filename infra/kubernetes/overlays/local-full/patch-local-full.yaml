@@ -160,6 +160,10 @@ data:
   API_SECRET_AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
   API_SECRET_TOKEN_SECRET: "kerosene-local-token-secret"
   API_SECRET_PEPPER_SECRET: "kerosene-local-pepper-secret"
+  # OperationalHealthService.checkStorage requires this path to be an
+  # existing readable+writeable directory. The server mounts /tmp as an
+  # in-memory emptyDir by design.
+  SHARD_IDENTITY_PATH: "/tmp"
 ---
 apiVersion: v1
 kind: ConfigMap
