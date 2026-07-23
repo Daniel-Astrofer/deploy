@@ -236,11 +236,12 @@ data:
   RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
   QUORUM_ALLOW_LOCAL_SIMULATION: "true"
   # On-chain outbound: local Bitcoin Core is a first-class PSBT signer seat (walletprocesspsbt).
-  # Production multiparty deploys set QUORUM_PSBT_SIGNER_URLS and raise required signatures.
-  QUORUM_PSBT_LOCAL_CORE_SIGNER_ENABLED: "true"
+  # Mesh-only: Taproot PSBT signing via vault mesh (no local-core / mpc fallback).
+  # Fund the mesh deposit address from GET /v1/bitcoin/deposit (tr() watch-only).
+  QUORUM_PSBT_LOCAL_CORE_SIGNER_ENABLED: "false"
   QUORUM_PSBT_REQUIRED_SIGNATURES: "1"
-  QUORUM_PSBT_LOCAL_CORE_SIGNER_ID: "bitcoin-core-wallet"
   QUORUM_PSBT_REQUIRE_SIGNER_IDENTITY: "false"
+  KFE_MPC_SIGNING_ENABLED: "false"
   # Beta onramp directory only — third-party links, Kerosene does not process fiat.
   # Keys map to provider aliases in the Flutter receive gateway (moonpay, transak, …)
   # plus generic buy/sell/help.
