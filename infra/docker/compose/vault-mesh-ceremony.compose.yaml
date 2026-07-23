@@ -1,0 +1,97 @@
+# Production-native vault ceremony compose (same binary + FROST distributed_wire as lab).
+# Lab ≠ go-live: this profile refuses sim/dealer/stub; domestic software attestation is first-class.
+#
+# All-domestic (Ryzen / home PC, no SEV):
+#   docker compose -f infra/docker/compose/vault-mesh-ceremony.compose.yaml up --build
+#   VAULT_CEREMONY_MODE=production VAULT_DKG_MODE=distributed_wire \
+#     ATTESTATION_MODE=software VAULT_NODE_TIER=domestic \
+#     VAULT_GENESIS_N=3 VAULT_SEED_PEERS='...' \
+#     ./scripts/genesis_ceremony_checklist.sh
+#   VAULT_AUTH_MODE=mtls VAULT_TLS_CLIENT_CERT=... VAULT_TLS_CLIENT_KEY=... VAULT_TLS_CA=... \
+#     ./backend/kerosene-vault/scripts/genesis_dkg_wire.sh
+#
+# Mixed SEV-priority: set VAULT_PEER_TIERS=vault-epyc=sev on every node; seating prefers SEV.
+# Never set ATTESTATION_STAGING_STUB=1 here. Never claim sev without /dev/sev-guest.
+#
+# Certs: reuse ./backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh for Gate visualize;
+# production ceremony must use operational CA / SPIRE (see MTLS_SPIFFE_LAYOUT.md).
+
+x-vault-ceremony-env: &vault-ceremony-env
+  BITCOIN_NETWORK: testnet3
+  KEROSENE_ENV: production
+  VAULT_CEREMONY_MODE: production
+  VAULT_DKG_MODE: distributed_wire
+  VAULT_NODE_TIER: domestic
+  ATTESTATION_MODE: software
+  VAULT_SHARE_STORE: aead_disk
+  VAULT_AUTH_MODE: mtls
+  # Local Gate visualize over LAN; real go-live sets VAULT_TRANSPORT=tor + SOCKS.
+  VAULT_TRANSPORT: clearnet
+  VAULT_LISTEN_ADDR: 0.0.0.0:7701
+  VAULT_GENESIS_N: "3"
+  VAULT_DATA_DIR: /var/lib/kerosene-vault
+  VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:?set VAULT_DATA_PASSPHRASE}
+  LAB_ATTESTATION_ROOT: kerosene-ceremony-root
+  VAULT_TLS_CERT_PATH: ${VAULT_TLS_CERT_PATH:-/certs/vault-server.crt}
+  VAULT_TLS_KEY_PATH: ${VAULT_TLS_KEY_PATH:-/certs/vault-server.key}
+  VAULT_TLS_CLIENT_CA_PATH: ${VAULT_TLS_CLIENT_CA_PATH:-/certs/ca.crt}
+  VAULT_TLS_CLIENT_CERT_PATH: ${VAULT_TLS_CLIENT_CERT_PATH:-/certs/vault-client.crt}
+  VAULT_TLS_CLIENT_KEY_PATH: ${VAULT_TLS_CLIENT_KEY_PATH:-/certs/vault-client.key}
+
+services:
+  vault-1:
+    build:
+      context: ../../../backend/kerosene-vault
+      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+      args:
+        CARGO_FEATURES: production
+    container_name: kerosene-vault-1-ceremony
+    environment:
+      <<: *vault-ceremony-env
+      VAULT_NODE_ID: vault-1
+      VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
+      # Optional mixed: VAULT_PEER_TIERS: vault-2=sev
+    volumes:
+      - vault-1-ceremony-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+    ports:
+      - "7701:7701"
+
+  vault-2:
+    build:
+      context: ../../../backend/kerosene-vault
+      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+      args:
+        CARGO_FEATURES: production
+    container_name: kerosene-vault-2-ceremony
+    environment:
+      <<: *vault-ceremony-env
+      VAULT_NODE_ID: vault-2
+      VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
+    volumes:
+      - vault-2-ceremony-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+    ports:
+      - "7702:7701"
+
+  vault-3:
+    build:
+      context: ../../../backend/kerosene-vault
+      dockerfile: ../../../infra/docker/images/kerosene-vault/Dockerfile
+      args:
+        CARGO_FEATURES: production
+    container_name: kerosene-vault-3-ceremony
+    environment:
+      <<: *vault-ceremony-env
+      VAULT_NODE_ID: vault-3
+      VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
+    volumes:
+      - vault-3-ceremony-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+    ports:
+      - "7703:7701"
+
+volumes:
+  vault-1-ceremony-data:
+  vault-2-ceremony-data:
+  vault-3-ceremony-data:

@@ -41,6 +41,9 @@ x-vault-lab-env: &vault-lab-env
   # VAULT_RESHARE_POLICY: daily
   # Anti-nonce: durable local log + quorum HTTP /v1/anti-nonce/prepare among VAULT_SEED_PEERS.
   # Explicit domestic lab tier (honest: not SEV). Production native uses software + AEAD.
+  # Ceremony production uses the same distributed_wire code path — override:
+  #   VAULT_DKG_MODE=distributed_wire ./backend/kerosene-vault/scripts/lab_dkg_wire.sh
+  # or: infra/docker/compose/vault-mesh-ceremony.compose.yaml + genesis_dkg_wire.sh
   VAULT_NODE_TIER: domestic
   ATTESTATION_MODE: sim
   LAB_ATTESTATION_ROOT: kerosene-lab-root

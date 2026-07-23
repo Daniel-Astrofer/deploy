@@ -2,11 +2,19 @@
 
 FROM rust:1.85-bookworm AS build
 WORKDIR /src
+ARG CARGO_FEATURES=
 COPY Cargo.toml ./
 COPY src ./src
 COPY tests ./tests
-RUN cargo test --offline 2>/dev/null || cargo test
-RUN cargo build --release --bin kerosene-vault
+# Lab default: dealer_lab features from Cargo.toml. Ceremony: --build-arg CARGO_FEATURES=production
+RUN if [ -n "$CARGO_FEATURES" ]; then \
+      cargo test --no-default-features --features "$CARGO_FEATURES" --offline 2>/dev/null \
+        || cargo test --no-default-features --features "$CARGO_FEATURES"; \
+      cargo build --release --no-default-features --features "$CARGO_FEATURES" --bin kerosene-vault; \
+    else \
+      cargo test --offline 2>/dev/null || cargo test; \
+      cargo build --release --bin kerosene-vault; \
+    fi
 
 FROM debian:bookworm-slim
 RUN apt-get update \

@@ -39,6 +39,7 @@ x-vault-staging-env: &vault-staging-env
   BITCOIN_NETWORK: testnet3
   KEROSENE_ENV: staging
   VAULT_CEREMONY_MODE: staging
+  VAULT_NODE_TIER: sev
   ATTESTATION_MODE: sev
   ATTESTATION_STAGING_STUB: "1"
   LAB_ATTESTATION_ROOT: kerosene-staging-root
@@ -46,6 +47,7 @@ x-vault-staging-env: &vault-staging-env
   VAULT_GENESIS_N: "3"
   VAULT_DATA_DIR: /var/lib/kerosene-vault
   VAULT_SHARE_STORE: tee_seal
+  VAULT_DKG_MODE: distributed_wire
   # Staging hygiene refuses static_token; default toward mTLS.
   VAULT_AUTH_MODE: ${VAULT_AUTH_MODE:-mtls}
   VAULT_API_TOKEN: ${VAULT_API_TOKEN:-}
@@ -53,6 +55,8 @@ x-vault-staging-env: &vault-staging-env
   VAULT_TLS_CERT_PATH: ${VAULT_TLS_CERT_PATH:-/certs/vault-server.crt}
   VAULT_TLS_KEY_PATH: ${VAULT_TLS_KEY_PATH:-/certs/vault-server.key}
   VAULT_TLS_CLIENT_CA_PATH: ${VAULT_TLS_CLIENT_CA_PATH:-/certs/ca.crt}
+  VAULT_TLS_CLIENT_CERT_PATH: ${VAULT_TLS_CLIENT_CERT_PATH:-/certs/vault-client.crt}
+  VAULT_TLS_CLIENT_KEY_PATH: ${VAULT_TLS_CLIENT_KEY_PATH:-/certs/vault-client.key}
 
 services:
   vault-1:
