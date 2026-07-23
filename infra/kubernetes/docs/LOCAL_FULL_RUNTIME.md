@@ -63,15 +63,21 @@ bash infra/kubernetes/deploy.sh local-full --wait
 ```
 
 Default (no args) is `local-full --wait`. Deploy starts `vault-mesh-lab.compose.yaml`
-(testnet3 + static_token) before applying the overlay.
+(testnet3 + static_token + `dealer_lab`) before applying the overlay.
 
-For staging mTLS mesh instead of lab (only when certs exist):
+Optional mesh profiles (`KEROSENE_VAULT_MESH_PROFILE`):
 
 ```bash
+# Staging mTLS mesh (falls back to lab if certs missing)
 KEROSENE_VAULT_MESH_PROFILE=staging bash infra/deploy.sh --wait
+
+# Real Tor private mesh + distributed_wire (no host :7701–7703; not for kfe bridge)
+KEROSENE_VAULT_MESH_PROFILE=tor bash infra/deploy.sh --wait
 ```
 
-If certs are missing, deploy falls back to lab with a clear warning.
+Tor profile starts `vault-mesh-tor.compose.yaml` via `ensure-vault-mesh-lab.sh`.
+Lab remains the default for local-full kfe visualize. See
+`backend/kerosene-vault/docs/CEREMONY_TOR.md`.
 
 ## Production boundary
 

@@ -15,13 +15,14 @@ Canonical local Kubernetes startup (vault mesh + local-full):
 
 Environments:
   local        Apply the lightweight local overlay.
-  local-full   Build/import local images, start vault-mesh-lab compose, apply
+  local-full   Build/import local images, start vault mesh compose, apply
                local-full (kfe vaultmesh on; mpc-sidecar / HashiCorp vault off).
   staging      Apply the staging overlay.
 
-Default local/beta settlement: testnet3 vault mesh (lab static_token).
-Opt into staging mesh: KEROSENE_VAULT_MESH_PROFILE=staging (falls back to lab
-if mTLS certs are missing).
+Default local/beta settlement: testnet3 vault-mesh-lab (dealer_lab + static_token).
+Opt-in profiles via KEROSENE_VAULT_MESH_PROFILE:
+  staging  — mTLS mesh (falls back to lab if certs missing)
+  tor      — vault-mesh-tor + distributed_wire (no clearnet vault ports)
 
 Production overlays/helpers are kept outside the public repository.
 

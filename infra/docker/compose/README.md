@@ -18,12 +18,19 @@ infra/docker/compose/vault-mesh-ceremony.compose.yaml # production-native flags 
 infra/docker/compose/local.limits.compose.yaml
 ```
 
-`bash infra/deploy.sh` starts **vault-mesh-lab** (kerosene-vault ×3, clearnet ports) and enables
-kfe vaultmesh (`mesh-only=true`). Legacy `local.compose.yaml` / `mpc-sidecar` compose paths are removed.
+`bash infra/deploy.sh` defaults to **vault-mesh-lab** (kerosene-vault ×3, clearnet ports,
+`dealer_lab`) and enables kfe vaultmesh (`mesh-only=true`). Legacy `local.compose.yaml` /
+`mpc-sidecar` compose paths are removed.
 
-**Real genesis ceremony over Tor** is **not** started by deploy.sh — use
-`vault-mesh-tor.compose.yaml` + `backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh`
-(and production checklist). See `backend/kerosene-vault/docs/CEREMONY_TOR.md`.
+Optional Tor mesh from the same deploy path:
+
+```bash
+KEROSENE_VAULT_MESH_PROFILE=tor bash infra/deploy.sh --wait
+```
+
+That starts `vault-mesh-tor.compose.yaml` (`distributed_wire`, no clearnet vault ports).
+For a full over-wire DKG exercise use `backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh`.
+See `backend/kerosene-vault/docs/CEREMONY_TOR.md`.
 
 A topologia `hardened` fica fora do repositório público (ops privado).
 

@@ -9,7 +9,7 @@ Deploys the complete local Kubernetes runtime into namespace kerosene-local:
   - server
   - kfe-service (vault mesh settlement enabled; mpc signing disabled)
   - web-page
-  - vault-mesh-lab (Docker Compose: kerosene-vault x3 on testnet3)
+  - vault mesh (Docker Compose: default vault-mesh-lab; optional tor/staging profile)
   - PostgreSQL
   - Redis
   - Bitcoin Core classic testnet (testnet3)
@@ -31,9 +31,10 @@ Environment:
   KEROSENE_HOST_HOME           Host home used for kubeconfig and onion keys (default: $HOME)
   KEROSENE_REPO_ROOT           Repository root for hostPath data dirs
   KEROSENE_AUTO_CREATE_CLUSTER Create a kind cluster when no API is reachable (default: 1)
-  KEROSENE_VAULT_MESH_PROFILE  lab (default, testnet3 clear-token) | staging (mTLS if certs exist)
+  KEROSENE_VAULT_MESH_PROFILE  lab (default, clearnet dealer_lab) | staging (mTLS if certs)
+                               | tor (vault-mesh-tor + distributed_wire; no clearnet vault ports)
   KEROSENE_VAULT_MESH_HOST_IP  Host gateway IP for vault-1 Service/Endpoints bridge
-  KEROSENE_SKIP_VAULT_MESH=1   Skip starting vault-mesh-lab compose (not recommended)
+  KEROSENE_SKIP_VAULT_MESH=1   Skip starting vault mesh compose (not recommended)
   KUBECONFIG                   Explicit kubeconfig path
   KEROSENE_SKIP_MONITORING=1              Skip Grafana/Prometheus ensure
   KEROSENE_SKIP_MONITORING_PORT_FORWARD=1 Skip only local port-forwards
@@ -160,15 +161,20 @@ ensure_vault_mesh_lab() {
     echo "[!] Skipping vault mesh compose (KEROSENE_SKIP_VAULT_MESH=1)" >&2
     return 0
   fi
-  echo "[*] Ensuring vault-mesh-lab (testnet3 settlement path)"
+  local profile="${KEROSENE_VAULT_MESH_PROFILE:-lab}"
+  echo "[*] Ensuring vault mesh (profile=$profile, testnet3)"
   # Captures host IP on stdout; progress logs go to stderr from the helper.
   local host_ip
   host_ip="$(
-    KEROSENE_VAULT_MESH_PROFILE="${KEROSENE_VAULT_MESH_PROFILE:-lab}" \
+    KEROSENE_VAULT_MESH_PROFILE="$profile" \
       bash "$SCRIPT_DIR/ensure-vault-mesh-lab.sh"
   )"
   export KEROSENE_VAULT_MESH_HOST_IP="${KEROSENE_VAULT_MESH_HOST_IP:-$host_ip}"
   echo "[*] Vault mesh host bridge: $KEROSENE_VAULT_MESH_HOST_IP"
+  if [[ "$profile" == "tor" ]]; then
+    echo "[!] profile=tor: kfe Endpoints bridge expects clearnet :7701 — Tor mesh does not publish it." >&2
+    echo "[!] Use lab (default) for local-full kfe visualize; tor for private mesh / distributed_wire." >&2
+  fi
 }
 
 require_cluster_access() {
@@ -395,8 +401,20 @@ echo "[+] host data:"
 echo "    postgres: $KEROSENE_LOCAL_POSTGRES_DATA"
 echo "    bitcoin:  $KEROSENE_LOCAL_BITCOIN_DATA"
 echo "    onion keys: $KEROSENE_LOCAL_ONION_KEYS_PATH"
-echo "[+] vault mesh: docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml"
-echo "    kfe base-url: http://vault-1:7701 (token lab-only; mesh-only=true)"
+case "${KEROSENE_VAULT_MESH_PROFILE:-lab}" in
+  tor)
+    echo "[+] vault mesh: docker compose -f infra/docker/compose/vault-mesh-tor.compose.yaml (distributed_wire)"
+    echo "    Tor profile: no host :7701; DKG via backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh"
+    ;;
+  staging)
+    echo "[+] vault mesh: docker compose -f infra/docker/compose/vault-mesh-staging.compose.yaml"
+    echo "    kfe base-url: https://vault-1:7701 (mTLS; mesh-only=true)"
+    ;;
+  *)
+    echo "[+] vault mesh: docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml"
+    echo "    kfe base-url: http://vault-1:7701 (token lab-only; mesh-only=true)"
+    ;;
+esac
 if kubectl_cmd -n "$NS" get deploy/tor-onion >/dev/null 2>&1; then
   onion_hostname="$(kubectl_cmd -n "$NS" exec deploy/tor-onion -- sh -c 'cat /var/lib/tor/kerosene_service/hostname' 2>/dev/null || true)"
   if [[ -n "$onion_hostname" ]]; then

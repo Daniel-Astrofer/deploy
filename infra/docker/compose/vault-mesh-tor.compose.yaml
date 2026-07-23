@@ -1,5 +1,7 @@
 # Private vault mesh over **real Tor** (onion HS + SOCKS outbound).
-# NOT the deploy.sh default (that remains vault-mesh-lab clearnet + dealer_lab visualize).
+# Deploy default remains vault-mesh-lab (clearnet + dealer_lab). Opt in:
+#   KEROSENE_VAULT_MESH_PROFILE=tor bash infra/deploy.sh
+#   KEROSENE_VAULT_MESH_PROFILE=tor bash infra/kubernetes/scripts/ensure-vault-mesh-lab.sh
 #
 # Goals:
 #   - VAULT_DKG_MODE=distributed_wire (same production FROST path; no dealer)
