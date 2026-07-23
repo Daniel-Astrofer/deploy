@@ -1,0 +1,33 @@
+# Local dev image builder for the Kerosene server.
+# This avoids relying on the legacy Dockerfile's expected repo layout.
+#
+# Build command (from repo root):
+#   docker build -f infra/docker/images/server/Dockerfile.localjar \
+#     -t localhost:5000/kerosene/server:local .
+
+FROM eclipse-temurin:21-jdk AS builder
+WORKDIR /workspace
+
+# Build context (minimal) provided by Docker build command:
+#   - app.jar (fat jar)
+#   - Healthcheck.java (for container preStop)
+COPY app.jar ./app.jar
+
+# Used by the container's lifecycle preStop healthcheck.
+COPY Healthcheck.java ./Healthcheck.java
+RUN javac ./Healthcheck.java -d /workspace/healthcheck
+
+FROM gcr.io/distroless/java21-debian12:nonroot
+WORKDIR /app
+
+COPY --chown=65532:65532 --from=builder /workspace/app.jar /app/app.jar
+COPY --chown=65532:65532 --from=builder /workspace/healthcheck /app/healthcheck
+
+USER 65532:65532
+EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=4s --start-period=180s --retries=12 \
+  CMD ["java", "-cp", "/app/healthcheck", "Healthcheck", "http://127.0.0.1:8080/health/ready"]
+
+ENTRYPOINT ["java","-XX:+UseContainerSupport","-XX:MaxRAMPercentage=75.0","-Djava.security.egd=file:/dev/./urandom","-Djava.awt.headless=true","-jar","/app/app.jar"]
+
