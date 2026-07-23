@@ -1,0 +1,67 @@
+# Host-bridge for vault-mesh-lab.compose.yaml into the local-full namespace.
+# deploy.sh starts the compose stack on the workstation; kfe reaches vault-1 via
+# this Service/Endpoints pair (host gateway IP substituted at render time).
+#
+# Placeholder __VAULT_MESH_HOST_IP__ is rewritten by render-local-full-overlay.sh.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-1
+  labels:
+    app.kubernetes.io/name: kerosene-vault-mesh
+    app.kubernetes.io/component: vault-mesh
+    kerosene.io/local-dependency: "true"
+spec:
+  ports:
+    - name: http
+      port: 7701
+      targetPort: 7701
+      protocol: TCP
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: vault-1
+  labels:
+    app.kubernetes.io/name: kerosene-vault-mesh
+    app.kubernetes.io/component: vault-mesh
+    kerosene.io/local-dependency: "true"
+subsets:
+  - addresses:
+      - ip: __VAULT_MESH_HOST_IP__
+    ports:
+      - name: http
+        port: 7701
+        protocol: TCP
+---
+# Convenience alias matching kfe.vaultmesh.base-url host used in lab docs.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-mesh-lab
+  labels:
+    app.kubernetes.io/name: kerosene-vault-mesh
+    app.kubernetes.io/component: vault-mesh
+    kerosene.io/local-dependency: "true"
+spec:
+  ports:
+    - name: http
+      port: 7701
+      targetPort: 7701
+      protocol: TCP
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: vault-mesh-lab
+  labels:
+    app.kubernetes.io/name: kerosene-vault-mesh
+    app.kubernetes.io/component: vault-mesh
+    kerosene.io/local-dependency: "true"
+subsets:
+  - addresses:
+      - ip: __VAULT_MESH_HOST_IP__
+    ports:
+      - name: http
+        port: 7701
+        protocol: TCP

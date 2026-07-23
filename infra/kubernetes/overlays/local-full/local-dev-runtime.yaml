@@ -226,77 +226,8 @@ spec:
           emptyDir:
             sizeLimit: 512Mi
 ---
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: local-vault
-  labels:
-    app: kerosene-vault
-    app.kubernetes.io/name: vault
-    app.kubernetes.io/component: secrets
-    app.kubernetes.io/part-of: kerosene
-    kerosene.io/local-dependency: "true"
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: kerosene-vault
-  template:
-    metadata:
-      labels:
-        app: kerosene-vault
-        app.kubernetes.io/name: vault
-        app.kubernetes.io/component: secrets
-        app.kubernetes.io/part-of: kerosene
-        kerosene.io/local-dependency: "true"
-    spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 100
-        runAsGroup: 100
-        fsGroup: 100
-        seccompProfile:
-          type: RuntimeDefault
-      containers:
-        - name: vault
-          image: hashicorp/vault:1.17
-          imagePullPolicy: IfNotPresent
-          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
-          env:
-            - name: VAULT_DEV_ROOT_TOKEN_ID
-              value: local-root-token
-            - name: VAULT_ADDR
-              value: http://127.0.0.1:8200
-            - name: SKIP_SETCAP
-              value: "true"
-            - name: VAULT_DISABLE_MLOCK
-              value: "true"
-          ports:
-            - name: vault-api
-              containerPort: 8200
-              protocol: TCP
-            - name: vault-cluster
-              containerPort: 8201
-              protocol: TCP
-          readinessProbe:
-            httpGet:
-              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
-              port: vault-api
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 12
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests:
-              cpu: 50m
-              memory: 128Mi
-            limits:
-              cpu: 500m
-              memory: 512Mi
----
+# HashiCorp Vault (wallet-arming / raft) removed from local-full deploy.
+# Treasury settlement uses kerosene-vault mesh via vault-mesh-lab.compose.yaml.
 apiVersion: v1
 kind: PersistentVolume
 metadata:

@@ -39,13 +39,16 @@ stop_quorum() {
   scale_if_present deployment/server 0
   scale_if_present deployment/web-page 0
   scale_if_present deployment/tor-onion 0
-  scale_if_present statefulset/mpc-sidecar 0
   scale_if_present statefulset/local-postgres 0
   scale_if_present deployment/local-redis 0
-  scale_if_present deployment/local-vault 0
   scale_if_present deployment/local-bitcoin 0
   scale_if_present deployment/local-lnd 0
   scale_if_present deployment/local-lnd-peer 0
+  # Best-effort: stop host vault mesh started by deploy (legacy mpc/hashicorp not used).
+  if command -v docker >/dev/null 2>&1 && [[ -f "$ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml" ]]; then
+    echo "[*] Stopping vault-mesh-lab compose (if running)"
+    docker compose -f "$ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml" stop >/dev/null 2>&1 || true
+  fi
   echo "[+] Local quorum workloads stopped. Persistent local data is preserved."
 }
 

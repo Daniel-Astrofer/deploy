@@ -44,6 +44,13 @@ echo "validated"
 EOF
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/validate-local-full.sh"
 
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-vault-mesh-lab.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "127.0.0.1"
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-vault-mesh-lab.sh"
+
 cat > "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
@@ -75,7 +82,6 @@ if [[ "${1:-}" == "image" && "${2:-}" == "inspect" ]]; then
   case "$image" in
     localhost:5000/kerosene/server:local) echo "sha256:server-image-id" ;;
     localhost:5000/kerosene/kfe-service:local) echo "sha256:kfe-service-image-id" ;;
-    kerosene/mpc-sidecar:local) echo "sha256:mpc-sidecar-image-id" ;;
     localhost:5000/kerosene/web-page:local) echo "sha256:web-page-image-id" ;;
     kerosene/tor:local) echo "sha256:tor-image-id" ;;
     *) echo "unknown image: ${3:-}" >&2; exit 42 ;;
@@ -90,6 +96,23 @@ chmod +x "$TMP_DIR/bin/docker"
 cat > "$TMP_DIR/bin/kubectl" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+# Drop optional --kubeconfig PATH so mocks stay stable across host configs.
+args=()
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --kubeconfig)
+      shift 2 || true
+      continue
+      ;;
+    --kubeconfig=*)
+      shift
+      continue
+      ;;
+  esac
+  args+=("\$1")
+  shift
+done
+set -- "\${args[@]}"
 echo "\$*" >> "$LOG_FILE"
 if [[ "\${1:-}" == "config" && "\${2:-}" == "current-context" ]]; then
   echo "test-context"
@@ -127,13 +150,13 @@ chmod +x "$TMP_DIR/bin/kubectl"
 
 PATH="$TMP_DIR/bin:$PATH" \
   KEROSENE_HOST_HOME="$TMP_DIR/no-kube-home" \
+  KUBECONFIG="$TMP_DIR/no-kube-home/config" \
   CALL_LOG="$LOG_FILE" \
   KUBECTL=kubectl \
   "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" >/dev/null
 
 grep -qF 'patch deployment/server --type merge -p' "$LOG_FILE" || fail "server image id was not recorded on the pod template"
 grep -qF 'patch deployment/kfe-service --type merge -p' "$LOG_FILE" || fail "kfe-service image id was not recorded on the pod template"
-grep -qF 'patch statefulset/mpc-sidecar --type merge -p' "$LOG_FILE" || fail "mpc-sidecar image id was not recorded on the pod template"
 grep -qF 'patch deployment/web-page --type merge -p' "$LOG_FILE" || fail "web-page image id was not recorded on the pod template"
 grep -qF 'patch deployment/tor-onion --type merge -p' "$LOG_FILE" || fail "tor-onion image id was not recorded on the pod template"
 grep -qF '"kerosene.io/local-image-id":"sha256:server-image-id"' "$LOG_FILE" || fail "server patch did not include the local image id annotation"

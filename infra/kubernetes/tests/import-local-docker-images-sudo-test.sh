@@ -33,6 +33,7 @@ mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/scri
   "$TMP_DIR/backend/kerosene" \
   "$TMP_DIR/backend/mpc-sidecar"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
+cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
 touch \
   "$TMP_DIR/infra/docker/images/server/Dockerfile" \

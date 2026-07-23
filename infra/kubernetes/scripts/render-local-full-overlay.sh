@@ -45,6 +45,33 @@ while IFS= read -r -d '' file; do
   kerosene_rewrite_legacy_host_paths "$file"
 done < <(find "$WORK_OVERLAY" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
 
+# Bridge vault-mesh-lab (host compose) into the cluster via Endpoints IP.
+VAULT_MESH_HOST_IP="${KEROSENE_VAULT_MESH_HOST_IP:-}"
+if [[ -z "$VAULT_MESH_HOST_IP" ]]; then
+  if [[ -x "$SCRIPT_DIR/ensure-vault-mesh-lab.sh" ]]; then
+    VAULT_MESH_HOST_IP="$(
+      KEROSENE_VAULT_MESH_HOST_IP="${KEROSENE_VAULT_MESH_HOST_IP:-}" \
+        bash "$SCRIPT_DIR/ensure-vault-mesh-lab.sh" --print-host-ip 2>/dev/null || true
+    )"
+  fi
+fi
+if [[ -z "$VAULT_MESH_HOST_IP" ]]; then
+  for net in kind bridge; do
+    VAULT_MESH_HOST_IP="$(docker network inspect "$net" -f '{{range .IPAM.Config}}{{.Gateway}}{{println}}{{end}}' 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+    [[ -n "$VAULT_MESH_HOST_IP" ]] && break
+  done
+fi
+if [[ -z "$VAULT_MESH_HOST_IP" ]]; then
+  echo "[!] Could not resolve vault mesh host IP; set KEROSENE_VAULT_MESH_HOST_IP" >&2
+  exit 1
+fi
+echo "[*] Vault mesh host bridge IP: $VAULT_MESH_HOST_IP" >&2
+while IFS= read -r -d '' file; do
+  if grep -Fq '__VAULT_MESH_HOST_IP__' "$file"; then
+    sed -i "s/__VAULT_MESH_HOST_IP__/${VAULT_MESH_HOST_IP}/g" "$file"
+  fi
+done < <(find "$WORK_OVERLAY" -type f \( -name '*.yaml' -o -name '*.yml' \) -print0)
+
 # Verify critical paths were rewritten away from the legacy omega markers when
 # the active host is not the legacy workstation.
 if [[ "$KEROSENE_HOST_HOME" != "$KEROSENE_LEGACY_HOST_HOME" ]] \

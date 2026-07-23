@@ -27,6 +27,7 @@ mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/scri
   "$TMP_DIR/backend/kerosene" \
   "$TMP_DIR/backend/mpc-sidecar"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
+cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
 touch \
   "$TMP_DIR/infra/docker/images/server/Dockerfile" \
@@ -113,6 +114,8 @@ PATH="$TMP_DIR/bin:$PATH" CALL_LOG="$LOG_FILE" \
 
 grep -qF "docker:build -t kerosene/server:local -f $TMP_DIR/infra/docker/images/server/Dockerfile $TMP_DIR/backend/kerosene" "$LOG_FILE" || fail "server image was not rebuilt from the canonical Dockerfile"
 grep -qF "docker:build -t kerosene/kfe-service:local -f $TMP_DIR/infra/docker/images/kfe-service/Dockerfile $TMP_DIR/backend/kerosene" "$LOG_FILE" || fail "kfe-service image was not rebuilt from the canonical Dockerfile"
-grep -qF "docker:build -t kerosene/mpc-sidecar:local -f $TMP_DIR/infra/docker/images/mpc-sidecar/Dockerfile $TMP_DIR/backend/mpc-sidecar" "$LOG_FILE" || fail "mpc-sidecar image was not rebuilt from the canonical Dockerfile"
+if grep -qF "mpc-sidecar" "$LOG_FILE"; then
+  fail "mpc-sidecar must not be built/imported on the deploy image path"
+fi
 
 echo "[PASS] import-local-docker-images.sh workload builds"

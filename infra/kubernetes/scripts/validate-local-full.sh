@@ -97,11 +97,10 @@ require '^  name: web-page-runtime-config$'
 require 'kerosene-runtime-config.json'
 require '"access":"tor-hidden-service-only"'
 require 'mountPath: /usr/share/nginx/html/kerosene-runtime-config.json'
-require '^kind: StatefulSet$'
-require '^  name: mpc-sidecar$'
+require '^  name: vault-1$'
+require '^  name: vault-mesh-lab$'
 require '^  name: local-postgres$'
 require '^  name: local-redis$'
-require '^  name: local-vault$'
 require '^  name: local-bitcoin$'
 require_literal 'wallet="${BITCOIN_RPC_WALLET:-kerosene}"'
 require_literal 'loadwallet "$wallet"'
@@ -115,7 +114,13 @@ require 'APP_CORS_ALLOWED_ORIGINS: http://placeholder.onion'
 require 'WEBAUTHN_ORIGINS: android:apk-key-hash:kerosene,http://placeholder.onion'
 require 'SPRING_PROFILES_ACTIVE: docker,kfe'
 require 'KEROSENE_RUNTIME_ROLE: kfe-service'
-require 'BITCOIN_NETWORK: testnet'
+require 'BITCOIN_NETWORK: testnet3'
+require 'KFE_VAULTMESH_ENABLED: "true"'
+require 'KFE_VAULTMESH_MESH_ONLY: "true"'
+require 'KFE_VAULTMESH_SUBMIT_ON_OUTBOUND: "true"'
+require 'KFE_VAULTMESH_BASE_URL: http://vault-1:7701'
+require 'KFE_VAULTMESH_API_TOKEN: kerosene-vault-lab-only'
+require 'KFE_MPC_SIGNING_ENABLED: "false"'
 # Beta testnet: Bitcoin Core is required so financial rails fail closed when down.
 require 'BITCOIN_RPC_REQUIRED: "true"'
 require 'KFE_NETWORK_MONITOR_ENABLED: "true"'
@@ -123,6 +128,16 @@ require 'LIGHTNING_LND_ENABLED: "true"'
 require 'LIGHTNING_LND_REST_ENABLED: "true"'
 require 'LIGHTNING_LND_BASE_URL: https://kerosene-lnd-headless:8080'
 require 'kfe-internal-shared-secret: local-kfe-internal-secret-not-for-production'
+
+# Legacy signing path must not appear in local-full / deploy.
+if grep -qE '^  name: mpc-sidecar$' "$rendered"; then
+  echo "[!] local-full must not include mpc-sidecar (vault mesh cutover)." >&2
+  exit 1
+fi
+if grep -qE '^  name: local-vault$' "$rendered"; then
+  echo "[!] local-full must not include HashiCorp local-vault (wallet-arming removed)." >&2
+  exit 1
+fi
 
 hidden_service_ports="$(grep -E '^[[:space:]]*HiddenServicePort[[:space:]]+' "$rendered" || true)"
 hidden_service_port_count="$(printf '%s\n' "$hidden_service_ports" | sed '/^$/d' | wc -l | tr -d '[:space:]')"

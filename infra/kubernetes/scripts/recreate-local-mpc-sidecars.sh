@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-bash infra/scripts/local/recreate-mpc-sidecars.sh "$@"
+
+echo "[!] recreate-local-mpc-sidecars.sh removed from deploy path." >&2
+echo "[!] Settlement uses vault-mesh-lab: bash infra/kubernetes/scripts/ensure-vault-mesh-lab.sh" >&2
+echo "[!] See backend/mpc-sidecar/REMOVED.txt" >&2
+exit 2

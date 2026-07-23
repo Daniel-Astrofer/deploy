@@ -21,8 +21,10 @@ bash infra/test.sh
 ```
 
 `infra/start.sh` é o caminho principal do quorum local. Ele usa Kubernetes
-local-full, constrói/importa imagens locais quando possível, aplica o overlay,
-aguarda readiness e mostra as URLs finais.
+local-full, sobe o **vault mesh** (`vault-mesh-lab.compose.yaml`, testnet3),
+constrói/importa imagens locais quando possível, aplica o overlay, aguarda
+readiness e mostra as URLs finais. Signing legado (`mpc-sidecar` / HashiCorp
+wallet-arming) **não** faz parte deste caminho.
 
 Antes de falar com o Kubernetes, `infra/start.sh` tenta iniciar os serviços host
 `containerd.service`, `docker.service` e `kubelet.service` quando o host usa
@@ -95,9 +97,10 @@ bash infra/logs.sh --follow
 ```
 
 Esse comando cria um diretório em `infra/runtime/logs/kubernetes/<timestamp>/`
-com `server.log`, `kfe-service.log`, `web-page.log`, `mpc-sidecar.log`,
-`tor-onion.log`, `local-postgres.log`, `local-redis.log`, `local-vault.log`,
+com `server.log`, `kfe-service.log`, `web-page.log`,
+`tor-onion.log`, `local-postgres.log`, `local-redis.log`,
 `local-bitcoin.log`, `local-lnd.log`, `local-lnd-peer.log` e `index.txt`.
+Vault mesh logs: `docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml logs`.
 
 Para logs de um serviço só:
 
@@ -109,7 +112,8 @@ bash infra/logs.sh tor-onion --follow
 ## Compose legado
 
 Compose continua em `infra/docker/compose/` e `infra/scripts/local/` como apoio
-legado/local específico. Ele não deve competir como caminho principal do quorum.
+legado/local específico. O caminho de settlement do deploy é
+`vault-mesh-lab.compose.yaml` (não `local.compose.yaml` / mpc-sidecar).
 
 ## Regras
 

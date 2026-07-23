@@ -7,7 +7,7 @@ usage() {
   cat <<'USAGE'
 Usage: infra/kubernetes/deploy.sh [local|local-full|staging] [options]
 
-Canonical local Kubernetes startup:
+Canonical local Kubernetes startup (vault mesh + local-full):
   bash infra/start.sh
   bash infra/deploy.sh
   bash infra/kubernetes/deploy.sh
@@ -15,8 +15,13 @@ Canonical local Kubernetes startup:
 
 Environments:
   local        Apply the lightweight local overlay.
-  local-full   Build/import local images, apply the complete local runtime, and optionally wait.
+  local-full   Build/import local images, start vault-mesh-lab compose, apply
+               local-full (kfe vaultmesh on; mpc-sidecar / HashiCorp vault off).
   staging      Apply the staging overlay.
+
+Default local/beta settlement: testnet3 vault mesh (lab static_token).
+Opt into staging mesh: KEROSENE_VAULT_MESH_PROFILE=staging (falls back to lab
+if mTLS certs are missing).
 
 Production overlays/helpers are kept outside the public repository.
 

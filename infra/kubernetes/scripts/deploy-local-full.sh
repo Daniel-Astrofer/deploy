@@ -7,16 +7,17 @@ Usage: infra/kubernetes/scripts/deploy-local-full.sh [--dry-run] [--skip-image-i
 
 Deploys the complete local Kubernetes runtime into namespace kerosene-local:
   - server
-  - kfe-service
+  - kfe-service (vault mesh settlement enabled; mpc signing disabled)
   - web-page
-  - mpc-sidecar
+  - vault-mesh-lab (Docker Compose: kerosene-vault x3 on testnet3)
   - PostgreSQL
   - Redis
-  - Vault dev
   - Bitcoin Core classic testnet (testnet3)
   - LND (testnet) + peer for local liquidity
   - Tor hidden service for the web-page API gateway
   - Grafana + Prometheus (namespace monitoring; always ensured)
+
+Legacy NOT started: mpc-sidecar, HashiCorp Vault wallet-arming.
 
 Options:
   --dry-run            Validate against the Kubernetes API without persisting resources.
@@ -30,6 +31,9 @@ Environment:
   KEROSENE_HOST_HOME           Host home used for kubeconfig and onion keys (default: $HOME)
   KEROSENE_REPO_ROOT           Repository root for hostPath data dirs
   KEROSENE_AUTO_CREATE_CLUSTER Create a kind cluster when no API is reachable (default: 1)
+  KEROSENE_VAULT_MESH_PROFILE  lab (default, testnet3 clear-token) | staging (mTLS if certs exist)
+  KEROSENE_VAULT_MESH_HOST_IP  Host gateway IP for vault-1 Service/Endpoints bridge
+  KEROSENE_SKIP_VAULT_MESH=1   Skip starting vault-mesh-lab compose (not recommended)
   KUBECONFIG                   Explicit kubeconfig path
   KEROSENE_SKIP_MONITORING=1              Skip Grafana/Prometheus ensure
   KEROSENE_SKIP_MONITORING_PORT_FORWARD=1 Skip only local port-forwards
@@ -137,13 +141,34 @@ record_tor_config_hash() {
 record_imported_local_image_ids() {
   record_local_image_id deployment/server localhost:5000/kerosene/server:local
   record_local_image_id deployment/kfe-service localhost:5000/kerosene/kfe-service:local
-  record_local_image_id statefulset/mpc-sidecar kerosene/mpc-sidecar:local
   record_local_image_id deployment/web-page localhost:5000/kerosene/web-page:local
   record_local_image_id deployment/tor-onion kerosene/tor:local
 }
 
 cleanup_stale_local_full_resources() {
   kubectl_cmd -n "$NS" delete networkpolicy/local-full-allow-nodeport-ingress --ignore-not-found >/dev/null
+  # Cutover leftovers: legacy mpc signing + HashiCorp wallet-arming vault.
+  kubectl_cmd -n "$NS" delete statefulset/mpc-sidecar --ignore-not-found >/dev/null
+  kubectl_cmd -n "$NS" delete svc/mpc-sidecar svc/mpc-sidecar-headless --ignore-not-found >/dev/null
+  kubectl_cmd -n "$NS" delete sa/mpc-sidecar pdb/mpc-sidecar networkpolicy/mpc-sidecar-network --ignore-not-found >/dev/null
+  kubectl_cmd -n "$NS" delete deployment/local-vault --ignore-not-found >/dev/null
+  kubectl_cmd -n "$NS" delete secret/kerosene-mpc-secrets --ignore-not-found >/dev/null
+}
+
+ensure_vault_mesh_lab() {
+  if [[ "${KEROSENE_SKIP_VAULT_MESH:-0}" == "1" ]]; then
+    echo "[!] Skipping vault mesh compose (KEROSENE_SKIP_VAULT_MESH=1)" >&2
+    return 0
+  fi
+  echo "[*] Ensuring vault-mesh-lab (testnet3 settlement path)"
+  # Captures host IP on stdout; progress logs go to stderr from the helper.
+  local host_ip
+  host_ip="$(
+    KEROSENE_VAULT_MESH_PROFILE="${KEROSENE_VAULT_MESH_PROFILE:-lab}" \
+      bash "$SCRIPT_DIR/ensure-vault-mesh-lab.sh"
+  )"
+  export KEROSENE_VAULT_MESH_HOST_IP="${KEROSENE_VAULT_MESH_HOST_IP:-$host_ip}"
+  echo "[*] Vault mesh host bridge: $KEROSENE_VAULT_MESH_HOST_IP"
 }
 
 require_cluster_access() {
@@ -199,6 +224,7 @@ done
 
 ensure_local_host_services
 bash "$SCRIPT_DIR/validate-local-full.sh"
+ensure_vault_mesh_lab
 render_overlay
 require_cluster_access
 
@@ -270,7 +296,6 @@ require_local_app_images() {
     "kerosene/kfe-service:local"
     "localhost:5000/kerosene/server:local"
     "localhost:5000/kerosene/kfe-service:local"
-    "kerosene/mpc-sidecar:local"
     "kerosene/tor:local"
   )
 
@@ -364,11 +389,14 @@ KUBECONFIG="${KUBECONFIG:-}" KUBECTL="$KUBECTL" \
   }
 
 echo "[+] local-full deployment submitted."
+echo "[+] settlement: vault mesh (compose lab vault-1 → Service/vault-1)"
 echo "[+] clear-net service exposure: disabled"
 echo "[+] host data:"
 echo "    postgres: $KEROSENE_LOCAL_POSTGRES_DATA"
 echo "    bitcoin:  $KEROSENE_LOCAL_BITCOIN_DATA"
 echo "    onion keys: $KEROSENE_LOCAL_ONION_KEYS_PATH"
+echo "[+] vault mesh: docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml"
+echo "    kfe base-url: http://vault-1:7701 (token lab-only; mesh-only=true)"
 if kubectl_cmd -n "$NS" get deploy/tor-onion >/dev/null 2>&1; then
   onion_hostname="$(kubectl_cmd -n "$NS" exec deploy/tor-onion -- sh -c 'cat /var/lib/tor/kerosene_service/hostname' 2>/dev/null || true)"
   if [[ -n "$onion_hostname" ]]; then

@@ -73,22 +73,6 @@ spec:
           configMap:
             name: web-page-runtime-config
 ---
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mpc-sidecar
-spec:
-  template:
-    spec:
-      containers:
-        - name: mpc-sidecar
-          imagePullPolicy: Never
-          env:
-            - name: MPC_ALLOW_INSECURE_GRPC
-              value: "true"
-            - name: MPC_REQUIRE_MASTER_KEY
-              value: "false"
----
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
@@ -135,16 +119,18 @@ data:
   SERVER_PORT: "8080"
   SPRING_DATA_REDIS_HOST: "kerosene-redis-headless"
   SPRING_DATA_REDIS_PORT: "6379"
-  MPC_SIDECAR_HOST: "mpc-sidecar"
+  # Legacy mpc-sidecar removed from deploy; leave host empty / TLS off so probes do not require it.
+  MPC_SIDECAR_HOST: ""
   MPC_SIDECAR_PORT: "50051"
   MPC_SIDECAR_TLS_ENABLED: "false"
   TOR_HEALTH_REQUIRED: "false"
+  VAULT_ENABLED: "false"
   VAULT_RAFT_ENABLED: "false"
   VAULT_RAFT_REQUIRED: "false"
-  VAULT_RAFT_URL: "http://kerosene-vault-raft-headless:8200"
-  VAULT_RAFT_TOKEN: "local-root-token"
+  VAULT_RAFT_URL: ""
+  VAULT_RAFT_TOKEN: ""
   VAULT_RAFT_TOKEN_FILE: ""
-  VAULT_RAFT_EXPECTED_SERVERS: "1"
+  VAULT_RAFT_EXPECTED_SERVERS: "0"
   VAULT_RAFT_TLS_INSECURE: "true"
   VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS: "180000"
   LIGHTNING_LND_ENABLED: "true"
@@ -154,7 +140,7 @@ data:
   LIGHTNING_LND_TLS_INSECURE: "true"
   LIGHTNING_LND_REST_ENABLED: "true"
   LIGHTNING_LND_BASE_URL: "https://kerosene-lnd-headless:8080"
-  BITCOIN_NETWORK: "testnet"
+  BITCOIN_NETWORK: "testnet3"
   BITCOIN_RPC_ENABLED: "true"
   # Beta testnet: fail closed if Bitcoin Core is unreachable.
   BITCOIN_RPC_REQUIRED: "true"
@@ -190,15 +176,25 @@ data:
   KEROSENE_RUNTIME_ROLE: "kfe-service"
   SPRING_DATA_REDIS_HOST: "kerosene-redis-headless"
   SPRING_DATA_REDIS_PORT: "6379"
-  MPC_SIDECAR_HOST: "mpc-sidecar"
+  SPRING_CONFIG_ADDITIONAL_LOCATION: "optional:classpath:kfe-service-vaultmesh-testnet3.properties"
+  # Vault mesh settlement (compose lab vault-1 via Service/Endpoints bridge).
+  KFE_VAULTMESH_ENABLED: "true"
+  KFE_VAULTMESH_MESH_ONLY: "true"
+  KFE_VAULTMESH_SUBMIT_ON_OUTBOUND: "true"
+  KFE_VAULTMESH_BASE_URL: "http://vault-1:7701"
+  KFE_VAULTMESH_API_TOKEN: "kerosene-vault-lab-only"
+  KFE_MPC_SIGNING_ENABLED: "false"
+  KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED: "false"
+  MPC_SIDECAR_HOST: ""
   MPC_SIDECAR_PORT: "50051"
   MPC_SIDECAR_TLS_ENABLED: "false"
+  VAULT_ENABLED: "false"
   VAULT_RAFT_ENABLED: "false"
   VAULT_RAFT_REQUIRED: "false"
-  VAULT_RAFT_URL: "http://kerosene-vault-raft-headless:8200"
-  VAULT_RAFT_TOKEN: "local-root-token"
+  VAULT_RAFT_URL: ""
+  VAULT_RAFT_TOKEN: ""
   VAULT_RAFT_TOKEN_FILE: ""
-  VAULT_RAFT_EXPECTED_SERVERS: "1"
+  VAULT_RAFT_EXPECTED_SERVERS: "0"
   VAULT_RAFT_TLS_INSECURE: "true"
   VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS: "180000"
   LIGHTNING_LND_ENABLED: "true"
@@ -208,7 +204,7 @@ data:
   LIGHTNING_LND_TLS_INSECURE: "true"
   LIGHTNING_LND_REST_ENABLED: "true"
   LIGHTNING_LND_BASE_URL: "https://kerosene-lnd-headless:8080"
-  BITCOIN_NETWORK: "testnet"
+  BITCOIN_NETWORK: "testnet3"
   BITCOIN_RPC_ENABLED: "true"
   BITCOIN_RPC_REQUIRED: "true"
   BITCOIN_RPC_PRUNED_REQUIRED: "false"
@@ -238,7 +234,6 @@ data:
   AUDIT_SOLVENCY_ENFORCED: "false"
   RELEASE_ATTESTATION_REQUIRED: "false"
   RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
-  KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED: "true"
   QUORUM_ALLOW_LOCAL_SIMULATION: "true"
   # On-chain outbound: local Bitcoin Core is a first-class PSBT signer seat (walletprocesspsbt).
   # Production multiparty deploys set QUORUM_PSBT_SIGNER_URLS and raise required signatures.

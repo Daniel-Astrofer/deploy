@@ -29,7 +29,6 @@ spec:
         values:
           - server
           - web-page
-          - mpc-sidecar
   policyTypes:
     - Ingress
   ingress:
@@ -39,10 +38,25 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
+---
+# kfe → host-published vault-mesh-lab (:7701) via Service/Endpoints bridge.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: local-full-allow-vault-mesh-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kfe-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
         - protocol: TCP
-          port: 8081
-        - protocol: TCP
-          port: 50051
+          port: 7701
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

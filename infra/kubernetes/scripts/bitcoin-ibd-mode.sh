@@ -18,13 +18,10 @@ PAUSE_DEPLOYS=(
   kfe-service
   web-page
   tor-onion
-  mpc-sidecar
-  local-vault
   local-redis
 )
 PAUSE_STS=(
   local-postgres
-  mpc-sidecar
 )
 
 log() { printf '[bitcoin-ibd] %s\n' "$*"; }
@@ -100,7 +97,7 @@ if mode == "boost":
     indent = m.group(1)
     insert = (
         f"{indent}-txindex=0 \\\n"
-        f"{indent}-dbcache=2048 \\\n"
+        f"{indent}-dbcache=512 \\\n"
         f"{indent}-blocksonly=1 \\\n"
         f"{indent}-par=10 \\\n"
         f"{indent}-maxconnections=64 \\\n"
@@ -138,7 +135,7 @@ cmd_boost() {
   set_bitcoin_ibd_knobs boost
   # Realistic on a 16Gi workstation that still runs IDE/browser.
   # Raise further only if `free -h` shows >8Gi available after pause.
-  patch_bitcoin_resources "1" "2Gi" "6" "4Gi"
+  patch_bitcoin_resources "1" "2Gi" "4" "3500Mi"
   $KUBECTL -n "$NS" rollout status deploy/local-bitcoin --timeout=300s || true
   log "boost active. When IBD finishes: bash infra/kubernetes/scripts/bitcoin-ibd-mode.sh restore"
   cmd_status

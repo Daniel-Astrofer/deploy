@@ -27,6 +27,9 @@ images:
     dockerfile: infra/docker/images/mpc-sidecar/Dockerfile
     context: backend/mpc-sidecar
     owner: mpc
+    notes: >-
+      REMOVED from deploy.sh / local-full. See backend/mpc-sidecar/REMOVED.txt.
+      Settlement uses kerosene-vault mesh (vault-mesh-lab.compose.yaml).
 
   kerosene-vault:
     image: kerosene/kerosene-vault

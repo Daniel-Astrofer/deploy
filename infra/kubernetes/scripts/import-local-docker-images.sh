@@ -13,9 +13,11 @@ Expected targets:
   kerosene/server:local
   kerosene/kfe-service:local
   localhost:5000/kerosene/kfe-service:local
-  kerosene/mpc-sidecar:local
   kerosene/tor:local
   kerosene/web-page:local
+
+Vault mesh (kerosene-vault) is started by deploy via vault-mesh-lab.compose.yaml,
+not imported into the cluster.
 
 Options:
   --skip-kfe-service-build
@@ -207,26 +209,6 @@ build_kfe_service_image() {
   docker build -t "$target" -f "$dockerfile" "$context"
 }
 
-build_mpc_sidecar_image() {
-  local target="kerosene/mpc-sidecar:local"
-  local dockerfile="$REPO_ROOT/infra/docker/images/mpc-sidecar/Dockerfile"
-  local context="$REPO_ROOT/backend/mpc-sidecar"
-
-  if [[ ! -f "$dockerfile" ]]; then
-    fail "MPC sidecar Dockerfile not found: $dockerfile"
-  fi
-  if [[ ! -d "$context" ]]; then
-    fail "MPC sidecar build context not found: $context"
-  fi
-
-  if docker image inspect "$target" >/dev/null 2>&1; then
-    info "Rebuilding existing Docker image: $target"
-  fi
-
-  info "Building $target from $dockerfile"
-  docker build -t "$target" -f "$dockerfile" "$context"
-}
-
 build_kubernetes_web_bundle() {
   local frontend_dir="$REPO_ROOT/frontend"
   local web_build="$frontend_dir/build/web"
@@ -327,7 +309,6 @@ import_image() {
 
 build_server_image
 build_kfe_service_image
-build_mpc_sidecar_image
 build_web_page_image
 build_tor_image
 
@@ -342,7 +323,6 @@ import_image "kerosene/server:local"
 import_image "localhost:5000/kerosene/server:local"
 import_image "kerosene/kfe-service:local"
 import_image "localhost:5000/kerosene/kfe-service:local"
-import_image "kerosene/mpc-sidecar:local"
 import_image "kerosene/tor:local"
 if docker image inspect "kerosene/web-page:local" >/dev/null 2>&1; then
   import_image "kerosene/web-page:local"
@@ -351,7 +331,7 @@ fi
 
 if [[ "$IMPORT_MODE" == "containerd" ]]; then
   info "Imported images visible to Kubernetes:"
-  "${CTR_CMD[@]}" -n k8s.io images ls | grep -E 'kerosene/(server|kfe-service|mpc-sidecar|tor|web-page)' || true
+  "${CTR_CMD[@]}" -n k8s.io images ls | grep -E 'kerosene/(server|kfe-service|tor|web-page)' || true
 else
   info "Images loaded into kind cluster $KIND_CLUSTER_NAME"
 fi

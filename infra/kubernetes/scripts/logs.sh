@@ -22,8 +22,8 @@ if [[ -n "${KUBECONFIG:-}" ]]; then
   KUBECTL_ARGS+=(--kubeconfig "$KUBECONFIG")
 fi
 
-CORE_TARGETS=(server kfe-service web-page mpc-sidecar tor-onion)
-FULL_TARGETS=(server kfe-service web-page mpc-sidecar tor-onion local-postgres local-redis local-vault local-bitcoin local-lnd local-lnd-peer)
+CORE_TARGETS=(server kfe-service web-page tor-onion)
+FULL_TARGETS=(server kfe-service web-page tor-onion local-postgres local-redis local-bitcoin local-lnd local-lnd-peer)
 
 usage() {
   cat <<'USAGE'
@@ -31,9 +31,9 @@ Usage: infra/logs.sh [target] [--follow|--snapshot] [--split] [--tail N] [--outp
 
 Targets:
   all, full        Complete local-full runtime.
-  core             server, kfe-service, web-page, mpc-sidecar, tor-onion.
-  server, kfe-service, web-page, mpc-sidecar, tor-onion
-  local-postgres, local-redis, local-vault, local-bitcoin, local-lnd, local-lnd-peer
+  core             server, kfe-service, web-page, tor-onion.
+  server, kfe-service, web-page, tor-onion
+  local-postgres, local-redis, local-bitcoin, local-lnd, local-lnd-peer
 
 Examples:
   bash infra/logs.sh
@@ -157,14 +157,16 @@ resource_for() {
     server) echo "deployment/server" ;;
     kfe|kfe-service) echo "deployment/kfe-service" ;;
     web|web-page) echo "deployment/web-page" ;;
-    mpc|mpc-sidecar) echo "statefulset/mpc-sidecar" ;;
     tor|tor-onion) echo "deployment/tor-onion" ;;
     postgres|local-postgres) echo "statefulset/local-postgres" ;;
     redis|local-redis) echo "deployment/local-redis" ;;
-    vault|local-vault) echo "deployment/local-vault" ;;
     bitcoin|local-bitcoin) echo "deployment/local-bitcoin" ;;
     lnd|local-lnd) echo "deployment/local-lnd" ;;
     lnd-peer|local-lnd-peer) echo "deployment/local-lnd-peer" ;;
+    mpc|mpc-sidecar|vault|local-vault)
+      echo "[!] $1 removed from deploy (use vault-mesh-lab compose logs)" >&2
+      return 1
+      ;;
     *)
       return 1
       ;;

@@ -9,6 +9,7 @@ resources:
   - local-lnd-peer.yaml
   - local-network-policy.yaml
   - local-tor-onion.yaml
+  - local-vault-mesh-host.yaml
   - web-page-nginx-config.yaml
   - web-page-runtime-config.yaml
 labels:
@@ -21,8 +22,6 @@ images:
   - name: kerosene/server
     newName: localhost:5000/kerosene/server
     newTag: local
-  - name: kerosene/mpc-sidecar
-    newTag: local
   - name: kerosene/web-page
     newName: localhost:5000/kerosene/web-page
     newTag: local
@@ -34,11 +33,60 @@ patches:
       kind: StatefulSet
       name: mpc-sidecar
     patch: |-
-      - op: remove
-        path: /spec/volumeClaimTemplates
-      - op: add
-        path: /spec/template/spec/volumes/-
-        value:
-          name: encrypted-shards
-          emptyDir:
-            sizeLimit: 1Gi
+      $patch: delete
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: mpc-sidecar
+  - target:
+      version: v1
+      kind: Service
+      name: mpc-sidecar
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: mpc-sidecar
+  - target:
+      version: v1
+      kind: Service
+      name: mpc-sidecar-headless
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: mpc-sidecar-headless
+  - target:
+      version: v1
+      kind: ServiceAccount
+      name: mpc-sidecar
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: mpc-sidecar
+  - target:
+      group: policy
+      version: v1
+      kind: PodDisruptionBudget
+      name: mpc-sidecar
+    patch: |-
+      $patch: delete
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: mpc-sidecar
+  - target:
+      group: networking.k8s.io
+      version: v1
+      kind: NetworkPolicy
+      name: mpc-sidecar-network
+    patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: mpc-sidecar-network
