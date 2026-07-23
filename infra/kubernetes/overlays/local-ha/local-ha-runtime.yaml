@@ -1,3 +1,7 @@
+# local-ha multi-AZ scaffold.
+# HashiCorp vault-raft + mpc-sidecar removed (vault-mesh cutover; see local-full).
+# Treasury signing path is vault mesh — wire vault-mesh separately; do not revive Raft/mpc.
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -231,159 +235,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: vault-raft-1
-  labels:
-    app: vault-raft-1
-spec:
-  selector:
-    app: vault-raft-1
-  ports:
-    - name: api
-      port: 8200
-      targetPort: api
-    - name: cluster
-      port: 8201
-      targetPort: cluster
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: vault-raft-2
-  labels:
-    app: vault-raft-2
-spec:
-  selector:
-    app: vault-raft-2
-  ports:
-    - name: api
-      port: 8200
-      targetPort: api
-    - name: cluster
-      port: 8201
-      targetPort: cluster
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: vault-raft-3
-  labels:
-    app: vault-raft-3
-spec:
-  selector:
-    app: vault-raft-3
-  ports:
-    - name: api
-      port: 8200
-      targetPort: api
-    - name: cluster
-      port: 8201
-      targetPort: cluster
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vault-raft-1
-  labels:
-    app: vault-raft-1
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: vault-raft-1
-  template:
-    metadata:
-      labels:
-        app: vault-raft-1
-    spec:
-      containers:
-        - name: vault
-          image: hashicorp/vault:1.17
-          imagePullPolicy: IfNotPresent
-          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
-          env:
-            - name: VAULT_DEV_ROOT_TOKEN_ID
-              value: local-root-token
-          ports:
-            - name: api
-              containerPort: 8200
-            - name: cluster
-              containerPort: 8201
-          readinessProbe:
-            httpGet:
-              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
-              port: api
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vault-raft-2
-  labels:
-    app: vault-raft-2
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: vault-raft-2
-  template:
-    metadata:
-      labels:
-        app: vault-raft-2
-    spec:
-      containers:
-        - name: vault
-          image: hashicorp/vault:1.17
-          imagePullPolicy: IfNotPresent
-          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
-          env:
-            - name: VAULT_DEV_ROOT_TOKEN_ID
-              value: local-root-token
-          ports:
-            - name: api
-              containerPort: 8200
-            - name: cluster
-              containerPort: 8201
-          readinessProbe:
-            httpGet:
-              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
-              port: api
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: vault-raft-3
-  labels:
-    app: vault-raft-3
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: vault-raft-3
-  template:
-    metadata:
-      labels:
-        app: vault-raft-3
-    spec:
-      containers:
-        - name: vault
-          image: hashicorp/vault:1.17
-          imagePullPolicy: IfNotPresent
-          args: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
-          env:
-            - name: VAULT_DEV_ROOT_TOKEN_ID
-              value: local-root-token
-          ports:
-            - name: api
-              containerPort: 8200
-            - name: cluster
-              containerPort: 8201
-          readinessProbe:
-            httpGet:
-              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
-              port: api
----
-apiVersion: v1
-kind: Service
-metadata:
   name: db-wvo
   labels:
     app: db-wvo
@@ -492,70 +343,6 @@ spec:
           readinessProbe:
             exec:
               command: ["sh", "-c", "redis-cli -a kerosene-dev ping | grep PONG"]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: mpc-sidecar-wvo
-  labels:
-    app: mpc-sidecar-wvo
-spec:
-  type: NodePort
-  selector:
-    app: mpc-sidecar-wvo
-  ports:
-    - name: grpc
-      port: 50051
-      targetPort: grpc
-    - name: health
-      port: 8081
-      targetPort: health
-      nodePort: 31180
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mpc-sidecar-wvo
-  labels:
-    app: mpc-sidecar-wvo
-spec:
-  serviceName: mpc-sidecar-wvo
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mpc-sidecar-wvo
-  template:
-    metadata:
-      labels:
-        app: mpc-sidecar-wvo
-    spec:
-      containers:
-        - name: mpc-sidecar
-          image: kerosene/mpc-sidecar:local
-          imagePullPolicy: Never
-          env:
-            - name: MPC_ALLOW_INSECURE_GRPC
-              value: "true"
-            - name: MPC_REQUIRE_MASTER_KEY
-              value: "false"
-            - name: MPC_RUNTIME_MODE
-              value: LOCAL_DEV_SIGNER
-          ports:
-            - name: grpc
-              containerPort: 50051
-            - name: health
-              containerPort: 8081
-          readinessProbe:
-            httpGet:
-              path: /version
-              port: health
-          volumeMounts:
-            - name: shards
-              mountPath: /app/encrypted-shards
-      volumes:
-        - name: shards
-          emptyDir:
-            sizeLimit: 256Mi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -670,24 +457,8 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: MPC_SIDECAR_HOST
-              value: mpc-sidecar-wvo
-            - name: MPC_SIDECAR_PORT
-              value: "50051"
-            - name: MPC_SIDECAR_TLS_ENABLED
-              value: "false"
             - name: VAULT_ENABLED
               value: "false"
-            - name: VAULT_RAFT_ENABLED
-              value: "false"
-            - name: VAULT_RAFT_REQUIRED
-              value: "false"
-            - name: VAULT_RAFT_URL
-              value: http://vault-raft-1:8200
-            - name: VAULT_RAFT_EXPECTED_SERVERS
-              value: "3"
-            - name: VAULT_RAFT_TLS_INSECURE
-              value: "true"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required
@@ -765,6 +536,14 @@ spec:
           image: kerosene/kfe-service:local
           imagePullPolicy: Never
           env:
+            - name: KFE_VAULTMESH_ENABLED
+              value: "true"
+            - name: KFE_VAULTMESH_MESH_ONLY
+              value: "true"
+            - name: KFE_MPC_SIGNING_ENABLED
+              value: "false"
+            - name: KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED
+              value: "false"
             - name: SPRING_PROFILES_ACTIVE
               value: docker,kfe
             - name: KEROSENE_RUNTIME_ROLE
@@ -789,26 +568,10 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: MPC_SIDECAR_HOST
-              value: mpc-sidecar-ltv
-            - name: MPC_SIDECAR_PORT
-              value: "50051"
-            - name: MPC_SIDECAR_TLS_ENABLED
-              value: "false"
             - name: VAULT_ENABLED
               value: "false"
-            - name: VAULT_RAFT_ENABLED
-              value: "false"
-            - name: VAULT_RAFT_REQUIRED
-              value: "false"
-            - name: VAULT_RAFT_URL
-              value: http://vault-raft-1:8200
             - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
               value: "180000"
-            - name: VAULT_RAFT_EXPECTED_SERVERS
-              value: "3"
-            - name: VAULT_RAFT_TLS_INSECURE
-              value: "true"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required
@@ -908,6 +671,14 @@ spec:
           image: kerosene/kfe-service:local
           imagePullPolicy: Never
           env:
+            - name: KFE_VAULTMESH_ENABLED
+              value: "true"
+            - name: KFE_VAULTMESH_MESH_ONLY
+              value: "true"
+            - name: KFE_MPC_SIGNING_ENABLED
+              value: "false"
+            - name: KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED
+              value: "false"
             - name: SPRING_PROFILES_ACTIVE
               value: docker,kfe
             - name: KEROSENE_RUNTIME_ROLE
@@ -932,26 +703,10 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: MPC_SIDECAR_HOST
-              value: mpc-sidecar-wvo
-            - name: MPC_SIDECAR_PORT
-              value: "50051"
-            - name: MPC_SIDECAR_TLS_ENABLED
-              value: "false"
             - name: VAULT_ENABLED
               value: "false"
-            - name: VAULT_RAFT_ENABLED
-              value: "false"
-            - name: VAULT_RAFT_REQUIRED
-              value: "false"
-            - name: VAULT_RAFT_URL
-              value: http://vault-raft-1:8200
             - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
               value: "180000"
-            - name: VAULT_RAFT_EXPECTED_SERVERS
-              value: "3"
-            - name: VAULT_RAFT_TLS_INSECURE
-              value: "true"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required
@@ -1128,70 +883,6 @@ spec:
             exec:
               command: ["sh", "-c", "redis-cli -a kerosene-dev ping | grep PONG"]
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: mpc-sidecar-iw5
-  labels:
-    app: mpc-sidecar-iw5
-spec:
-  type: NodePort
-  selector:
-    app: mpc-sidecar-iw5
-  ports:
-    - name: grpc
-      port: 50051
-      targetPort: grpc
-    - name: health
-      port: 8081
-      targetPort: health
-      nodePort: 31181
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mpc-sidecar-iw5
-  labels:
-    app: mpc-sidecar-iw5
-spec:
-  serviceName: mpc-sidecar-iw5
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mpc-sidecar-iw5
-  template:
-    metadata:
-      labels:
-        app: mpc-sidecar-iw5
-    spec:
-      containers:
-        - name: mpc-sidecar
-          image: kerosene/mpc-sidecar:local
-          imagePullPolicy: Never
-          env:
-            - name: MPC_ALLOW_INSECURE_GRPC
-              value: "true"
-            - name: MPC_REQUIRE_MASTER_KEY
-              value: "false"
-            - name: MPC_RUNTIME_MODE
-              value: LOCAL_DEV_SIGNER
-          ports:
-            - name: grpc
-              containerPort: 50051
-            - name: health
-              containerPort: 8081
-          readinessProbe:
-            httpGet:
-              path: /version
-              port: health
-          volumeMounts:
-            - name: shards
-              mountPath: /app/encrypted-shards
-      volumes:
-        - name: shards
-          emptyDir:
-            sizeLimit: 256Mi
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1305,24 +996,8 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: MPC_SIDECAR_HOST
-              value: mpc-sidecar-iw5
-            - name: MPC_SIDECAR_PORT
-              value: "50051"
-            - name: MPC_SIDECAR_TLS_ENABLED
-              value: "false"
             - name: VAULT_ENABLED
               value: "false"
-            - name: VAULT_RAFT_ENABLED
-              value: "false"
-            - name: VAULT_RAFT_REQUIRED
-              value: "false"
-            - name: VAULT_RAFT_URL
-              value: http://vault-raft-1:8200
-            - name: VAULT_RAFT_EXPECTED_SERVERS
-              value: "3"
-            - name: VAULT_RAFT_TLS_INSECURE
-              value: "true"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required
@@ -1400,6 +1075,14 @@ spec:
           image: kerosene/kfe-service:local
           imagePullPolicy: Never
           env:
+            - name: KFE_VAULTMESH_ENABLED
+              value: "true"
+            - name: KFE_VAULTMESH_MESH_ONLY
+              value: "true"
+            - name: KFE_MPC_SIGNING_ENABLED
+              value: "false"
+            - name: KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED
+              value: "false"
             - name: SPRING_PROFILES_ACTIVE
               value: docker,kfe
             - name: KEROSENE_RUNTIME_ROLE
@@ -1424,26 +1107,10 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: MPC_SIDECAR_HOST
-              value: mpc-sidecar-iw5
-            - name: MPC_SIDECAR_PORT
-              value: "50051"
-            - name: MPC_SIDECAR_TLS_ENABLED
-              value: "false"
             - name: VAULT_ENABLED
               value: "false"
-            - name: VAULT_RAFT_ENABLED
-              value: "false"
-            - name: VAULT_RAFT_REQUIRED
-              value: "false"
-            - name: VAULT_RAFT_URL
-              value: http://vault-raft-1:8200
             - name: VAULT_BOOTSTRAP_STARTUP_TIMEOUT_MS
               value: "180000"
-            - name: VAULT_RAFT_EXPECTED_SERVERS
-              value: "3"
-            - name: VAULT_RAFT_TLS_INSECURE
-              value: "true"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required
@@ -1620,70 +1287,6 @@ spec:
             exec:
               command: ["sh", "-c", "redis-cli -a kerosene-dev ping | grep PONG"]
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: mpc-sidecar-ltv
-  labels:
-    app: mpc-sidecar-ltv
-spec:
-  type: NodePort
-  selector:
-    app: mpc-sidecar-ltv
-  ports:
-    - name: grpc
-      port: 50051
-      targetPort: grpc
-    - name: health
-      port: 8081
-      targetPort: health
-      nodePort: 31182
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: mpc-sidecar-ltv
-  labels:
-    app: mpc-sidecar-ltv
-spec:
-  serviceName: mpc-sidecar-ltv
-  replicas: 1
-  selector:
-    matchLabels:
-      app: mpc-sidecar-ltv
-  template:
-    metadata:
-      labels:
-        app: mpc-sidecar-ltv
-    spec:
-      containers:
-        - name: mpc-sidecar
-          image: kerosene/mpc-sidecar:local
-          imagePullPolicy: Never
-          env:
-            - name: MPC_ALLOW_INSECURE_GRPC
-              value: "true"
-            - name: MPC_REQUIRE_MASTER_KEY
-              value: "false"
-            - name: MPC_RUNTIME_MODE
-              value: LOCAL_DEV_SIGNER
-          ports:
-            - name: grpc
-              containerPort: 50051
-            - name: health
-              containerPort: 8081
-          readinessProbe:
-            httpGet:
-              path: /version
-              port: health
-          volumeMounts:
-            - name: shards
-              mountPath: /app/encrypted-shards
-      volumes:
-        - name: shards
-          emptyDir:
-            sizeLimit: 256Mi
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1797,24 +1400,8 @@ spec:
               value: "6379"
             - name: SPRING_DATA_REDIS_PASSWORD
               value: kerosene-dev
-            - name: MPC_SIDECAR_HOST
-              value: mpc-sidecar-ltv
-            - name: MPC_SIDECAR_PORT
-              value: "50051"
-            - name: MPC_SIDECAR_TLS_ENABLED
-              value: "false"
             - name: VAULT_ENABLED
               value: "false"
-            - name: VAULT_RAFT_ENABLED
-              value: "false"
-            - name: VAULT_RAFT_REQUIRED
-              value: "false"
-            - name: VAULT_RAFT_URL
-              value: http://vault-raft-1:8200
-            - name: VAULT_RAFT_EXPECTED_SERVERS
-              value: "3"
-            - name: VAULT_RAFT_TLS_INSECURE
-              value: "true"
             - name: TOR_HEALTH_REQUIRED
               value: "false"
             - name: tor.health.required

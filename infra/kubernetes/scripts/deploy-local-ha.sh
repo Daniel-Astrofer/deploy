@@ -28,4 +28,5 @@ fi
 kubectl apply -f "$OVERLAY/namespace.yaml"
 kubectl apply -k "$OVERLAY"
 kubectl -n kerosene-local-ha get deploy,sts,pod,svc
-echo "[+] local-ha submitted. Use web-page NodePort 31090 for split Core/KFE routing."
+echo "[+] local-ha submitted (no HashiCorp/mpc). Use web-page NodePort 31090 for split Core/KFE routing."
+echo "    Treasury signing: vault mesh (mesh-only env on kfe); do not revive Raft/mpc stubs."
