@@ -23,6 +23,8 @@ x-vault-lab-env: &vault-lab-env
   VAULT_API_TOKEN: ${VAULT_API_TOKEN:-kerosene-vault-lab-only}
   VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:-kerosene-vault-lab-passphrase}
   VAULT_DATA_DIR: /var/lib/kerosene-vault
+  # Best-effort replicated anti-nonce across peers (shared lab volume).
+  VAULT_ANTI_NONCE_SHARED_DIR: /var/lib/kerosene-vault-shared/anti-nonce
   ATTESTATION_MODE: sim
   LAB_ATTESTATION_ROOT: kerosene-lab-root
   VAULT_LISTEN_ADDR: 0.0.0.0:7701
@@ -41,6 +43,7 @@ services:
       VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
     volumes:
       - vault-1-lab-data:/var/lib/kerosene-vault
+      - vault-lab-anti-nonce:/var/lib/kerosene-vault-shared/anti-nonce
     ports:
       - "7701:7701"
 
@@ -55,6 +58,7 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
     volumes:
       - vault-2-lab-data:/var/lib/kerosene-vault
+      - vault-lab-anti-nonce:/var/lib/kerosene-vault-shared/anti-nonce
     ports:
       - "7702:7701"
 
@@ -69,6 +73,7 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
     volumes:
       - vault-3-lab-data:/var/lib/kerosene-vault
+      - vault-lab-anti-nonce:/var/lib/kerosene-vault-shared/anti-nonce
     ports:
       - "7703:7701"
 
@@ -76,3 +81,4 @@ volumes:
   vault-1-lab-data:
   vault-2-lab-data:
   vault-3-lab-data:
+  vault-lab-anti-nonce:
