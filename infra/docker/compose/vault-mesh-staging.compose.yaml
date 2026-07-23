@@ -4,6 +4,9 @@
 #
 # Lab-only defaults below are for local staging visualization — NOT production go-live.
 # Staging must NOT set VAULT_DKG_MODE=dealer_lab (production-path refuse).
+#
+# mTLS (default): generate materials first:
+#   ./backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh
 
 x-vault-staging-env: &vault-staging-env
   BITCOIN_NETWORK: testnet3
@@ -16,10 +19,13 @@ x-vault-staging-env: &vault-staging-env
   VAULT_GENESIS_N: "3"
   VAULT_DATA_DIR: /var/lib/kerosene-vault
   VAULT_SHARE_STORE: tee_seal
-  # Staging hygiene refuses static_token; use mTLS (token unused unless auth mode overridden).
+  # Staging hygiene refuses static_token; default toward mTLS.
   VAULT_AUTH_MODE: ${VAULT_AUTH_MODE:-mtls}
   VAULT_API_TOKEN: ${VAULT_API_TOKEN:-}
   VAULT_DATA_PASSPHRASE: ${VAULT_DATA_PASSPHRASE:-}
+  VAULT_TLS_CERT_PATH: ${VAULT_TLS_CERT_PATH:-/certs/vault-server.crt}
+  VAULT_TLS_KEY_PATH: ${VAULT_TLS_KEY_PATH:-/certs/vault-server.key}
+  VAULT_TLS_CLIENT_CA_PATH: ${VAULT_TLS_CLIENT_CA_PATH:-/certs/ca.crt}
 
 services:
   vault-1:
@@ -33,6 +39,7 @@ services:
       VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
     volumes:
       - vault-1-staging-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     ports:
       - "7801:7701"
 
@@ -47,6 +54,7 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
     volumes:
       - vault-2-staging-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     ports:
       - "7802:7701"
 
@@ -61,6 +69,7 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
     volumes:
       - vault-3-staging-data:/var/lib/kerosene-vault
+      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     ports:
       - "7803:7701"
 
