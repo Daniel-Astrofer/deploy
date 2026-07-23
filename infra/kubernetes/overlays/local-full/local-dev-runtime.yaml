@@ -421,10 +421,12 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 512Mi
             limits:
               cpu: 1000m
-              memory: 1Gi
+              # Bitcoin Core (pruned classic testnet) can exceed 1Gi during
+              # block index loading with the wallet enabled.
+              memory: 2Gi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
