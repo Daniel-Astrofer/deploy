@@ -29,7 +29,7 @@ KEROSENE_VAULT_MESH_PROFILE=tor bash infra/deploy.sh --wait
 ```
 
 That starts `vault-mesh-tor.compose.yaml` (`distributed_wire`, no clearnet vault ports).
-For a full over-wire DKG exercise use `backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh`.
+For a full over-wire DKG exercise use `scripts/vault/lab_dkg_wire_tor.sh`.
 See `backend/kerosene-vault/docs/CEREMONY_TOR.md`.
 
 A topologia `hardened` fica fora do repositório público (ops privado).

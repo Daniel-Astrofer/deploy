@@ -57,7 +57,7 @@ case "$PROFILE" in
     COMPOSE_FILE="${KEROSENE_VAULT_MESH_COMPOSE_FILE:-$REPO_ROOT/infra/docker/compose/vault-mesh-staging.compose.yaml}"
     if [[ ! -d "${KEROSENE_VAULT_MESH_CERTS_DIR:-$REPO_ROOT/backend/kerosene-vault/certs}" ]]; then
       echo "[!] staging mesh profile needs mTLS certs; falling back to lab clear-token mesh." >&2
-      echo "[!] Generate certs: bash backend/kerosene-vault/scripts/gen_lab_mtls_certs.sh" >&2
+      echo "[!] Generate certs: bash scripts/vault/gen_lab_mtls_certs.sh" >&2
       COMPOSE_FILE="$REPO_ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml"
       PROFILE=lab
     fi

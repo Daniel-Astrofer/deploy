@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-VAULT_SCRIPTS="$REPO_ROOT/backend/kerosene-vault/scripts"
+VAULT_SCRIPTS="$REPO_ROOT/scripts/vault"
 
 WITH_AUDIT=1
 while [[ $# -gt 0 ]]; do
@@ -28,4 +28,4 @@ fi
 echo
 echo "Next: source ceremony-certs/audit/env.hint (if audit generated),"
 echo "      mount per-node paths from ceremony-certs/nodes/{id}/,"
-echo "      then VAULT_CEREMONY_MODE=production ./backend/kerosene-vault/scripts/genesis_ceremony_checklist.sh"
+echo "      then VAULT_CEREMONY_MODE=production ./scripts/vault/genesis_ceremony_checklist.sh"

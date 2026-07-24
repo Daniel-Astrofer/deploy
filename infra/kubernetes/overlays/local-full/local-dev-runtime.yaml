@@ -600,6 +600,9 @@ spec:
                 "--rpclisten=0.0.0.0:10009" \
                 "--restlisten=0.0.0.0:8080" \
                 "--listen=0.0.0.0:9735" \
+                "--tor.socks=${TOR_SOCKS_PROXY}" \
+                "--tor.skip-proxy-for-clearnet-targets" \
+                "--externalip=${EXTERNALIP}" \
                 "--bitcoin.active" \
                 "--bitcoin.testnet" \
                 "--bitcoin.node=bitcoind" \
@@ -636,14 +639,18 @@ spec:
               value: "kerosene-lnd-headless,local-lnd,localhost,lnd-bitcoind"
             - name: LND_TLS_EXTRA_IPS
               value: "127.0.0.1"
+            - name: TOR_SOCKS_PROXY
+              value: tor-onion:9050
+            - name: EXTERNALIP
+              value: 192.168.3.100:32245
             - name: BITCOIN_RPC_HOST
               value: bitcoin-core
             - name: BITCOIN_RPC_PORT
               value: "8332"
             - name: BITCOIN_ZMQ_RAWBLOCK
-              value: "tcp://bitcoin-core:28332"
+              value: "tcp://bitcoin-core:28334"
             - name: BITCOIN_ZMQ_RAWTX
-              value: "tcp://bitcoin-core:28333"
+              value: "tcp://bitcoin-core:28332"
             - name: BITCOIN_RPC_USER
               valueFrom:
                 secretKeyRef:

@@ -7,7 +7,7 @@
 # Bring up:
 #   docker compose -f infra/docker/compose/vault-mesh-lab.compose.yaml up --build
 # Smoke:
-#   ./backend/kerosene-vault/scripts/lab_testnet3_smoke.sh
+#   ./scripts/vault/lab_testnet3_smoke.sh
 #
 # --- Over-wire distributed DKG (3 containers, no dealer) ---
 # Set on each service (or override):
@@ -22,9 +22,9 @@
 #   VAULT_TLS_CLIENT_CERT_PATH=/certs/vault-client.crt   # outbound peer identity
 #   VAULT_TLS_CLIENT_KEY_PATH=/certs/vault-client.key
 # Then run:
-#   ./backend/kerosene-vault/scripts/lab_dkg_wire.sh
+#   ./scripts/vault/lab_dkg_wire.sh
 # Tor (real network variation, private mesh): 
-#   ./backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh
+#   ./scripts/vault/lab_dkg_wire_tor.sh
 # Integrity (ToB Gate): roster+min/max frozen at round1; transcript_hex on wire;
 # rejects malicious threshold bump / late join / participant set change.
 # In-process fallback (single process, no peer HTTP): VAULT_DKG_MODE=distributed
@@ -46,7 +46,7 @@ x-vault-lab-env: &vault-lab-env
   # Anti-nonce: durable local log + quorum HTTP /v1/anti-nonce/prepare among VAULT_SEED_PEERS.
   # Explicit domestic lab tier (honest: not SEV). Production native uses software + AEAD.
   # Ceremony production uses the same distributed_wire code path — override:
-  #   VAULT_DKG_MODE=distributed_wire ./backend/kerosene-vault/scripts/lab_dkg_wire.sh
+  #   VAULT_DKG_MODE=distributed_wire ./scripts/vault/lab_dkg_wire.sh
   # or: infra/docker/compose/vault-mesh-ceremony.compose.yaml + genesis_dkg_wire.sh
   VAULT_NODE_TIER: domestic
   ATTESTATION_MODE: sim

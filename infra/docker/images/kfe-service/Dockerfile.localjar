@@ -1,0 +1,35 @@
+# Local dev image builder for kfe-service.
+# Avoids the standalone Dockerfile's expected repo layout (no root build.gradle.kts/src/deploy).
+#
+# Build (from repo root), after producing app.jar via:
+#   ./gradlew :kfe-service:bootJar -x test
+#   cp backend/kerosene/kfe-service/build/libs/*-boot.jar /tmp/kfe-build-ctx/app.jar
+#   cp backend/deploy/docker/Healthcheck.java /tmp/kfe-build-ctx/Healthcheck.java
+#   docker build -f infra/docker/images/kfe-service/Dockerfile.localjar \
+#     -t kerosene/kfe-service:local /tmp/kfe-build-ctx
+
+FROM eclipse-temurin:21-jdk AS builder
+WORKDIR /workspace
+
+COPY app.jar ./app.jar
+COPY Healthcheck.java ./Healthcheck.java
+RUN javac ./Healthcheck.java -d /workspace/healthcheck
+
+FROM gcr.io/distroless/java21-debian12:nonroot
+WORKDIR /app
+
+COPY --chown=65532:65532 --from=builder /workspace/app.jar /app/app.jar
+COPY --chown=65532:65532 --from=builder /workspace/healthcheck /app/healthcheck
+
+USER 65532:65532
+EXPOSE 8080
+
+ENV SPRING_PROFILES_ACTIVE=kfe,docker
+ENV SPRING_CONFIG_IMPORT=optional:classpath:kfe-service-defaults.properties
+ENV KFE_STANDALONE=true
+ENV KEROSENE_RUNTIME_ROLE=kfe-service
+
+HEALTHCHECK --interval=10s --timeout=4s --start-period=180s --retries=12 \
+  CMD ["java", "-cp", "/app/healthcheck", "Healthcheck", "http://127.0.0.1:8080/health/ready"]
+
+ENTRYPOINT ["java","-XX:+UseContainerSupport","-XX:MaxRAMPercentage=75.0","-Djava.security.egd=file:/dev/./urandom","-Djava.awt.headless=true","-jar","/app/app.jar"]

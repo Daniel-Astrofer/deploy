@@ -405,7 +405,7 @@ echo "    onion keys: $KEROSENE_LOCAL_ONION_KEYS_PATH"
 case "${KEROSENE_VAULT_MESH_PROFILE:-lab}" in
   tor)
     echo "[+] vault mesh: docker compose -f infra/docker/compose/vault-mesh-tor.compose.yaml (distributed_wire)"
-    echo "    Tor profile: no host :7701; DKG via backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh"
+    echo "    Tor profile: no host :7701; DKG via scripts/vault/lab_dkg_wire_tor.sh"
     ;;
   staging)
     echo "[+] vault mesh: docker compose -f infra/docker/compose/vault-mesh-staging.compose.yaml"

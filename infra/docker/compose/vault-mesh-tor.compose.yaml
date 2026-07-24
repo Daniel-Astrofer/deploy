@@ -13,7 +13,7 @@
 #   Lab variability smoke (default): VAULT_AUTH_MODE=static_token
 #   Ceremony / staging / production path:
 #     VAULT_AUTH_MODE=mtls + lab-certs; peer verify = onion_or_spiffe (SPIFFE URI or .onion SAN)
-#     VAULT_AUTH_MODE=mtls ./backend/kerosene-vault/scripts/lab_dkg_wire_tor.sh
+#     VAULT_AUTH_MODE=mtls ./scripts/vault/lab_dkg_wire_tor.sh
 #
 # Docs: backend/kerosene-vault/docs/CEREMONY_TOR.md + MTLS_SPIFFE_LAYOUT.md
 
