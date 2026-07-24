@@ -152,6 +152,8 @@ data:
   TICKER_COINGECKO_ENABLED: "true"
   TICKER_PROXY_SOCKS_HOST: "tor-onion"
   TICKER_PROXY_SOCKS_PORT: "9050"
+  # WARN: KFE_VAULTMESH_REQUIRE_MTLS=false is LOCAL-ONLY. Must be set to "true" or removed before promotion to staging/production.
+  KFE_VAULTMESH_REQUIRE_MTLS: "false"
   # Security material (local-only): in prod this must come from injected secrets.
   # Spring binds these env vars to:
   #   api.secret.aes.secret
@@ -183,6 +185,8 @@ data:
   KFE_VAULTMESH_BASE_URL: "http://vault-1:7701"
   KFE_VAULTMESH_API_TOKEN: "kerosene-vault-lab-only"
   KFE_VAULTMESH_DAY_ROTATION_ENABLED: "true"
+  # WARN: KFE_VAULTMESH_REQUIRE_MTLS=false is LOCAL-ONLY. Must be set to "true" or removed for staging/production.
+  KFE_VAULTMESH_REQUIRE_MTLS: "false"
   KFE_MPC_SIGNING_ENABLED: "false"
   KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED: "false"
   LIGHTNING_LND_ENABLED: "true"

@@ -17,7 +17,7 @@ secretGenerator:
   - name: kerosene-bitcoin-secrets
     literals: [rpc-user=kerosene, rpc-password=kerosene-local-bitcoin]
   - name: kerosene-lnd-secrets
-    literals: [admin-macaroon=local-lnd-placeholder]
+    literals: [LIGHTNING_LND_MACAROON=local-lnd-placeholder]
   # mpc-sidecar / HashiCorp wallet-arming secrets removed (vault-mesh cutover).
   - name: server-secrets
     literals: [shard-attestation-secret=local-ha-shard-attestation-change-me, release-attestation-secret=local-ha-release-attestation-change-me, kfe-internal-shared-secret=local-ha-kfe-internal-secret]

@@ -84,7 +84,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: kerosene-lnd-secrets
-                  key: admin-macaroon
+                  key: LIGHTNING_LND_MACAROON
             - name: SHARD_ATTESTATION_SECRET
               valueFrom:
                 secretKeyRef:

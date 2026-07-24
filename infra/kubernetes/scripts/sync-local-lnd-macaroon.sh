@@ -10,8 +10,8 @@ if [ "${#HEX}" -lt 32 ]; then
   exit 1
 fi
 kubectl -n "$NS" create secret generic kerosene-lnd-secrets \
-  --from-literal=admin-macaroon="$HEX" \
+  --from-literal=LIGHTNING_LND_MACAROON="$HEX" \
   --from-literal=wallet-password="${LND_WALLET_PASSWORD:-kerosene-local-lnd-wallet}" \
   --dry-run=client -o yaml | kubectl apply -f -
-echo "Updated kerosene-lnd-secrets admin-macaroon (${#HEX} hex chars) from $POD"
+echo "Updated kerosene-lnd-secrets LIGHTNING_LND_MACAROON (${#HEX} hex chars) from $POD"
 kubectl -n "$NS" rollout restart deploy/kfe-service
