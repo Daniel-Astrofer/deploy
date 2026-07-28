@@ -1,0 +1,150 @@
+groups:
+  - name: kfe-financial-transactions
+    rules:
+      # --- Counters ---
+      - record: kfe_transactions_total_rate_5m
+        expr: rate(kfe_transactions_total[5m])
+        labels:
+          domain: financial
+
+      - record: kfe_reconciliation_required_total_rate_5m
+        expr: rate(kfe_reconciliation_required_total[5m])
+        labels:
+          domain: financial
+
+      - record: kfe_reorg_total_rate_5m
+        expr: rate(kfe_reorg_total[5m])
+        labels:
+          domain: financial
+
+      # --- Alerts ---
+
+      - alert: KfeLockedFundsStale
+        expr: kfe_locked_sats > 0 and (time() - kfe_transactions_last_locked_change_seconds{status="LOCKED"}) > 1800
+        for: 5m
+        labels:
+          severity: critical
+          domain: financial
+        annotations:
+          summary: "Funds LOCKED > 30min without progress"
+          description: "At least one transaction has remained in LOCKED status for over 30 minutes."
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+
+      - alert: KfeExecutingNoTxid
+        expr: kfe_transactions_stuck_total{status="EXECUTING"} > 0 and (time() - kfe_transactions_stuck_since_seconds{status="EXECUTING"}) > 300
+        for: 5m
+        labels:
+          severity: critical
+          domain: financial
+        annotations:
+          summary: "Transaction EXECUTING without txid > 5min"
+          description: "A transaction entered EXECUTING but no blockchain txid was recorded within 5 minutes."
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+
+      - alert: KfeTxidDisappeared
+        expr: increase(kfe_network_not_found_total[15m]) > 3
+        for: 0m
+        labels:
+          severity: high
+          domain: financial
+        annotations:
+          summary: "Transaction not found by Bitcoin Core > 3 occurrences in 15min"
+          description: "Multiple transactions have been reported as NOT_FOUND by Bitcoin Core node."
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+
+      - alert: KfeLightningPaymentUnknown
+        expr: kfe_lightning_inflight_sats > 0
+        for: 15m
+        labels:
+          severity: high
+          domain: financial
+        annotations:
+          summary: "Lightning payment UNKNOWN > 15min"
+          description: "At least one Lightning payment has been in-flight without resolution for over 15 minutes."
+          runbook: "docs/kfe/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
+
+      - alert: KfeNotificationDeadLetter
+        expr: increase(kfe_notification_dead_letter_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: high
+          domain: financial
+        annotations:
+          summary: "Dead-letter notifications present"
+          description: "Notification outbox entries have reached dead-letter after exhausting retries."
+          runbook: "docs/backend/TROUBLESHOOTING.md"
+
+      - alert: KfeBalanceDivergence
+        expr: abs(kfe_balance_divergence_sats) > 10000
+        for: 5m
+        labels:
+          severity: critical
+          domain: financial
+        annotations:
+          summary: "Ledger vs chain divergence > 10000 sats"
+          description: "Absolute difference between internal ledger and chain-observed balance exceeds 10000 sats."
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+
+      - alert: KfeNoopNotificationPort
+        expr: kfe_financial_notification_port_active{provider="noop"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          domain: financial
+        annotations:
+          summary: "Noop notification port active"
+          description: "Financial notification port is set to noop — real-time push notifications are disabled."
+          runbook: "docs/backend/TROUBLESHOOTING.md"
+
+      - alert: KfeAuthDisabled
+        expr: kfe_adapter_auth_enabled == 0
+        for: 5m
+        labels:
+          severity: critical
+          domain: security
+        annotations:
+          summary: "KFE adapter auth disabled"
+          description: "KFE service adapter authentication is currently disabled."
+          runbook: "docs/backend/TROUBLESHOOTING.md"
+
+      - alert: KfeNetworkMismatch
+        expr: kfe_configured_network != kfe_running_network
+        for: 5m
+        labels:
+          severity: critical
+          domain: security
+        annotations:
+          summary: "Configured network != running network"
+          description: "Bitcoin network mismatch detected between configuration and running node."
+          runbook: "docs/backend/TROUBLESHOOTING.md"
+
+      - alert: KfeConflictedSpike
+        expr: increase(kfe_conflicted_total[10m]) > 5
+        for: 0m
+        labels:
+          severity: high
+          domain: financial
+        annotations:
+          summary: "Spike in conflicted transactions"
+          description: "More than 5 conflicted transactions detected in 10 minutes."
+
+      - alert: KfeReorgDetected
+        expr: increase(kfe_reorg_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          domain: financial
+        annotations:
+          summary: "Blockchain reorg event detected"
+          description: "At least one reorg event has been detected by the confirmation monitor."
+          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+
+      - alert: KfeIdempotencyConflictSpike
+        expr: increase(kfe_idempotency_conflict_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: medium
+          domain: financial
+        annotations:
+          summary: "Spike in idempotency conflicts"
+          description: "High rate of idempotency conflicts — possible replay attack or retry storm."

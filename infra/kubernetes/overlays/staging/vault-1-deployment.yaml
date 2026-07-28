@@ -1,0 +1,151 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault-1
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/instance: vault-1
+    vault.kerosene.io/node-id: vault-1
+spec:
+  replicas: 1
+  revisionHistoryLimit: 10
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+      app.kubernetes.io/instance: vault-1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/instance: vault-1
+        vault.kerosene.io/node-id: vault-1
+        kerosene.io/scrape: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /v1/metrics
+        prometheus.io/port: "7801"
+    spec:
+      serviceAccountName: vault
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vault
+          image: kerosene/vault:staging
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 7801
+              protocol: TCP
+          env:
+            - name: BITCOIN_NETWORK
+              value: testnet3
+            - name: KEROSENE_ENV
+              value: staging
+            - name: VAULT_CEREMONY_MODE
+              value: staging
+            - name: VAULT_NODE_ID
+              value: vault-1
+            - name: VAULT_LISTEN_ADDR
+              value: 0.0.0.0:7801
+            - name: VAULT_DATA_DIR
+              value: /var/lib/kerosene-vault
+            - name: VAULT_AUTH_MODE
+              value: mtls
+            - name: VAULT_TRANSPORT
+              value: clearnet
+            - name: VAULT_RESHARE_POLICY
+              value: daily
+            - name: VAULT_DKG_MODE
+              value: distributed_wire
+            - name: VAULT_SHARE_STORE
+              value: aead_disk
+            - name: VAULT_TLS_VERIFY_MODE
+              value: hostname
+            - name: VAULT_TLS_CERT_PATH
+              value: /certs/vault-server.crt
+            - name: VAULT_TLS_KEY_PATH
+              value: /certs/vault-server.key
+            - name: VAULT_TLS_CLIENT_CA_PATH
+              value: /certs/ca.crt
+            - name: VAULT_TLS_CLIENT_CERT_PATH
+              value: /certs/vault-client.crt
+            - name: VAULT_TLS_CLIENT_KEY_PATH
+              value: /certs/vault-client.key
+            - name: VAULT_GENESIS_N
+              value: "3"
+            - name: VAULT_NODE_TIER
+              value: domestic
+            - name: ATTESTATION_MODE
+              value: software
+            - name: VAULT_SEED_PEERS
+              value: vault-2=https://vault-2:7801,vault-3=https://vault-3:7801
+            - name: VAULT_DATA_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: vault-1-secrets
+                  key: data-passphrase
+            - name: LAB_ATTESTATION_ROOT
+              valueFrom:
+                secretKeyRef:
+                  name: vault-1-secrets
+                  key: attestation-root
+            - name: VAULT_API_TOKEN
+              value: ""
+          volumeMounts:
+            - name: vault-data
+              mountPath: /var/lib/kerosene-vault
+            - name: vault-certs
+              mountPath: /certs
+              readOnly: true
+            - name: vault-tor-config
+              mountPath: /etc/kerosene/tor
+              readOnly: true
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: vault-data
+          persistentVolumeClaim:
+            claimName: vault-1-data
+        - name: vault-certs
+          secret:
+            secretName: vault-1-mtls-certs
+            defaultMode: 0400
+        - name: vault-tor-config
+          configMap:
+            name: vault-tor-config
+            defaultMode: 0444

@@ -4,6 +4,12 @@ namespace: kerosene-staging
 resources:
   - ../../base
   - namespace.yaml
+  - vault-1-deployment.yaml
+  - vault-2-deployment.yaml
+  - vault-3-deployment.yaml
+  - vault-services.yaml
+  - vault-network-policy.yaml
+  - vault-prerequisites.yaml
 labels:
   - pairs:
       app.kubernetes.io/environment: staging
@@ -13,6 +19,8 @@ images:
   - name: kerosene/server
     newTag: staging
   - name: kerosene/web-page
+    newTag: staging
+  - name: kerosene/vault
     newTag: staging
 patches:
   - path: patch-staging.yaml

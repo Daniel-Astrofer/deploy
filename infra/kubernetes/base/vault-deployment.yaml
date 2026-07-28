@@ -1,0 +1,194 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/component: vault-mesh
+spec:
+  replicas: 3
+  revisionHistoryLimit: 10
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/component: vault-mesh
+        kerosene.io/scrape: "true"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /v1/metrics
+        prometheus.io/port: "7801"
+    spec:
+      serviceAccountName: vault
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsUser: 65532
+        runAsGroup: 65532
+        runAsNonRoot: true
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: vault-mtls-init
+          image: kerosene/vault-mtls-init:replace-me
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -f /certs-out/vault-server.crt ]; then
+                echo "[!] mTLS certs not found. Expect ceremony-generated certs mounted via Secret." >&2
+                echo "[!] Run: scripts/vault/gen_ceremony_mtls_certs.sh" >&2
+                exit 1
+              fi
+          volumeMounts:
+            - name: vault-certs
+              mountPath: /certs-out
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      containers:
+        - name: vault
+          image: kerosene/vault:replace-me
+          imagePullPolicy: IfNotPresent
+          args:
+            - --features
+            - production,hybrid
+          ports:
+            - name: http
+              containerPort: 7801
+              protocol: TCP
+          env:
+            - name: BITCOIN_NETWORK
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: bitcoin-network
+            - name: VAULT_NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: VAULT_LISTEN_ADDR
+              value: "0.0.0.0:7801"
+            - name: VAULT_DATA_DIR
+              value: /var/lib/kerosene-vault
+            - name: VAULT_AUTH_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: auth-mode
+            - name: VAULT_TRANSPORT
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: transport
+            - name: VAULT_RESHARE_POLICY
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: reshare-policy
+            - name: VAULT_TLS_CERT_PATH
+              value: /certs/vault-server.crt
+            - name: VAULT_TLS_KEY_PATH
+              value: /certs/vault-server.key
+            - name: VAULT_TLS_CLIENT_CA_PATH
+              value: /certs/ca.crt
+            - name: VAULT_TLS_CLIENT_CERT_PATH
+              value: /certs/vault-client.crt
+            - name: VAULT_TLS_CLIENT_KEY_PATH
+              value: /certs/vault-client.key
+            - name: VAULT_TLS_VERIFY_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: tls-verify-mode
+            - name: VAULT_DKG_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: dkg-mode
+            - name: VAULT_SHARE_STORE
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: share-store
+            - name: VAULT_DATA_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: data-passphrase
+            - name: VAULT_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: api-token
+            - name: ATTESTATION_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-config
+                  key: attestation-mode
+          volumeMounts:
+            - name: vault-data
+              mountPath: /var/lib/kerosene-vault
+            - name: vault-certs
+              mountPath: /certs
+              readOnly: true
+            - name: vault-tor-config
+              mountPath: /etc/kerosene/tor
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /v1/health/mesh
+              port: http
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /v1/health/mesh?ready=true
+              port: http
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: vault-data
+          persistentVolumeClaim:
+            claimName: vault-data
+        - name: vault-certs
+          secret:
+            secretName: vault-mtls-certs
+            defaultMode: 0400
+        - name: vault-tor-config
+          configMap:
+            name: vault-tor-config
+            defaultMode: 0444

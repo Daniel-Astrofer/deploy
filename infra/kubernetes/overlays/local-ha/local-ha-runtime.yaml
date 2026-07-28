@@ -466,7 +466,7 @@ spec:
             - name: LIGHTNING_LND_TLS_ENABLED
               value: "false"
             - name: BITCOIN_NETWORK
-              value: regtest
+              value: testnet3
             - name: BITCOIN_RPC_ENABLED
               value: "true"
             - name: BITCOIN_RPC_REQUIRED
@@ -581,7 +581,7 @@ spec:
             - name: LIGHTNING_LND_TLS_ENABLED
               value: "false"
             - name: BITCOIN_NETWORK
-              value: regtest
+              value: testnet3
             - name: BITCOIN_RPC_ENABLED
               value: "true"
             - name: BITCOIN_RPC_REQUIRED
@@ -714,7 +714,7 @@ spec:
             - name: LIGHTNING_LND_TLS_ENABLED
               value: "false"
             - name: BITCOIN_NETWORK
-              value: regtest
+              value: testnet3
             - name: BITCOIN_RPC_ENABLED
               value: "true"
             - name: BITCOIN_RPC_REQUIRED
@@ -999,7 +999,7 @@ spec:
             - name: LIGHTNING_LND_TLS_ENABLED
               value: "false"
             - name: BITCOIN_NETWORK
-              value: regtest
+              value: testnet3
             - name: BITCOIN_RPC_ENABLED
               value: "true"
             - name: BITCOIN_RPC_REQUIRED
@@ -1114,7 +1114,7 @@ spec:
             - name: LIGHTNING_LND_TLS_ENABLED
               value: "false"
             - name: BITCOIN_NETWORK
-              value: regtest
+              value: testnet3
             - name: BITCOIN_RPC_ENABLED
               value: "true"
             - name: BITCOIN_RPC_REQUIRED
@@ -1399,7 +1399,7 @@ spec:
             - name: LIGHTNING_LND_TLS_ENABLED
               value: "false"
             - name: BITCOIN_NETWORK
-              value: regtest
+              value: testnet3
             - name: BITCOIN_RPC_ENABLED
               value: "true"
             - name: BITCOIN_RPC_REQUIRED

@@ -4,17 +4,15 @@
 FROM rust:1.88-bookworm AS build
 WORKDIR /src
 ARG CARGO_FEATURES=
-COPY Cargo.toml ./
+ENV CARGO_BUILD_JOBS=1
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-COPY tests ./tests
-# Lab default: dealer_lab features from Cargo.toml. Ceremony: --build-arg CARGO_FEATURES=production
+# Tests run in CI before image construction. The image stage performs one
+# reproducible release build to keep peak memory bounded.
 RUN if [ -n "$CARGO_FEATURES" ]; then \
-      cargo test --no-default-features --features "$CARGO_FEATURES" --offline 2>/dev/null \
-        || cargo test --no-default-features --features "$CARGO_FEATURES"; \
-      cargo build --release --no-default-features --features "$CARGO_FEATURES" --bin kerosene-vault; \
+      cargo build --locked --release --no-default-features --features "$CARGO_FEATURES" --bin kerosene-vault; \
     else \
-      cargo test --offline 2>/dev/null || cargo test; \
-      cargo build --release --bin kerosene-vault; \
+      cargo build --locked --release --bin kerosene-vault; \
     fi
 
 FROM debian:bookworm-slim

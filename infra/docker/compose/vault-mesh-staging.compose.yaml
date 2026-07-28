@@ -20,7 +20,7 @@
 # 3) Point kfe at vault with client TLS (go-live props):
 #      --spring.config.additional-location=classpath:kfe-service-vaultmesh-go-live.properties
 #    Props (env overrides):
-#      KFE_VAULTMESH_BASE_URL=https://127.0.0.1:7801
+#      KFE_VAULTMESH_BASE_URL=https://127.0.0.1:7701
 #      KFE_VAULTMESH_TLS_ENABLED=true
 #      KFE_VAULTMESH_TLS_CERT_PATH=.../lab-certs/vault-client.crt
 #      KFE_VAULTMESH_TLS_KEY_PATH=.../lab-certs/vault-client.pkcs8.key
@@ -33,7 +33,7 @@
 #    Do not set KFE_VAULTMESH_API_TOKEN under mTLS (vault refuses X-Vault-Token).
 # 4) Smoke (client cert):
 #      curl --cert lab-certs/vault-client.crt --key lab-certs/vault-client.key \
-#           --cacert lab-certs/ca.crt https://127.0.0.1:7801/v1/health
+#           --cacert lab-certs/ca.crt https://127.0.0.1:7701/v1/health
 
 x-vault-staging-env: &vault-staging-env
   BITCOIN_NETWORK: testnet3
@@ -59,11 +59,58 @@ x-vault-staging-env: &vault-staging-env
   VAULT_TLS_CLIENT_KEY_PATH: ${VAULT_TLS_CLIENT_KEY_PATH:-/certs/vault-client.key}
 
 services:
+  # Init container: generate staging mTLS certs before vaults start
+  staging-cert-init:
+    image: alpine:3.20
+    container_name: kerosene-vault-staging-cert-init
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache openssl > /dev/null 2>&1
+        if [ ! -f /certs/ca.crt ]; then
+          echo "[cert-init] Generating staging mTLS certs..."
+          # CA
+          openssl req -x509 -newkey rsa:4096 -sha256 -days 365 -nodes \
+            -keyout /certs/ca.key -out /certs/ca.crt \
+            -subj "/CN=kerosene-staging-ca/O=Kerosene/C=BR"
+          # Vault server cert
+          openssl req -newkey rsa:2048 -sha256 -nodes -keyout /certs/vault-server.key \
+            -out /tmp/vault-server.csr -subj "/CN=kerosene-vault-staging/O=Kerosene/C=BR"
+          printf '%s\n' \
+            'subjectAltName=DNS:localhost,DNS:vault-1,DNS:vault-2,DNS:vault-3,IP:127.0.0.1,URI:spiffe://kerosene.lab/vault/server' \
+            'keyUsage=digitalSignature,keyEncipherment' \
+            'extendedKeyUsage=serverAuth,clientAuth' > /tmp/srv.ext
+          openssl x509 -req -in /tmp/vault-server.csr -CA /certs/ca.crt -CAkey /certs/ca.key \
+            -CAcreateserial -out /certs/vault-server.crt -days 365 -sha256 -extfile /tmp/srv.ext
+          # Vault client cert
+          openssl req -newkey rsa:2048 -sha256 -nodes -keyout /certs/vault-client.key \
+            -out /tmp/vault-client.csr -subj "/CN=kerosene-kfe-staging/O=Kerosene/C=BR"
+          printf '%s\n' \
+            'subjectAltName=URI:spiffe://kerosene.lab/kfe' \
+            'keyUsage=digitalSignature,keyEncipherment' \
+            'extendedKeyUsage=clientAuth' > /tmp/cli.ext
+          openssl x509 -req -in /tmp/vault-client.csr -CA /certs/ca.crt -CAkey /certs/ca.key \
+            -CAcreateserial -out /certs/vault-client.crt -days 365 -sha256 -extfile /tmp/cli.ext
+          chmod 600 /certs/*.key
+          chmod 644 /certs/*.crt
+          echo "[cert-init] Staging mTLS certs generated."
+        else
+          echo "[cert-init] Staging mTLS certs already exist."
+        fi
+    volumes:
+      - lab-certs:/certs
+    networks:
+      - vault-staging
+
   vault-1:
     build:
       context: ../../../backend/kerosene-vault
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-1-staging
+    depends_on:
+      staging-cert-init:
+        condition: service_completed_successfully
     environment:
       <<: *vault-staging-env
       VAULT_NODE_ID: vault-1
@@ -72,13 +119,16 @@ services:
       - vault-1-staging-data:/var/lib/kerosene-vault
       - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     ports:
-      - "7801:7701"
+      - "7701:7701"
 
   vault-2:
     build:
       context: ../../../backend/kerosene-vault
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-2-staging
+    depends_on:
+      staging-cert-init:
+        condition: service_completed_successfully
     environment:
       <<: *vault-staging-env
       VAULT_NODE_ID: vault-2
@@ -87,13 +137,16 @@ services:
       - vault-2-staging-data:/var/lib/kerosene-vault
       - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     ports:
-      - "7802:7701"
+      - "7702:7701"
 
   vault-3:
     build:
       context: ../../../backend/kerosene-vault
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-3-staging
+    depends_on:
+      staging-cert-init:
+        condition: service_completed_successfully
     environment:
       <<: *vault-staging-env
       VAULT_NODE_ID: vault-3
@@ -102,9 +155,14 @@ services:
       - vault-3-staging-data:/var/lib/kerosene-vault
       - ../../../backend/kerosene-vault/lab-certs:/certs:ro
     ports:
-      - "7803:7701"
+      - "7703:7701"
 
 volumes:
+  lab-certs:
   vault-1-staging-data:
   vault-2-staging-data:
   vault-3-staging-data:
+
+networks:
+  vault-staging:
+    driver: bridge

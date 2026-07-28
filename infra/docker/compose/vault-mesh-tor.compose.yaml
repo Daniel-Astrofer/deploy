@@ -69,6 +69,7 @@ services:
       - ../../../infra/runtime/tor/entrypoint.sh:/entrypoint.sh:ro
       - ../../../infra/runtime/tor/torrc-vault-mesh-1:/etc/tor/torrc:ro
       - tor-1-data:/var/lib/tor
+      - ../../../infra/runtime/tor/authorized_clients:/var/lib/tor/kerosene_service/authorized_clients:ro
     networks:
       - vault-private
       - tor-egress
@@ -82,6 +83,7 @@ services:
       - ../../../infra/runtime/tor/entrypoint.sh:/entrypoint.sh:ro
       - ../../../infra/runtime/tor/torrc-vault-mesh-2:/etc/tor/torrc:ro
       - tor-2-data:/var/lib/tor
+      - ../../../infra/runtime/tor/authorized_clients:/var/lib/tor/kerosene_service/authorized_clients:ro
     networks:
       - vault-private
       - tor-egress
@@ -95,6 +97,7 @@ services:
       - ../../../infra/runtime/tor/entrypoint.sh:/entrypoint.sh:ro
       - ../../../infra/runtime/tor/torrc-vault-mesh-3:/etc/tor/torrc:ro
       - tor-3-data:/var/lib/tor
+      - ../../../infra/runtime/tor/authorized_clients:/var/lib/tor/kerosene_service/authorized_clients:ro
     networks:
       - vault-private
       - tor-egress

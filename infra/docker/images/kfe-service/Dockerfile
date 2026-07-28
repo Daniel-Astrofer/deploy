@@ -17,7 +17,6 @@ COPY kerosene-contracts kerosene-contracts/
 COPY kerosene-shared kerosene-shared/
 COPY kfe-service kfe-service/
 
-COPY src src/
 COPY deploy/docker docker/
 ARG GRADLE_MAX_WORKERS=2
 RUN ./gradlew :kfe-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test

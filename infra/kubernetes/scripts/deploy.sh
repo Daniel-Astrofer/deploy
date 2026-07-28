@@ -9,6 +9,7 @@ Optional:
   SERVER_IMAGE=registry/server@sha256:...
   KFE_SERVICE_IMAGE=registry/kfe-service@sha256:...
   WEB_PAGE_IMAGE=registry/web-page@sha256:...
+  VAULT_IMAGE=registry/vault@sha256:...
 
   KUBECTL=kubectl
   KUSTOMIZE=kustomize
@@ -53,7 +54,7 @@ if ! command -v "$KUBECTL" >/dev/null 2>&1; then
   exit 127
 fi
 
-if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" ]]; then
+if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" ]]; then
   if ! command -v "$KUSTOMIZE_BIN" >/dev/null 2>&1; then
     echo "kustomize not found. It is required when setting images through environment variables." >&2
     echo "Install kustomize or edit the overlay image tags manually and run with no image env vars." >&2
@@ -82,6 +83,9 @@ fi
 if [[ -n "${WEB_PAGE_IMAGE:-}" ]]; then
   (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/web-page=${WEB_PAGE_IMAGE}")
 fi
+if [[ -n "${VAULT_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/vault=${VAULT_IMAGE}")
+fi
 
 MANIFEST="$TMP_DIR/manifest.yaml"
 "$KUBECTL" kustomize "$WORK_OVERLAY" > "$MANIFEST"
@@ -105,13 +109,52 @@ fi
 echo "[*] Ensuring namespace exists..."
 "$KUBECTL" create namespace "$NAMESPACE" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
+if [[ "$ENVIRONMENT" == "staging" ]]; then
+  echo "[*] Verifying independently provisioned vault secrets..."
+  for required_secret in \
+    server-secrets \
+    kerosene-db-secrets \
+    kerosene-redis-secrets \
+    kerosene-bitcoin-secrets \
+    kerosene-lnd-secrets \
+    kfe-vault-mtls-certs; do
+    "$KUBECTL" -n "$NAMESPACE" get secret "$required_secret" >/dev/null
+  done
+  for vault_id in 1 2 3; do
+    data_secret="vault-${vault_id}-secrets"
+    cert_secret="vault-${vault_id}-mtls-certs"
+    "$KUBECTL" -n "$NAMESPACE" get secret "$data_secret" >/dev/null
+    "$KUBECTL" -n "$NAMESPACE" get secret "$cert_secret" >/dev/null
+
+    "$KUBECTL" -n "$NAMESPACE" get secret "$data_secret" \
+      -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}' \
+      | grep -qx 'data-passphrase'
+    for required_key in ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key; do
+      "$KUBECTL" -n "$NAMESPACE" get secret "$cert_secret" \
+        -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}' \
+        | grep -qx "$required_key"
+    done
+  done
+fi
+
 echo "[*] Applying manifest..."
-"$KUBECTL" apply --server-side -f "$MANIFEST"
+APPLY_ARGS=(apply --server-side)
+if [[ "${KEROSENE_FORCE_CONFLICTS:-0}" == "1" ]]; then
+  echo "[!] KEROSENE_FORCE_CONFLICTS=1: overriding server-side apply ownership conflicts." >&2
+  APPLY_ARGS+=(--force-conflicts)
+fi
+"$KUBECTL" "${APPLY_ARGS[@]}" -f "$MANIFEST"
 
 echo "[*] Waiting for core workloads..."
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/server --timeout=10m
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/kfe-service --timeout=10m
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
+if [[ "$ENVIRONMENT" == "staging" ]]; then
+  echo "[*] Waiting for mandatory vault mesh quorum..."
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-1 --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-2 --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-3 --timeout=10m
+fi
 
 # Local (and any cluster with helm) also keeps Grafana + Prometheus up with the server.
 if [[ "$ENVIRONMENT" == "local" || "${KEROSENE_ENSURE_MONITORING:-0}" == "1" ]]; then

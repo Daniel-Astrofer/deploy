@@ -55,11 +55,13 @@ case "$PROFILE" in
     ;;
   staging)
     COMPOSE_FILE="${KEROSENE_VAULT_MESH_COMPOSE_FILE:-$REPO_ROOT/infra/docker/compose/vault-mesh-staging.compose.yaml}"
-    if [[ ! -d "${KEROSENE_VAULT_MESH_CERTS_DIR:-$REPO_ROOT/backend/kerosene-vault/certs}" ]]; then
-      echo "[!] staging mesh profile needs mTLS certs; falling back to lab clear-token mesh." >&2
-      echo "[!] Generate certs: bash scripts/vault/gen_lab_mtls_certs.sh" >&2
-      COMPOSE_FILE="$REPO_ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml"
-      PROFILE=lab
+    if [[ ! -d "${KEROSENE_VAULT_MESH_CERTS_DIR:-$REPO_ROOT/backend/kerosene-vault/lab-certs}" ]]; then
+      echo "[!] staging mesh profile needs mTLS certs; generating automatically..." >&2
+      bash "$REPO_ROOT/scripts/vault/gen_staging_mtls_certs.sh" >&2 || {
+        echo "[!] Auto cert gen failed; falling back to lab clear-token mesh." >&2
+        COMPOSE_FILE="$REPO_ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml"
+        PROFILE=lab
+      }
     fi
     ;;
   tor)
@@ -179,6 +181,18 @@ fi
 echo "[*] Starting vault mesh ($PROFILE) from $COMPOSE_FILE" >&2
 echo "[*] Host IP advertised to cluster for vault-1: $HOST_IP" >&2
 
+if [[ "$PROFILE" == "staging" ]]; then
+  vault_state_dir="${KEROSENE_HOST_HOME:-$HOME}/.local/state/kerosene/vault-mesh"
+  vault_passphrase_file="$vault_state_dir/staging-data-passphrase"
+  install -d -m 700 "$vault_state_dir"
+  if [[ ! -s "$vault_passphrase_file" ]]; then
+    umask 077
+    openssl rand -base64 48 > "$vault_passphrase_file"
+  fi
+  export VAULT_DATA_PASSPHRASE
+  VAULT_DATA_PASSPHRASE="$(tr -d '\r\n' < "$vault_passphrase_file")"
+fi
+
 if [[ "$PROFILE" == "tor" ]]; then
   echo "[!] Tor profile: vault APIs are NOT published on host :7701–7703." >&2
   echo "[!] local-full kfe Endpoints bridge remains clearnet-lab; use this profile for Tor mesh / distributed_wire." >&2
@@ -192,7 +206,18 @@ else
   # Wait briefly for vault-1 HTTP on the published lab port.
   deadline=$(( $(date +%s) + 90 ))
   while true; do
-    if curl -fsS -o /dev/null "http://127.0.0.1:7701/v1/health" 2>/dev/null; then
+    if [[ "$PROFILE" == "staging" ]]; then
+      health_ok=1
+      curl -fsS -o /dev/null \
+        --cacert "$REPO_ROOT/backend/kerosene-vault/lab-certs/ca.crt" \
+        --cert "$REPO_ROOT/backend/kerosene-vault/lab-certs/vault-client.crt" \
+        --key "$REPO_ROOT/backend/kerosene-vault/lab-certs/vault-client.key" \
+        "https://127.0.0.1:7701/v1/health" 2>/dev/null || health_ok=0
+    else
+      health_ok=1
+      curl -fsS -o /dev/null "http://127.0.0.1:7701/v1/health" 2>/dev/null || health_ok=0
+    fi
+    if [[ "$health_ok" -eq 1 ]]; then
       echo "[+] Vault mesh vault-1 is responding on :7701" >&2
       break
     fi

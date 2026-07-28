@@ -8,6 +8,52 @@ spec:
     spec:
       containers:
         - name: kfe-service
+          env:
+            - name: SPRING_CONFIG_IMPORT
+              value: optional:classpath:kfe-service-defaults.properties,classpath:kfe-service-vaultmesh-go-live.properties
+            - name: KFE_VAULTMESH_ENABLED
+              value: "true"
+            - name: KFE_VAULTMESH_MESH_ONLY
+              value: "true"
+            - name: KFE_MPC_SIGNING_ENABLED
+              value: "false"
+            - name: KFE_VAULTMESH_BASE_URL
+              value: https://vault-1:7801
+            - name: KFE_VAULTMESH_URLS
+              value: https://vault-1:7801,https://vault-2:7801,https://vault-3:7801
+            - name: KFE_VAULTMESH_TLS_ENABLED
+              value: "true"
+            - name: KFE_VAULTMESH_REQUIRE_MTLS
+              value: "true"
+            - name: KFE_VAULTMESH_TLS_CERT_PATH
+              value: /etc/kerosene/vault-mtls/vault-client.crt
+            - name: KFE_VAULTMESH_TLS_KEY_PATH
+              value: /etc/kerosene/vault-mtls/vault-client.pkcs8.key
+            - name: KFE_VAULTMESH_TLS_CA_PATH
+              value: /etc/kerosene/vault-mtls/ca.crt
+            - name: KFE_VAULTMESH_TLS_HOSTNAME_VERIFICATION
+              value: "true"
+            - name: KFE_VAULTMESH_DAY_ROTATION_ENABLED
+              value: "true"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: jwt-secret
+            - name: PASSWORD_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: password-pepper
+            - name: KFE_COLUMN_CRYPTO_KEY_BASE64
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: kfe-column-crypto-key
+          volumeMounts:
+            - name: vault-mtls-client
+              mountPath: /etc/kerosene/vault-mtls
+              readOnly: true
           resources:
             requests:
               cpu: 500m
@@ -15,6 +61,11 @@ spec:
             limits:
               cpu: 1500m
               memory: 2Gi
+      volumes:
+        - name: vault-mtls-client
+          secret:
+            secretName: kfe-vault-mtls-certs
+            defaultMode: 0400
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -26,6 +77,22 @@ spec:
     spec:
       containers:
         - name: server
+          env:
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: jwt-secret
+            - name: API_SECRET_AES_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: aes-secret
+            - name: PASSWORD_PEPPER
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: password-pepper
           resources:
             requests:
               cpu: 500m
@@ -70,7 +137,9 @@ metadata:
   name: server-config
 data:
   SPRING_PROFILES_ACTIVE: "staging"
-  BITCOIN_NETWORK: "testnet"
+  # KFE is the single Flyway owner for the shared financial schema.
+  FLYWAY_ENABLED: "false"
+  BITCOIN_NETWORK: "testnet3"
   REGION: "STAGING"
   AUDIT_SOLVENCY_ENFORCED: "true"
   RELEASE_ATTESTATION_REQUIRED: "false"
@@ -83,7 +152,7 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: "staging,kfe"
   KEROSENE_RUNTIME_ROLE: "kfe-service"
-  BITCOIN_NETWORK: "testnet"
+  BITCOIN_NETWORK: "testnet3"
   REGION: "STAGING"
   AUDIT_SOLVENCY_ENFORCED: "true"
   RELEASE_ATTESTATION_REQUIRED: "false"

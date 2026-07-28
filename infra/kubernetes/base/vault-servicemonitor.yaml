@@ -1,0 +1,27 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vault-mesh
+  labels:
+    app.kubernetes.io/component: vault-mesh
+    prometheus: kerosene
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+      kerosene.io/scrape: "true"
+  namespaceSelector:
+    matchNames:
+      - kerosene-staging
+  endpoints:
+    - port: http
+      path: /v1/metrics
+      scheme: https
+      tlsConfig:
+        insecureSkipVerify: true
+        certFile: /etc/prometheus/secrets/vault-metrics-client.crt
+        keyFile: /etc/prometheus/secrets/vault-metrics-client.key
+        caFile: /etc/prometheus/secrets/vault-metrics-ca.crt
+      interval: 30s
+      scrapeTimeout: 10s
+      honorLabels: false

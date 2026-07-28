@@ -62,6 +62,20 @@ chmod 700 /var/lib/tor/kerosene_service 2>/dev/null || true
 chmod 755 /var/run/tor/socks 2>/dev/null || true
 chmod 750 /var/run/tor/control 2>/dev/null || true
 
+# Authorized clients (stealth) — optional gate
+if [[ "${VAULT_TOR_AUTH_CLIENTS:-false}" == "true" ]]; then
+  echo "==> Tor stealth auth enabled (VAULT_TOR_AUTH_CLIENTS=true)"
+  if ls /var/lib/tor/kerosene_service/authorized_clients/*.auth >/dev/null 2>&1; then
+    echo "==> Found .auth files:"
+    ls -la /var/lib/tor/kerosene_service/authorized_clients/*.auth
+    echo "==> The torrc must contain: HiddenServiceAuthorizeClient stealth kerosene_service"
+  else
+    echo "[!] VAULT_TOR_AUTH_CLIENTS=true but no .auth files found." >&2
+    echo "[!] Generate with: ./scripts/vault/gen_tor_auth_clients.sh" >&2
+    echo "[!] Continuing with v3 public onion (no client auth)." >&2
+  fi
+fi
+
 echo "==> Starting Tor hidden service for Kerosene..."
 echo "==> Once connected, .onion address will be in:"
 echo "    /var/lib/tor/kerosene_service/hostname"

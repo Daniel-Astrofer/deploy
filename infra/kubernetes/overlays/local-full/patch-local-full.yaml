@@ -30,6 +30,10 @@ spec:
       containers:
         - name: kfe-service
           imagePullPolicy: Never
+          volumeMounts:
+            - name: vault-mesh-certs
+              mountPath: /certs
+              readOnly: true
           resources:
             requests:
               cpu: 250m
@@ -37,6 +41,10 @@ spec:
             limits:
               cpu: 1000m
               memory: 1536Mi
+      volumes:
+        - name: vault-mesh-certs
+          secret:
+            secretName: vault-client-mtls
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -159,6 +167,9 @@ data:
   #   api.secret.aes.secret
   #   api.secret.token.secret
   #   api.secret.pepper.secret
+  # Stable local key: changing it without re-encrypting existing rows makes
+  # StringCryptoConverter reject every existing credential.
+  AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
   API_SECRET_AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
   API_SECRET_TOKEN_SECRET: "kerosene-local-token-secret"
   API_SECRET_PEPPER_SECRET: "kerosene-local-pepper-secret"
