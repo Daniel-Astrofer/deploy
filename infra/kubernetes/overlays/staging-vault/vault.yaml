@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vault-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+spec:
+  selector:
+    app.kubernetes.io/name: vault
+  ports:
+    - name: https
+      port: 7801
+      targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault
+    spec:
+      serviceAccountName: vault
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: vault
+          image: kerosene/vault:staging
+          ports:
+            - name: https
+              containerPort: 7801
+          env:
+            - name: KEROSENE_ENV
+              value: staging
+            - name: VAULT_CEREMONY_MODE
+              value: staging
+            - name: BITCOIN_NETWORK
+              value: testnet3
+            - name: VAULT_NODE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vault-identity
+                  key: node-id
+            - name: VAULT_LISTEN_ADDR
+              value: 0.0.0.0:7801
+            - name: VAULT_DATA_DIR
+              value: /var/lib/kerosene-vault
+            - name: VAULT_AUTH_MODE
+              value: mtls
+            - name: VAULT_TRANSPORT
+              value: tor
+            - name: VAULT_SOCKS_PROXY
+              value: socks5h://tor:9050
+            - name: VAULT_SEED_PEERS
+              value: ""
+            - name: VAULT_GENESIS_N
+              value: "3"
+            - name: VAULT_DKG_MODE
+              value: distributed_wire
+            - name: VAULT_SHARE_STORE
+              value: aead_disk
+            - name: VAULT_TLS_VERIFY_MODE
+              value: onion_or_spiffe
+            - name: VAULT_TLS_CERT_PATH
+              value: /certs/vault-server.crt
+            - name: VAULT_TLS_KEY_PATH
+              value: /certs/vault-server.key
+            - name: VAULT_TLS_CLIENT_CA_PATH
+              value: /certs/ca.crt
+            - name: VAULT_TLS_CLIENT_CERT_PATH
+              value: /certs/vault-client.crt
+            - name: VAULT_TLS_CLIENT_KEY_PATH
+              value: /certs/vault-client.key
+            - name: VAULT_DATA_PASSPHRASE
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: data-passphrase
+            - name: LAB_ATTESTATION_ROOT
+              valueFrom:
+                secretKeyRef:
+                  name: vault-secrets
+                  key: attestation-root
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /v1/health
+              port: https
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 30
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kerosene-vault
+            - name: certs
+              mountPath: /certs
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: vault-data
+        - name: certs
+          secret:
+            secretName: vault-mtls-certs
+            defaultMode: 0400

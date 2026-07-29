@@ -10,8 +10,8 @@ metadata:
   name: vault-tor-config
 data:
   README: |
-    Staging currently uses VAULT_TRANSPORT=clearnet inside the private cluster.
-    External production vaults must use their independently provisioned Tor config.
+    Vault traffic is Tor-only. A Vault runs from the independent staging-vault
+    overlay and publishes a stable onion identity provisioned outside Git.
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

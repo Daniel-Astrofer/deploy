@@ -3,24 +3,46 @@ kind: Deployment
 metadata:
   name: kfe-service
 spec:
-  replicas: 2
+  replicas: 1
   template:
     spec:
+      volumes:
+        - name: vault-mtls-client
+          secret:
+            secretName: kfe-vault-mtls-certs
+            optional: true
+            defaultMode: 0400
       containers:
         - name: kfe-service
           env:
             - name: SPRING_CONFIG_IMPORT
               value: optional:classpath:kfe-service-defaults.properties,classpath:kfe-service-vaultmesh-go-live.properties
             - name: KFE_VAULTMESH_ENABLED
-              value: "true"
+              value: "false"
             - name: KFE_VAULTMESH_MESH_ONLY
               value: "true"
             - name: KFE_MPC_SIGNING_ENABLED
               value: "false"
+            # Enabled only after authenticated discovery supplies one or more
+            # stable onion endpoints. Never put Kubernetes Service DNS here.
+            - name: KFE_VAULTMESH_TRANSPORT
+              value: tor
+            - name: KFE_VAULTMESH_SOCKS_HOST
+              value: tor-onion
+            - name: KFE_VAULTMESH_SOCKS_PORT
+              value: "9050"
             - name: KFE_VAULTMESH_BASE_URL
-              value: https://vault-1:7801
+              valueFrom:
+                secretKeyRef:
+                  name: vault-discovery
+                  key: coordinator-url
+                  optional: true
             - name: KFE_VAULTMESH_URLS
-              value: https://vault-1:7801,https://vault-2:7801,https://vault-3:7801
+              valueFrom:
+                secretKeyRef:
+                  name: vault-discovery
+                  key: vault-urls
+                  optional: true
             - name: KFE_VAULTMESH_TLS_ENABLED
               value: "true"
             - name: KFE_VAULTMESH_REQUIRE_MTLS
@@ -34,7 +56,7 @@ spec:
             - name: KFE_VAULTMESH_TLS_HOSTNAME_VERIFICATION
               value: "true"
             - name: KFE_VAULTMESH_DAY_ROTATION_ENABLED
-              value: "true"
+              value: "false"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -61,18 +83,13 @@ spec:
             limits:
               cpu: 1500m
               memory: 2Gi
-      volumes:
-        - name: vault-mtls-client
-          secret:
-            secretName: kfe-vault-mtls-certs
-            defaultMode: 0400
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: server
 spec:
-  replicas: 2
+  replicas: 1
   template:
     spec:
       containers:
@@ -106,7 +123,7 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: kfe-service
 spec:
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 6
 ---
 apiVersion: autoscaling/v2
@@ -114,7 +131,7 @@ kind: HorizontalPodAutoscaler
 metadata:
   name: server
 spec:
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 6
 ---
 apiVersion: policy/v1
@@ -157,3 +174,6 @@ data:
   AUDIT_SOLVENCY_ENFORCED: "true"
   RELEASE_ATTESTATION_REQUIRED: "false"
   RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
+  # An authenticated discovery controller may override this through the
+  # optional vault-discovery Secret mounted as explicit environment entries.
+  KFE_VAULTMESH_ENABLED: "false"
