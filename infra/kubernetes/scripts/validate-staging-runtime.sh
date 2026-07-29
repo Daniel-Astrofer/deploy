@@ -44,9 +44,21 @@ for claim in data-staging-postgres-0 data-staging-redis-0 data-staging-bitcoin-0
   }
 done
 
-require 'value: testnet3' "Bitcoin network is not testnet3"
+require '(value: testnet3|BITCOIN_NETWORK: testnet3)' "Bitcoin network is not testnet3"
 require 'HiddenServicePort 80 web-page:8080' "staging onion does not publish the web gateway"
 require '^  name: kerosene-staging$' "staging namespace is missing"
+require 'name: KFE_VAULTMESH_TRANSPORT' "KFE Vault transport mode is missing"
+require 'value: tor' "Tor-only transport is not enabled"
+
+if grep -Eq 'KFE_VAULTMESH_(BASE_URL|URLS).*(vault-[123]|\\.svc)|https://vault-[123]:' "$manifest"; then
+  echo "[!] Staging Core contains a clearnet Kubernetes Vault endpoint." >&2
+  exit 1
+fi
+
+if grep -Eq '^  name: vault-[123]$' "$manifest"; then
+  echo "[!] Staging Core embeds a Vault deployment; use staging-vault independently." >&2
+  exit 1
+fi
 
 if grep -Eq 'kerosene-local(-ha)?|namespace:[[:space:]]+kerosene-(local|production)' "$manifest"; then
   echo "[!] Staging manifest references a non-staging Kerosene runtime." >&2

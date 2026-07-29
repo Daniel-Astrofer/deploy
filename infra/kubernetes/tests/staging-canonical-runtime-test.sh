@@ -21,6 +21,18 @@ manifest="$TMP_DIR/staging.yaml"
 kubectl kustomize "$REPO_ROOT/infra/kubernetes/overlays/staging" > "$manifest"
 bash "$VALIDATOR" "$manifest" >/dev/null
 
+vault_manifest="$TMP_DIR/staging-vault.yaml"
+kubectl kustomize "$REPO_ROOT/infra/kubernetes/overlays/staging-vault" > "$vault_manifest"
+grep -q '^  name: kerosene-staging-vault$' "$vault_manifest" \
+  || fail "independent Vault namespace is missing"
+grep -A1 'name: VAULT_TRANSPORT' "$vault_manifest" | grep -q 'value: tor' \
+  || fail "independent Vault is not Tor-only"
+grep -q 'HiddenServicePort 7801 vault:7801' "$vault_manifest" \
+  || fail "Vault onion service is not published through Tor"
+if grep -Eq 'value: clearnet|https://vault-[123]:' "$vault_manifest"; then
+  fail "independent Vault manifest contains a clearnet mesh route"
+fi
+
 for workload in staging-postgres staging-redis staging-bitcoin staging-lnd staging-tor; do
   grep -q "^  name: ${workload}$" "$manifest" || fail "missing ${workload}"
 done

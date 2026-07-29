@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<USAGE
-Usage: $0 <local|staging> [--dry-run]
+Usage: $0 <local|staging|staging-vault> [--dry-run]
 
 Optional:
   SERVER_IMAGE=registry/server@sha256:...
@@ -30,6 +30,7 @@ fi
 case "$ENVIRONMENT" in
   local) NAMESPACE="kerosene-local" ;;
   staging) NAMESPACE="kerosene-staging" ;;
+  staging-vault) NAMESPACE="kerosene-staging-vault" ;;
   production)
     echo "Production overlay is not shipped in the public repository." >&2
     echo "Use a private ops checkout for production deploys." >&2
@@ -69,7 +70,15 @@ if [[ ! -d "$OVERLAY" ]]; then
 fi
 
 if [[ "$ENVIRONMENT" == "staging" ]]; then
-  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE VAULT_IMAGE TOR_IMAGE; do
+  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE TOR_IMAGE; do
+    image_ref="${!image_var:-}"
+    if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
+      echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
+      exit 2
+    fi
+  done
+elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
+  for image_var in VAULT_IMAGE TOR_IMAGE; do
     image_ref="${!image_var:-}"
     if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
       echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
@@ -128,7 +137,7 @@ echo "[*] Ensuring namespace exists..."
 "$KUBECTL" create namespace "$NAMESPACE" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
 if [[ "$ENVIRONMENT" == "staging" ]]; then
-  echo "[*] Verifying independently provisioned vault secrets..."
+  echo "[*] Verifying independently provisioned Core secrets..."
 
   require_secret_keys() {
     local secret="$1"
@@ -155,8 +164,6 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
   require_secret_keys kerosene-redis-secrets redis-password
   require_secret_keys kerosene-bitcoin-secrets rpc-user rpc-password
   require_secret_keys kerosene-lnd-secrets LIGHTNING_LND_MACAROON
-  require_secret_keys kfe-vault-mtls-certs \
-    ca.crt vault-client.crt vault-client.pkcs8.key
   require_secret_keys staging-smoke-credentials username password
 
   jdbc_url="$(
@@ -168,13 +175,28 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
     exit 1
   fi
 
-  for vault_id in 1 2 3; do
-    data_secret="vault-${vault_id}-secrets"
-    cert_secret="vault-${vault_id}-mtls-certs"
-    require_secret_keys "$data_secret" data-passphrase attestation-root
-    require_secret_keys "$cert_secret" \
-      ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key
-  done
+elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
+  echo "[*] Verifying independently provisioned Vault secrets..."
+  require_secret_keys() {
+    local secret="$1"
+    shift
+    local present_keys
+    present_keys="$(
+      "$KUBECTL" -n "$NAMESPACE" get secret "$secret" \
+        -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'
+    )"
+    local key
+    for key in "$@"; do
+      grep -qx "$key" <<<"$present_keys" || {
+        echo "[!] Secret ${secret} is missing required key ${key}." >&2
+        exit 1
+      }
+    done
+  }
+  require_secret_keys vault-identity node-id
+  require_secret_keys vault-secrets data-passphrase attestation-root
+  require_secret_keys vault-mtls-certs \
+    ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key
 fi
 
 echo "[*] Applying manifest..."
@@ -185,8 +207,8 @@ if [[ "${KEROSENE_FORCE_CONFLICTS:-0}" == "1" ]]; then
 fi
 "$KUBECTL" "${APPLY_ARGS[@]}" -f "$MANIFEST"
 
-echo "[*] Waiting for core workloads..."
 if [[ "$ENVIRONMENT" == "staging" ]]; then
+  echo "[*] Waiting for Core workloads..."
   echo "[*] Waiting for staging-owned stateful dependencies..."
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-postgres --timeout=10m
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-redis --timeout=5m
@@ -194,21 +216,24 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-lnd --timeout=15m
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-tor --timeout=10m
 fi
-"$KUBECTL" -n "$NAMESPACE" rollout status deployment/server --timeout=10m
-"$KUBECTL" -n "$NAMESPACE" rollout status deployment/kfe-service --timeout=10m
-"$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
+if [[ "$ENVIRONMENT" != "staging-vault" ]]; then
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/server --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/kfe-service --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
+fi
 if [[ "$ENVIRONMENT" == "staging" ]]; then
-  echo "[*] Waiting for mandatory vault mesh quorum..."
-  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-1 --timeout=10m
-  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-2 --timeout=10m
-  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-3 --timeout=10m
-
   if [[ "${KEROSENE_SKIP_STAGING_SMOKES:-0}" == "1" ]]; then
     echo "[!] KEROSENE_SKIP_STAGING_SMOKES=1: post-deploy gates were explicitly skipped." >&2
   else
     KUBECTL="$KUBECTL" KEROSENE_STAGING_NAMESPACE="$NAMESPACE" \
       bash "$SCRIPT_DIR/smoke-staging.sh"
   fi
+elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
+  echo "[*] Waiting for the independent Vault and its Tor transport..."
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/vault-tor --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault --timeout=10m
+  KUBECTL="$KUBECTL" KEROSENE_STAGING_VAULT_NAMESPACE="$NAMESPACE" \
+    bash "$SCRIPT_DIR/smoke-staging-vault.sh"
 fi
 
 # Local (and any cluster with helm) also keeps Grafana + Prometheus up with the server.
