@@ -1,0 +1,451 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: staging-postgres
+  labels:
+    app: kerosene-db-patroni
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+spec:
+  serviceName: kerosene-db-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-db-patroni
+  template:
+    metadata:
+      labels:
+        app: kerosene-db-patroni
+        app.kubernetes.io/name: postgres
+        app.kubernetes.io/component: database
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16.4-alpine3.20
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: kerosene
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-db-secrets
+                  key: application-user
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-db-secrets
+                  key: application-password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d kerosene"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d kerosene"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 50Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: staging-redis
+  labels:
+    app: kerosene-redis
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+spec:
+  serviceName: kerosene-redis-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-redis
+  template:
+    metadata:
+      labels:
+        app: kerosene-redis
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: cache
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: redis
+          image: redis:7.4.0-alpine3.20
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - exec redis-server --appendonly yes --appendfsync everysec --requirepass "$REDIS_PASSWORD"
+          ports:
+            - name: redis
+              containerPort: 6379
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-redis-secrets
+                  key: redis-password
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -qx PONG"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -qx PONG"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: staging-bitcoin
+  labels:
+    app: kerosene-bitcoin
+    app.kubernetes.io/name: bitcoin-core
+    app.kubernetes.io/component: bitcoin
+spec:
+  serviceName: kerosene-bitcoin-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-bitcoin
+  template:
+    metadata:
+      labels:
+        app: kerosene-bitcoin
+        app.kubernetes.io/name: bitcoin-core
+        app.kubernetes.io/component: bitcoin
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bitcoind
+          image: bitcoin/bitcoin:28.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              exec bitcoind \
+                -testnet \
+                -datadir=/home/bitcoin/.bitcoin \
+                -server=1 \
+                -printtoconsole \
+                -prune=20000 \
+                -txindex=0 \
+                -rpcbind=0.0.0.0 \
+                -rpcallowip=10.0.0.0/8 \
+                -rpcallowip=172.16.0.0/12 \
+                -rpcallowip=192.168.0.0/16 \
+                -rpcport=8332 \
+                -port=8333 \
+                -rpcuser="$BITCOIN_RPC_USER" \
+                -rpcpassword="$BITCOIN_RPC_PASSWORD" \
+                -zmqpubrawtx=tcp://0.0.0.0:28332 \
+                -zmqpubhashblock=tcp://0.0.0.0:28333
+          env:
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-user
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-password
+          ports:
+            - name: rpc
+              containerPort: 8332
+            - name: p2p
+              containerPort: 8333
+            - name: zmq-block
+              containerPort: 28332
+            - name: zmq-tx
+              containerPort: 28333
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - bitcoin-cli -testnet -rpcport=8332 -rpcuser="$BITCOIN_RPC_USER" -rpcpassword="$BITCOIN_RPC_PASSWORD" getblockchaininfo >/dev/null
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 24
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 6Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /home/bitcoin/.bitcoin
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: staging-lnd
+  labels:
+    app: kerosene-lnd
+    app.kubernetes.io/name: lnd
+    app.kubernetes.io/component: lightning
+spec:
+  serviceName: kerosene-lnd-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kerosene-lnd
+  template:
+    metadata:
+      labels:
+        app: kerosene-lnd
+        app.kubernetes.io/name: lnd
+        app.kubernetes.io/component: lightning
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 120
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        fsGroup: 0
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-bitcoin-rpc
+          image: curlimages/curl:8.10.1
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              payload='{"jsonrpc":"1.0","id":"staging-lnd","method":"getblockchaininfo","params":[]}'
+              until curl --silent --show-error --fail --max-time 5 \
+                -u "${BITCOIN_RPC_USER}:${BITCOIN_RPC_PASSWORD}" \
+                -H "Content-Type: application/json" --data "$payload" \
+                http://bitcoin-core:8332/ | grep -q '"result"'; do
+                sleep 10
+              done
+          env:
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-user
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+      containers:
+        - name: lnd
+          image: lightninglabs/lnd:v0.20.1-beta
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              exec lnd \
+                --lnddir=/root/.lnd \
+                --rpclisten=0.0.0.0:10009 \
+                --restlisten=0.0.0.0:8080 \
+                --listen=0.0.0.0:9735 \
+                --bitcoin.active \
+                --bitcoin.testnet \
+                --bitcoin.node=bitcoind \
+                --bitcoind.rpchost=bitcoin-core:8332 \
+                --bitcoind.rpcuser="$BITCOIN_RPC_USER" \
+                --bitcoind.rpcpass="$BITCOIN_RPC_PASSWORD" \
+                --bitcoind.zmqpubrawblock=tcp://bitcoin-core:28333 \
+                --bitcoind.zmqpubrawtx=tcp://bitcoin-core:28332 \
+                --alias=kerosene-staging \
+                --accept-keysend \
+                --accept-amp \
+                --tlsextradomain=kerosene-lnd-headless \
+                --tlsextradomain=staging-lnd
+          env:
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-user
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-bitcoin-secrets
+                  key: rpc-password
+          ports:
+            - name: grpc
+              containerPort: 10009
+            - name: rest
+              containerPort: 8080
+            - name: p2p
+              containerPort: 9735
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - test -f /root/.lnd/data/chain/bitcoin/testnet/admin.macaroon && lncli --network=testnet getinfo >/dev/null
+            periodSeconds: 15
+            timeoutSeconds: 10
+            failureThreshold: 40
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+          volumeMounts:
+            - name: data
+              mountPath: /root/.lnd
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: staging-runtime-ingress
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [database, cache, bitcoin, lightning]
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [server, kfe-service, lnd]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: staging-runtime-egress
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [bitcoin-core, lnd]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

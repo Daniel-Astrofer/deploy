@@ -15,14 +15,33 @@ repositório e está bloqueada pelos gates descritos em
 - `kubectl` com contexto correto.
 - `kustomize` quando imagens forem substituídas por variável.
 - Imagens publicadas e preferencialmente referenciadas por digest.
+- StorageClass padrão capaz de provisionar PVCs `ReadWriteOnce`.
 - Secrets centrais já provisionados:
   - `server-secrets`;
   - `kerosene-db-secrets`;
   - `kerosene-redis-secrets`;
   - `kerosene-bitcoin-secrets`;
   - `kerosene-lnd-secrets`.
+  - `staging-smoke-credentials`, com um usuário sintético já cadastrado.
 
 O script de deploy não cria nem imprime esses valores.
+
+O namespace é proprietário dos StatefulSets `staging-postgres`,
+`staging-redis`, `staging-bitcoin`, `staging-lnd` e `staging-tor`. Nenhum
+Service de staging seleciona pods de `kerosene-local`.
+
+`local` e `local-full` permanecem somente como ferramentas de workstation. Eles
+não são fallback, origem de dados nem destino de promoção para staging.
+
+## Inicialização do LND
+
+O Deploy cria o StatefulSet e o PVC, mas não gera nem importa seed. Antes da
+primeira promoção, o operador inicializa a wallet do LND por canal seguro,
+registra o backup de seed e o static channel backup no secret manager e
+provisiona `LIGHTNING_LND_MACAROON` em `kerosene-lnd-secrets`.
+
+Essa cerimônia é deliberadamente externa ao pipeline. Reinicializar o PVC sem
+restaurar o material de recuperação cria outra identidade Lightning.
 
 ## Certificados e secrets dos vaults
 
@@ -48,7 +67,12 @@ de cerimônia deve ser protegido e ter backup seguro.
 
 ```bash
 infra/kubernetes/scripts/deploy.sh local --dry-run
-infra/kubernetes/scripts/deploy.sh staging --dry-run
+SERVER_IMAGE=registry/kerosene-server@sha256:... \
+KFE_SERVICE_IMAGE=registry/kerosene-kfe@sha256:... \
+WEB_PAGE_IMAGE=registry/kerosene-web@sha256:... \
+VAULT_IMAGE=registry/kerosene-vault@sha256:... \
+TOR_IMAGE=registry/kerosene-tor@sha256:... \
+  infra/kubernetes/scripts/deploy.sh staging --dry-run
 ```
 
 Se o namespace staging ainda não existir, o segundo comando realiza validação
@@ -63,17 +87,55 @@ SERVER_IMAGE=registry/kerosene-server@sha256:... \
 KFE_SERVICE_IMAGE=registry/kerosene-kfe@sha256:... \
 WEB_PAGE_IMAGE=registry/kerosene-web@sha256:... \
 VAULT_IMAGE=registry/kerosene-vault@sha256:... \
+TOR_IMAGE=registry/kerosene-tor@sha256:... \
   infra/kubernetes/scripts/deploy.sh staging
 ```
 
 O deploy falha se:
 
+- qualquer imagem de aplicação/Tor não estiver fixada por digest;
 - algum Secret obrigatório estiver ausente;
+- o JDBC não apontar para `kerosene-db-headless`;
+- o manifesto mencionar `kerosene-local` ou outro namespace Kerosene;
+- PostgreSQL, Redis, Bitcoin, LND ou Tor não ficar pronto;
 - houver conflito de ownership no server-side apply;
 - server, KFE, web ou qualquer um dos três vaults não ficar pronto.
+- o login sintético ou a prontidão de três nós do quorum falhar.
 
 `KEROSENE_FORCE_CONFLICTS=1` existe somente para recuperação operacional
 deliberada e emite aviso.
+
+`KEROSENE_SKIP_STAGING_SMOKES=1` existe somente para recuperação deliberada;
+um deploy normal nunca deve usá-lo.
+
+## Onion
+
+`staging-tor` publica `web-page:8080` como hidden service e mantém a identidade
+no PVC `data-staging-tor-0`. Consulte o hostname sem exportar a chave:
+
+```bash
+kubectl -n kerosene-staging exec staging-tor-0 -- \
+  cat /var/lib/tor/kerosene_service/hostname
+```
+
+O snapshot do PVC é parte obrigatória do plano de recuperação.
+
+## Rollback e recuperação
+
+- Reaplique os digests anteriores; não remova namespace nem PVCs.
+- Restaure PostgreSQL/Bitcoin em PVCs substitutos a partir do último snapshot
+  verificado.
+- Redis pode ser recriado somente com os serviços de aplicação parados.
+- Recupere o LND usando seed e static channel backup sob controle do operador.
+- Recupere o onion pelo snapshot do PVC `data-staging-tor-0`.
+- Vault shares seguem a cerimônia própria do `kerosene-vault`; este deploy não
+  cria nem ativa signers.
+
+Depois de qualquer rollback:
+
+```bash
+bash infra/kubernetes/scripts/smoke-staging.sh
+```
 
 ## Limites do staging
 
