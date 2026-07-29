@@ -81,6 +81,23 @@ spec:
               value: socks5h://tor:9050
             - name: VAULT_SEED_PEERS
               value: ""
+            - name: VAULT_KEROSENE_NODE_URL
+              value: https://tor.kerosene-staging-vault.svc:8800
+            - name: VAULT_KEROSENE_NETWORK_ID
+              value: kerosene-staging
+            - name: VAULT_KEROSENE_NODE_MEMBER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: kerosene-node-identity
+                  key: member-id
+            - name: VAULT_KEROSENE_NODE_CLIENT_IDENTITY_PEM
+              value: /node-certs/client-identity.pem
+            - name: VAULT_KEROSENE_NODE_CA_PATH
+              value: /node-certs/ca.crt
+            - name: VAULT_KEROSENE_SERVICE_PORT
+              value: "7801"
+            - name: VAULT_KEROSENE_NODE_ALLOW_EMPTY
+              value: "true"
             - name: VAULT_GENESIS_N
               value: "3"
             - name: VAULT_DKG_MODE
@@ -125,6 +142,9 @@ spec:
             - name: certs
               mountPath: /certs
               readOnly: true
+            - name: node-certs
+              mountPath: /node-certs
+              readOnly: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -138,3 +158,7 @@ spec:
           secret:
             secretName: vault-mtls-certs
             defaultMode: 0400
+        - name: node-certs
+          secret:
+            secretName: kerosene-node-mtls
+            defaultMode: 0440

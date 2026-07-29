@@ -10,6 +10,7 @@ Optional:
   KFE_SERVICE_IMAGE=registry/kfe-service@sha256:...
   WEB_PAGE_IMAGE=registry/web-page@sha256:...
   VAULT_IMAGE=registry/vault@sha256:...
+  NODE_IMAGE=registry/node@sha256:...
   TOR_IMAGE=registry/tor@sha256:...
 
   KUBECTL=kubectl
@@ -56,7 +57,7 @@ if ! command -v "$KUBECTL" >/dev/null 2>&1; then
   exit 127
 fi
 
-if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" || -n "${TOR_IMAGE:-}" ]]; then
+if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" || -n "${NODE_IMAGE:-}" || -n "${TOR_IMAGE:-}" ]]; then
   if ! command -v "$KUSTOMIZE_BIN" >/dev/null 2>&1; then
     echo "kustomize not found. It is required when setting images through environment variables." >&2
     echo "Install kustomize or edit the overlay image tags manually and run with no image env vars." >&2
@@ -70,7 +71,7 @@ if [[ ! -d "$OVERLAY" ]]; then
 fi
 
 if [[ "$ENVIRONMENT" == "staging" ]]; then
-  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE TOR_IMAGE; do
+  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE NODE_IMAGE TOR_IMAGE; do
     image_ref="${!image_var:-}"
     if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
       echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
@@ -78,7 +79,7 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
     fi
   done
 elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
-  for image_var in VAULT_IMAGE TOR_IMAGE; do
+  for image_var in VAULT_IMAGE NODE_IMAGE TOR_IMAGE; do
     image_ref="${!image_var:-}"
     if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
       echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
@@ -105,6 +106,9 @@ if [[ -n "${WEB_PAGE_IMAGE:-}" ]]; then
 fi
 if [[ -n "${VAULT_IMAGE:-}" ]]; then
   (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/vault=${VAULT_IMAGE}")
+fi
+if [[ -n "${NODE_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/node=${NODE_IMAGE}")
 fi
 if [[ -n "${TOR_IMAGE:-}" ]]; then
   (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/tor=${TOR_IMAGE}")
@@ -165,6 +169,10 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
   require_secret_keys kerosene-bitcoin-secrets rpc-user rpc-password
   require_secret_keys kerosene-lnd-secrets LIGHTNING_LND_MACAROON
   require_secret_keys staging-smoke-credentials username password
+  require_secret_keys kerosene-node-genesis genesis-trust-bundle.json
+  require_secret_keys kerosene-node-mtls \
+    ca.crt server.crt server.key client-identity.pem client.crt client.pkcs8.key
+  require_secret_keys kerosene-node-identity identity.key member-id
 
   jdbc_url="$(
     "$KUBECTL" -n "$NAMESPACE" get secret kerosene-db-secrets \
@@ -197,6 +205,10 @@ elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
   require_secret_keys vault-secrets data-passphrase attestation-root
   require_secret_keys vault-mtls-certs \
     ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key
+  require_secret_keys kerosene-node-genesis genesis-trust-bundle.json
+  require_secret_keys kerosene-node-mtls \
+    ca.crt server.crt server.key client-identity.pem client.crt client.pkcs8.key
+  require_secret_keys kerosene-node-identity identity.key member-id
 fi
 
 echo "[*] Applying manifest..."

@@ -13,7 +13,7 @@ if [[ -z "$IMAGE_KEY" || "$IMAGE_KEY" == "-h" || "$IMAGE_KEY" == "--help" ]]; th
 Usage: bash infra/docker/build-image.sh <image-key>
 
 Image keys are defined in infra/docker/images.yaml.
-Common keys: server, kfe-service, kerosene-vault, tor, web-page.
+Common keys: server, kfe-service, kerosene-vault, kerosene-node, tor, web-page.
 
 This script reads the image contract and resolves build contexts from the
 independent polyrepo workspace.

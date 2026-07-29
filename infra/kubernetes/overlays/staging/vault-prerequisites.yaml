@@ -14,6 +14,16 @@ data:
     overlay and publishes a stable onion identity provisioned outside Git.
 ---
 apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-node-directory
+data:
+  # Enable only after a Vault-plane Node has accepted a quorum-signed
+  # MembershipManifest and its onion URL is known.
+  enabled: "false"
+  node-url: ""
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: vault-1-data

@@ -14,3 +14,5 @@ images:
     newTag: staging
   - name: kerosene/tor
     newTag: staging
+  - name: kerosene/node
+    newTag: staging
