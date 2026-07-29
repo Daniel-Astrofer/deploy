@@ -53,5 +53,7 @@ grep -q 'requires immutable SERVER_IMAGE' <<<"$output" \
 
 grep -q 'smoke-staging.sh' "$DEPLOY" || fail "staging deploy does not execute smoke gates"
 grep -q 'statefulset/staging-postgres' "$DEPLOY" || fail "staging deploy does not wait for dependencies"
+grep -q 'port-forward deployment/vault' "$REPO_ROOT/infra/kubernetes/scripts/smoke-staging-vault.sh" \
+  || fail "Vault smoke does not support the shell-free runtime image"
 
 echo "[PASS] canonical staging runtime and fail-fast gates"
