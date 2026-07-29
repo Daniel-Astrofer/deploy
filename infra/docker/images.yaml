@@ -11,21 +11,24 @@ images:
     image: kerosene/server
     local_tag: local
     dockerfile: infra/docker/images/server/Dockerfile
-    context: backend/kerosene
+    context_repository: core
+    context: .
     owner: backend
 
   kfe-service:
     image: kerosene/kfe-service
     local_tag: local
     dockerfile: infra/docker/images/kfe-service/Dockerfile
-    context: backend/kerosene
+    context_repository: core
+    context: .
     owner: kfe
 
   kerosene-vault:
     image: kerosene/kerosene-vault
     local_tag: local
     dockerfile: infra/docker/images/kerosene-vault/Dockerfile
-    context: backend/kerosene-vault
+    context_repository: vault
+    context: .
     owner: vault-mesh
     notes: >-
       Vault mesh node (Rust). Lab uses ATTESTATION_MODE=sim; production builds
@@ -35,6 +38,7 @@ images:
     image: kerosene/tor
     local_tag: local
     dockerfile: infra/docker/images/tor/Dockerfile
+    context_repository: deploy
     context: infra/runtime/tor
     owner: network
 
@@ -42,6 +46,7 @@ images:
     image: kerosene/web-page
     local_tag: local
     dockerfile: infra/docker/images/web-page/Dockerfile
+    context_repository: generated
     context: .
     owner: frontend
     notes: >-

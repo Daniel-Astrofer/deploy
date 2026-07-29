@@ -57,7 +57,11 @@ if [[ -z "$REAL_USER" || "$REAL_USER" == "root" ]]; then
   REAL_USER="$(getent passwd 1000 | cut -d: -f1 || true)"
 fi
 REAL_HOME="$(getent passwd "${REAL_USER:-root}" | cut -d: -f6)"
-REAL_HOME="${REAL_HOME:-/home/astrofer}"
+REAL_HOME="${REAL_HOME:-${HOME:-}}"
+[[ -n "$REAL_HOME" ]] || {
+  echo "REAL_HOME or HOME must be set." >&2
+  exit 1
+}
 
 SIZE="40G"
 MOUNT_DIR="$REAL_HOME/.local/share/docker-data"

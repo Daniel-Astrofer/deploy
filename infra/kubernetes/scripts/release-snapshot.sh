@@ -55,11 +55,11 @@ existing_paths() {
 }
 
 release_source_paths() {
-  existing_paths backend frontend scripts infra docker-compose.yml
+  existing_paths backend scripts infra docker-compose.yml
 }
 
 release_config_paths() {
-  existing_paths backend/kerosene/src/main/resources infra docker-compose.yml
+  existing_paths backend infra docker-compose.yml
 }
 
 ensure_keys() {

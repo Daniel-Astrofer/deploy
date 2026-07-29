@@ -65,7 +65,7 @@ init_local() {
   [[ "${KEROSENE_COMPOSE_RESOURCE_LIMITS:-1}" == "0" ]] || require_file "$COMPOSE_LIMITS_FILE"
 
   if [[ ! -f "$ENV_FILE" ]]; then
-    fail "Local env file not found: $ENV_FILE. Create it from backend/kerosene/.env.example or your secure local source."
+    fail "Local env file not found: $ENV_FILE. Create it from $CORE_DIR/.env.example or your secure local source."
   fi
 
   require_docker

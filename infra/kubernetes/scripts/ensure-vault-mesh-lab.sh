@@ -14,6 +14,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# shellcheck source=scripts/polyrepo-env.sh
+source "$REPO_ROOT/scripts/polyrepo-env.sh"
 
 COMPOSE_FILE="${KEROSENE_VAULT_MESH_COMPOSE_FILE:-$REPO_ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml}"
 PROFILE="${KEROSENE_VAULT_MESH_PROFILE:-lab}"
@@ -55,9 +57,9 @@ case "$PROFILE" in
     ;;
   staging)
     COMPOSE_FILE="${KEROSENE_VAULT_MESH_COMPOSE_FILE:-$REPO_ROOT/infra/docker/compose/vault-mesh-staging.compose.yaml}"
-    if [[ ! -d "${KEROSENE_VAULT_MESH_CERTS_DIR:-$REPO_ROOT/backend/kerosene-vault/lab-certs}" ]]; then
+    if [[ ! -d "${KEROSENE_VAULT_MESH_CERTS_DIR:-$VAULT_DIR/lab-certs}" ]]; then
       echo "[!] staging mesh profile needs mTLS certs; generating automatically..." >&2
-      bash "$REPO_ROOT/scripts/vault/gen_staging_mtls_certs.sh" >&2 || {
+      bash "$VAULT_DIR/scripts/gen_staging_mtls_certs.sh" >&2 || {
         echo "[!] Auto cert gen failed; falling back to lab clear-token mesh." >&2
         COMPOSE_FILE="$REPO_ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml"
         PROFILE=lab
@@ -196,7 +198,7 @@ fi
 if [[ "$PROFILE" == "tor" ]]; then
   echo "[!] Tor profile: vault APIs are NOT published on host :7701–7703." >&2
   echo "[!] local-full kfe Endpoints bridge remains clearnet-lab; use this profile for Tor mesh / distributed_wire." >&2
-  echo "[!] Docs: backend/kerosene-vault/docs/CEREMONY_TOR.md" >&2
+  echo "[!] Docs: $VAULT_DIR/docs/CEREMONY_TOR.md" >&2
   start_tor_mesh
 else
   pushd "$COMPOSE_DIR" >/dev/null
@@ -209,9 +211,9 @@ else
     if [[ "$PROFILE" == "staging" ]]; then
       health_ok=1
       curl -fsS -o /dev/null \
-        --cacert "$REPO_ROOT/backend/kerosene-vault/lab-certs/ca.crt" \
-        --cert "$REPO_ROOT/backend/kerosene-vault/lab-certs/vault-client.crt" \
-        --key "$REPO_ROOT/backend/kerosene-vault/lab-certs/vault-client.key" \
+        --cacert "$VAULT_DIR/lab-certs/ca.crt" \
+        --cert "$VAULT_DIR/lab-certs/vault-client.crt" \
+        --key "$VAULT_DIR/lab-certs/vault-client.key" \
         "https://127.0.0.1:7701/v1/health" 2>/dev/null || health_ok=0
     else
       health_ok=1

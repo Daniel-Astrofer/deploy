@@ -72,7 +72,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
   hostPath:
-    path: /home/astrofer/.local/state/kerosene/tor/keys/local-full
+    path: __KEROSENE_LOCAL_STATE_ROOT__/tor/keys/local-full
     type: DirectoryOrCreate
 ---
 apiVersion: v1

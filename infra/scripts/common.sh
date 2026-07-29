@@ -9,7 +9,8 @@ set -euo pipefail
 
 KEROSENE_INFRA_SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$KEROSENE_INFRA_SCRIPTS_DIR/../.." && pwd)"
-BACKEND_DIR="${KEROSENE_BACKEND_DIR:-$REPO_ROOT/backend/kerosene}"
+# shellcheck source=scripts/polyrepo-env.sh
+source "$REPO_ROOT/scripts/polyrepo-env.sh"
 INFRA_DIR="${KEROSENE_INFRA_DIR:-$REPO_ROOT/infra}"
 COMPOSE_FILE="${KEROSENE_COMPOSE_FILE:-$INFRA_DIR/docker/compose/vault-mesh-lab.compose.yaml}"
 COMPOSE_LIMITS_FILE="${KEROSENE_COMPOSE_LIMITS_FILE:-$INFRA_DIR/docker/compose/local.limits.compose.yaml}"
