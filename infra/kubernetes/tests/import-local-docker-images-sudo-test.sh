@@ -29,10 +29,16 @@ mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/scri
   "$TMP_DIR/infra/docker/images/tor" \
   "$TMP_DIR/infra/runtime/tor" \
   "$TMP_DIR/infra/runtime/web" \
-  "$TMP_DIR/backend/kerosene"
+  "$TMP_DIR/kerosene-core"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
 cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
+cat > "$TMP_DIR/infra/kubernetes/scripts/build-web-admin-backend.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/build-web-admin-backend.sh"
 touch \
   "$TMP_DIR/infra/docker/images/server/Dockerfile" \
   "$TMP_DIR/infra/docker/images/kfe-service/Dockerfile" \
@@ -117,6 +123,7 @@ chmod +x "$TMP_DIR/bin/sudo"
 set +e
 noninteractive_output="$(
   PATH="$TMP_DIR/bin:$PATH" CALL_LOG="$LOG_FILE" \
+    CORE_DIR="$TMP_DIR/kerosene-core" CLIENTS_DIR="$TMP_DIR/kerosene-clients" \
     "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh" \
       --skip-kfe-service-build --skip-web-page-build 2>&1
 )"
@@ -140,6 +147,8 @@ tmp_dir, log_file = sys.argv[1], sys.argv[2]
 env = os.environ.copy()
 env["PATH"] = f"{tmp_dir}/bin:{env['PATH']}"
 env["CALL_LOG"] = log_file
+env["CORE_DIR"] = f"{tmp_dir}/kerosene-core"
+env["CLIENTS_DIR"] = f"{tmp_dir}/kerosene-clients"
 cmd = [
     f"{tmp_dir}/infra/kubernetes/scripts/import-local-docker-images.sh",
     "--skip-kfe-service-build",

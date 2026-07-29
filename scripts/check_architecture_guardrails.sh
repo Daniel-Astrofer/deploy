@@ -33,4 +33,18 @@ if grep -Eq 'mpc-sidecar:|backend/mpc-sidecar' "${images}" "${vault_compose}"; t
 fi
 
 grep -Eq 'kerosene-vault|vault-1' "${vault_compose}"
+
+if grep -RInE \
+  --exclude-dir=.git \
+  --exclude-dir=tests \
+  --exclude='*.bak' \
+  --exclude='check_architecture_guardrails.sh' \
+  '(/home/[^/]+/Kerosene|\\$REPO_ROOT/(backend/kerosene(-vault)?|frontend)|\\.\\./\\.\\./\\.\\./backend/kerosene-vault)' \
+  "${repo_root}/infra" \
+  "${repo_root}/scripts"
+then
+  echo "Deploy contains a forbidden monorepo source path."
+  exit 1
+fi
+
 echo "Deployment architecture guardrails passed."

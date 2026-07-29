@@ -164,9 +164,9 @@ ensure_tag_from_compose_service() {
 build_server_image() {
   local target="kerosene/server:local"
   local dockerfile="$REPO_ROOT/infra/docker/images/server/Dockerfile"
-  local context="$REPO_ROOT/backend/kerosene"
+  local context="$CORE_DIR"
   local web_admin_build="$context/web-admin-build"
-  local frontend_web_bundle="$REPO_ROOT/frontend/build/web"
+  local frontend_web_bundle="$CLIENTS_DIR/build/web"
 
   if [[ ! -f "$dockerfile" ]]; then
     fail "Server Dockerfile not found: $dockerfile"
@@ -176,7 +176,7 @@ build_server_image() {
   fi
 
   # The server Dockerfile embeds the Flutter web-admin bundle from
-  # `backend/kerosene/web-admin-build/`. In dev machines, that directory may
+  # `kerosene-core/web-admin-build/`. In dev machines, that directory may
   # be absent until someone runs the Flutter build once.
   if [[ ! -f "$web_admin_build/index.html" ]]; then
     if [[ -f "$frontend_web_bundle/index.html" ]]; then
@@ -201,7 +201,7 @@ build_server_image() {
 build_kfe_service_image() {
   local target="kerosene/kfe-service:local"
   local dockerfile="$REPO_ROOT/infra/docker/images/kfe-service/Dockerfile"
-  local context="$REPO_ROOT/backend/kerosene"
+  local context="$CORE_DIR"
 
   if [[ "$SKIP_KFE_SERVICE_BUILD" -eq 1 ]]; then
     info "Skipping kfe-service image build by request."
@@ -227,7 +227,7 @@ build_kfe_service_image() {
 }
 
 build_kubernetes_web_bundle() {
-  local frontend_dir="$REPO_ROOT/frontend"
+  local frontend_dir="$CLIENTS_DIR"
   local web_build="$frontend_dir/build/web"
   local flutter_bin
 
@@ -252,9 +252,10 @@ build_kubernetes_web_bundle() {
 
 build_web_page_image() {
   local target="kerosene/web-page:local"
-  local web_build="$REPO_ROOT/frontend/build/web"
+  local web_build="$CLIENTS_DIR/build/web"
   local nginx_conf="$REPO_ROOT/infra/runtime/web/nginx.k8s.conf"
   local dockerfile="$REPO_ROOT/infra/docker/images/web-page/Dockerfile"
+  local image_context
 
   if [[ "$SKIP_WEB_PAGE_BUILD" -eq 1 ]]; then
     info "Skipping web-page image build by request."
@@ -264,7 +265,7 @@ build_web_page_image() {
   build_kubernetes_web_bundle
 
   if [[ ! -f "$web_build/index.html" ]]; then
-    fail "Flutter Kubernetes web-page build did not produce frontend/build/web/index.html."
+    fail "Flutter Kubernetes web-page build did not produce $web_build/index.html."
   fi
   if [[ ! -f "$nginx_conf" ]]; then
     fail "nginx config not found: $nginx_conf"
@@ -273,8 +274,13 @@ build_web_page_image() {
     fail "web-page Dockerfile not found: $dockerfile"
   fi
 
-  info "Building $target from frontend/build/web with Kubernetes Nginx routing"
-  docker build -t "$target" -f "$dockerfile" "$REPO_ROOT"
+  image_context="$(mktemp -d)"
+  mkdir -p "$image_context/web"
+  cp -R "$web_build"/. "$image_context/web"/
+  cp "$nginx_conf" "$image_context/nginx.conf"
+  info "Building $target from the Clients web bundle with Kubernetes Nginx routing"
+  docker build -t "$target" -f "$dockerfile" "$image_context"
+  rm -rf -- "$image_context"
 }
 
 build_tor_image() {

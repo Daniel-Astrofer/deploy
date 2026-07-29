@@ -55,6 +55,20 @@ exit 0
 EOF
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-local-cluster.sh"
 
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-vault-mesh-lab.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+echo "127.0.0.1"
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-vault-mesh-lab.sh"
+
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-local-monitoring.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-local-monitoring.sh"
+
 cat > "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -66,6 +80,23 @@ chmod +x "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
 cat > "$TMP_DIR/bin/kubectl" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+# Drop optional --kubeconfig PATH so the mock is independent of host config.
+args=()
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --kubeconfig)
+      shift 2 || true
+      continue
+      ;;
+    --kubeconfig=*)
+      shift
+      continue
+      ;;
+  esac
+  args+=("\$1")
+  shift
+done
+set -- "\${args[@]}"
 echo "\$*" >> "$LOG_FILE"
 if [[ "\${1:-}" == "config" && "\${2:-}" == "current-context" ]]; then
   echo "test-context"

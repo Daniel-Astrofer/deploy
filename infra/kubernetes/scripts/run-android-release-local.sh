@@ -3,7 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-FRONTEND_DIR="${REPO_ROOT}/frontend"
+# shellcheck source=scripts/polyrepo-env.sh
+source "${REPO_ROOT}/scripts/polyrepo-env.sh"
+FRONTEND_DIR="${CLIENTS_DIR}"
 
 cd "${FRONTEND_DIR}"
 

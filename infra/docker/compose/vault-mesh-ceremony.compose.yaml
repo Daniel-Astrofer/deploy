@@ -49,7 +49,7 @@ x-vault-ceremony-env: &vault-ceremony-env
 services:
   vault-1:
     build:
-      context: ../../../backend/kerosene-vault
+      context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
       args:
         CARGO_FEATURES: production
@@ -60,15 +60,15 @@ services:
       VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
     volumes:
       - vault-1-ceremony-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/ceremony-certs/nodes/vault-1:/certs:ro
-      - ../../../backend/kerosene-vault/ceremony-certs/ca.crt:/ca/ca.crt:ro
-      - ../../../backend/kerosene-vault/ceremony-certs/audit:/audit:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/nodes/vault-1:/certs:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/ca.crt:/ca/ca.crt:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/audit:/audit:ro
     ports:
       - "7701:7701"
 
   vault-2:
     build:
-      context: ../../../backend/kerosene-vault
+      context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
       args:
         CARGO_FEATURES: production
@@ -79,15 +79,15 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
     volumes:
       - vault-2-ceremony-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/ceremony-certs/nodes/vault-2:/certs:ro
-      - ../../../backend/kerosene-vault/ceremony-certs/ca.crt:/ca/ca.crt:ro
-      - ../../../backend/kerosene-vault/ceremony-certs/audit:/audit:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/nodes/vault-2:/certs:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/ca.crt:/ca/ca.crt:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/audit:/audit:ro
     ports:
       - "7702:7701"
 
   vault-3:
     build:
-      context: ../../../backend/kerosene-vault
+      context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
       args:
         CARGO_FEATURES: production
@@ -98,9 +98,9 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
     volumes:
       - vault-3-ceremony-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/ceremony-certs/nodes/vault-3:/certs:ro
-      - ../../../backend/kerosene-vault/ceremony-certs/ca.crt:/ca/ca.crt:ro
-      - ../../../backend/kerosene-vault/ceremony-certs/audit:/audit:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/nodes/vault-3:/certs:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/ca.crt:/ca/ca.crt:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/ceremony-certs/audit:/audit:ro
     ports:
       - "7703:7701"
 

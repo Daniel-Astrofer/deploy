@@ -105,7 +105,7 @@ services:
 
   vault-1:
     build:
-      context: ../../../backend/kerosene-vault
+      context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-1-staging
     depends_on:
@@ -117,13 +117,13 @@ services:
       VAULT_SEED_PEERS: vault-2=vault-2:7701,vault-3=vault-3:7701
     volumes:
       - vault-1-staging-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/lab-certs:/certs:ro
     ports:
       - "7701:7701"
 
   vault-2:
     build:
-      context: ../../../backend/kerosene-vault
+      context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-2-staging
     depends_on:
@@ -135,13 +135,13 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-3=vault-3:7701
     volumes:
       - vault-2-staging-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/lab-certs:/certs:ro
     ports:
       - "7702:7701"
 
   vault-3:
     build:
-      context: ../../../backend/kerosene-vault
+      context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
       dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-3-staging
     depends_on:
@@ -153,7 +153,7 @@ services:
       VAULT_SEED_PEERS: vault-1=vault-1:7701,vault-2=vault-2:7701
     volumes:
       - vault-3-staging-data:/var/lib/kerosene-vault
-      - ../../../backend/kerosene-vault/lab-certs:/certs:ro
+      - ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}/lab-certs:/certs:ro
     ports:
       - "7703:7701"
 

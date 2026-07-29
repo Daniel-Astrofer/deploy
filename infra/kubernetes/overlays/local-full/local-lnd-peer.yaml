@@ -18,7 +18,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: kerosene-local
   hostPath:
-    path: /home/astrofer/Kerosene/.local/lnd-peer-data
+    path: __KEROSENE_LOCAL_STATE_ROOT__/lnd-peer-data
     type: DirectoryOrCreate
 ---
 apiVersion: v1

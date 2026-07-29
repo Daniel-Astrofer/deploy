@@ -5,8 +5,8 @@ LOCAL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=infra/scripts/common.sh
 source "$LOCAL_SCRIPT_DIR/../common.sh"
 
-MIGRATION_FILE="$BACKEND_DIR/src/main/resources/db/migration.sql"
-VERSIONED_MIGRATIONS_DIR="$BACKEND_DIR/src/main/resources/db/migration"
+MIGRATION_FILE="$CORE_DIR/auth-service/src/main/resources/db/migration.sql"
+VERSIONED_MIGRATIONS_DIR="$CORE_DIR/auth-service/src/main/resources/db/migration"
 DB_WAIT_TIMEOUT_SECONDS=90
 DB_SERVICES=()
 FORCE_MIGRATIONS="${KEROSENE_FORCE_MIGRATIONS:-0}"
@@ -17,8 +17,8 @@ usage() {
   cat <<'EOF'
 Usage: infra/scripts/local/db-migrate.sh [options] [db-service...]
 
-Applies backend/kerosene/src/main/resources/db/migration.sql and incremental
-versioned migrations to running local PostgreSQL services. If no services are
+Applies migrations from the independent Core repository to running local
+PostgreSQL services. If no services are
 provided, it targets db-wvo, db-iw5, db-ltv.
 
 Options:

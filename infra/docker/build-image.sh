@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REPO_ROOT="$ROOT"
+# shellcheck source=scripts/polyrepo-env.sh
+source "$ROOT/scripts/polyrepo-env.sh"
 CONTRACT="$ROOT/infra/docker/images.yaml"
 IMAGE_KEY="${1:-}"
 
@@ -12,18 +15,26 @@ Usage: bash infra/docker/build-image.sh <image-key>
 Image keys are defined in infra/docker/images.yaml.
 Common keys: server, kfe-service, kerosene-vault, tor, web-page.
 
-This script is transitional. It reads the image contract and builds the selected
-image with Docker using the current repository paths.
+This script reads the image contract and resolves build contexts from the
+independent polyrepo workspace.
 USAGE
   exit 0
 fi
 
-python3 - "$CONTRACT" "$IMAGE_KEY" "$ROOT" <<'PY'
+python3 - \
+  "$CONTRACT" \
+  "$IMAGE_KEY" \
+  "$ROOT" \
+  "$CORE_DIR" \
+  "$CLIENTS_DIR" \
+  "$VAULT_DIR" \
+  "$NODE_DIR" \
+  "$CONTRACTS_DIR" <<'PY'
 import subprocess
 import sys
 from pathlib import Path
 
-contract, key, root = sys.argv[1:]
+contract, key, root, core, clients, vault, node, contracts = sys.argv[1:]
 text = Path(contract).read_text(encoding="utf-8").splitlines()
 
 current = None
@@ -46,7 +57,7 @@ if key not in items:
     sys.exit(2)
 
 item = items[key]
-required = ["image", "local_tag", "dockerfile", "context"]
+required = ["image", "local_tag", "dockerfile", "context_repository", "context"]
 missing = [field for field in required if not item.get(field)]
 if missing:
     print(f"Image {key} is missing fields: {', '.join(missing)}", file=sys.stderr)
@@ -58,7 +69,28 @@ if item["dockerfile"].startswith("generated-by-"):
 
 root_path = Path(root)
 dockerfile = root_path / item["dockerfile"]
-context = root_path / item["context"]
+repository_roots = {
+    "deploy": root_path,
+    "core": Path(core),
+    "clients": Path(clients),
+    "vault": Path(vault),
+    "node": Path(node),
+    "contracts": Path(contracts),
+}
+context_repository = item["context_repository"]
+if context_repository == "generated":
+    print(
+        f"Image {key} requires its dedicated orchestration builder.",
+        file=sys.stderr,
+    )
+    sys.exit(3)
+if context_repository not in repository_roots:
+    print(
+        f"Image {key} has an unknown context repository: {context_repository}",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+context = repository_roots[context_repository] / item["context"]
 if not dockerfile.is_file():
     print(f"Dockerfile not found: {dockerfile}", file=sys.stderr)
     sys.exit(4)

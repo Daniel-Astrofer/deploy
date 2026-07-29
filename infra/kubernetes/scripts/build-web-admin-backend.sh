@@ -8,7 +8,7 @@ source "$SCRIPT_DIR/backend-common.sh"
 source "$SCRIPT_DIR/flutter-common.sh"
 
 BUILD_JAR=1
-FRONTEND_DIR="$REPO_ROOT/frontend"
+FRONTEND_DIR="$CLIENTS_DIR"
 FRONTEND_BUILD_DIR="$FRONTEND_DIR/build/web"
 BACKEND_WEB_ADMIN_BUILD_DIR="$BACKEND_DIR/web-admin-build"
 FRONTEND_LOG_DIR="$FRONTEND_DIR/logs"
@@ -19,7 +19,7 @@ usage() {
 Usage: scripts/build-web-admin-backend.sh [options]
 
 Builds the Flutter web admin for same-origin Tor deployment, copies it into
-backend/kerosene/web-admin-build, and optionally packages the Spring Boot jar.
+the independent Core repository, and optionally packages the Spring Boot jar.
 
 Options:
   --no-jar    Only build/copy the Flutter bundle; do not run Gradle bootJar.

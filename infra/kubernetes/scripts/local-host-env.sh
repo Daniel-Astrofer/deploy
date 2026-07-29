@@ -2,9 +2,8 @@
 # Shared host path / kubeconfig resolution for local Kubernetes scripts.
 # Source this file; do not execute it directly.
 #
-# Template manifests still contain the historical workstation paths under
-# /home/omega. At render/apply time those markers are rewritten to the active
-# host home and repository root (see render-local-full-overlay.sh).
+# Template manifests may contain explicit host/repository markers. At
+# render/apply time those markers are rewritten to the active workspace.
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "local-host-env.sh must be sourced" >&2
@@ -32,12 +31,13 @@ kerosene_load_local_host_env() {
 
   export KEROSENE_REPO_ROOT="$repo_root"
   export KEROSENE_HOST_HOME="${KEROSENE_HOST_HOME:-${HOME:-/home/$(id -un)}}"
-  export KEROSENE_LEGACY_HOST_HOME="${KEROSENE_LEGACY_HOST_HOME:-/home/omega}"
-  export KEROSENE_LEGACY_REPO_ROOT="${KEROSENE_LEGACY_REPO_ROOT:-/home/omega/Kerosene}"
+  export KEROSENE_LEGACY_HOST_HOME="${KEROSENE_LEGACY_HOST_HOME:-__KEROSENE_HOST_HOME__}"
+  export KEROSENE_LEGACY_REPO_ROOT="${KEROSENE_LEGACY_REPO_ROOT:-__KEROSENE_REPO_ROOT__}"
 
-  export KEROSENE_LOCAL_ONION_KEYS_PATH="${KEROSENE_LOCAL_ONION_KEYS_PATH:-$KEROSENE_HOST_HOME/.local/state/kerosene/tor/keys/local-full}"
-  export KEROSENE_LOCAL_POSTGRES_DATA="${KEROSENE_LOCAL_POSTGRES_DATA:-$KEROSENE_REPO_ROOT/.local/postgres-data}"
-  export KEROSENE_LOCAL_BITCOIN_DATA="${KEROSENE_LOCAL_BITCOIN_DATA:-$KEROSENE_REPO_ROOT/.local/bitcoin-data}"
+  export KEROSENE_LOCAL_STATE_ROOT="${KEROSENE_LOCAL_STATE_ROOT:-$KEROSENE_HOST_HOME/.local/state/kerosene}"
+  export KEROSENE_LOCAL_ONION_KEYS_PATH="${KEROSENE_LOCAL_ONION_KEYS_PATH:-$KEROSENE_LOCAL_STATE_ROOT/tor/keys/local-full}"
+  export KEROSENE_LOCAL_POSTGRES_DATA="${KEROSENE_LOCAL_POSTGRES_DATA:-$KEROSENE_LOCAL_STATE_ROOT/postgres-data}"
+  export KEROSENE_LOCAL_BITCOIN_DATA="${KEROSENE_LOCAL_BITCOIN_DATA:-$KEROSENE_LOCAL_STATE_ROOT/bitcoin-data}"
 
   export KEROSENE_KIND_CLUSTER_NAME="${KEROSENE_KIND_CLUSTER_NAME:-kerosene-local}"
   export KEROSENE_KIND_KUBECONFIG="${KEROSENE_KIND_KUBECONFIG:-$KEROSENE_HOST_HOME/.kube/kind-config-${KEROSENE_KIND_CLUSTER_NAME}}"
@@ -68,11 +68,12 @@ kerosene_prepare_local_host_paths() {
 }
 
 kerosene_rewrite_legacy_host_paths() {
-  # Rewrite historical /home/omega markers inside a text file in-place.
+  # Rewrite explicit workspace markers inside a text file in-place.
   local file="$1"
   local content
   content="$(<"$file")"
   content="${content//$KEROSENE_LEGACY_REPO_ROOT/$KEROSENE_REPO_ROOT}"
   content="${content//$KEROSENE_LEGACY_HOST_HOME/$KEROSENE_HOST_HOME}"
+  content="${content//__KEROSENE_LOCAL_STATE_ROOT__/$KEROSENE_LOCAL_STATE_ROOT}"
   printf '%s' "$content" >"$file"
 }

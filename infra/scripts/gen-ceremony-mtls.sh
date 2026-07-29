@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Infra wrapper → vault ceremony CA (unique SPIFFE + short TTL) + optional audit keys.
-# Lab ≠ mainnet. See backend/kerosene-vault/docs/MTLS_SPIFFE_LAYOUT.md
+# Lab ≠ mainnet. See kerosene-vault/docs/MTLS_SPIFFE_LAYOUT.md
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-VAULT_SCRIPTS="$REPO_ROOT/scripts/vault"
+# shellcheck source=scripts/polyrepo-env.sh
+source "$REPO_ROOT/scripts/polyrepo-env.sh"
+VAULT_SCRIPTS="$VAULT_DIR/scripts"
 
 WITH_AUDIT=1
 while [[ $# -gt 0 ]]; do
@@ -28,4 +30,4 @@ fi
 echo
 echo "Next: source ceremony-certs/audit/env.hint (if audit generated),"
 echo "      mount per-node paths from ceremony-certs/nodes/{id}/,"
-echo "      then VAULT_CEREMONY_MODE=production ./scripts/vault/genesis_ceremony_checklist.sh"
+echo "      then VAULT_CEREMONY_MODE=production $VAULT_SCRIPTS/genesis_ceremony_checklist.sh"

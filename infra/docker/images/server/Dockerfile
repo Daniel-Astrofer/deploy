@@ -29,14 +29,14 @@ COPY gradle.properties ./
 COPY kerosene-contracts kerosene-contracts/
 COPY kerosene-shared kerosene-shared/
 COPY kfe-service kfe-service/
-COPY kerosene-app kerosene-app/
+COPY auth-service auth-service/
 ARG GRADLE_MAX_WORKERS=2
 RUN ./gradlew dependencies --no-daemon --max-workers=${GRADLE_MAX_WORKERS} --quiet || true
 
 # ── Layer 3: Source compilation ───────────────────────────────────────────────
 COPY deploy/docker docker/
 COPY web-admin-build web-admin-build/
-RUN ./gradlew :kerosene-app:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
+RUN ./gradlew :auth-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
 RUN javac docker/Healthcheck.java -d /workspace/healthcheck
 
 # ── Stage 2: Runtime (Distroless — minimal attack surface) ────────────────────
@@ -45,7 +45,7 @@ FROM gcr.io/distroless/java21-debian12:nonroot AS runtime
 WORKDIR /app
 
 # Copy the fat JAR. --chown ensures the nonroot user can read it.
-COPY --chown=65532:65532 --from=builder /workspace/kerosene-app/build/libs/*.jar app.jar
+COPY --chown=65532:65532 --from=builder /workspace/auth-service/build/libs/*.jar app.jar
 COPY --chown=65532:65532 --from=builder /workspace/healthcheck /app/healthcheck
 
 # UID 65532 matches distroless:nonroot — lowest possible privilege.

@@ -51,6 +51,13 @@ echo "127.0.0.1"
 EOF
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-vault-mesh-lab.sh"
 
+cat > "$TMP_DIR/infra/kubernetes/scripts/ensure-local-monitoring.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+chmod +x "$TMP_DIR/infra/kubernetes/scripts/ensure-local-monitoring.sh"
+
 cat > "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail

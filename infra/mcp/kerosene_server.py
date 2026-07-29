@@ -1180,10 +1180,14 @@ def as_bool(value: Any, default: bool = False) -> bool:
     return bool(value)
 
 
-# Lista de múltiplos workspaces/mounts explicitamente autorizados para leitura e escrita
+# Only the configured polyrepo workspace is authorized for file operations.
 ALLOWED_ROOTS = [
-    Path("/home/omega/Kerosene").resolve(),
-    Path("/home/omega/chatgpt-cli").resolve()
+    Path(
+        os.environ.get(
+            "KEROSENE_WORKSPACE_ROOT",
+            str(Path(__file__).resolve().parents[2]),
+        )
+    ).resolve()
 ]
 
 
