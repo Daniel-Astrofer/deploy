@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.macaroon
+**/logs/
+**/data/
+**/secrets/
+!**/examples/secrets/
+.smart_build_state.json
