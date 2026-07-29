@@ -21,7 +21,8 @@ Environments:
   local        Apply the lightweight local overlay.
   local-full   Build/import local images, start vault mesh compose, apply
                local-full (kfe vaultmesh on; mpc-sidecar / HashiCorp vault off).
-  staging      Apply the staging overlay.
+  staging      Apply the self-contained production-trial overlay; immutable
+               images and post-deploy smoke gates are mandatory.
 
 Default local/beta settlement: testnet3 vault-mesh-lab (dealer_lab + static_token).
 Opt-in profiles via KEROSENE_VAULT_MESH_PROFILE:

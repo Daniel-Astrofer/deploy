@@ -10,6 +10,7 @@ Optional:
   KFE_SERVICE_IMAGE=registry/kfe-service@sha256:...
   WEB_PAGE_IMAGE=registry/web-page@sha256:...
   VAULT_IMAGE=registry/vault@sha256:...
+  TOR_IMAGE=registry/tor@sha256:...
 
   KUBECTL=kubectl
   KUSTOMIZE=kustomize
@@ -54,7 +55,7 @@ if ! command -v "$KUBECTL" >/dev/null 2>&1; then
   exit 127
 fi
 
-if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" ]]; then
+if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" || -n "${TOR_IMAGE:-}" ]]; then
   if ! command -v "$KUSTOMIZE_BIN" >/dev/null 2>&1; then
     echo "kustomize not found. It is required when setting images through environment variables." >&2
     echo "Install kustomize or edit the overlay image tags manually and run with no image env vars." >&2
@@ -65,6 +66,16 @@ fi
 if [[ ! -d "$OVERLAY" ]]; then
   echo "Overlay not found: $OVERLAY" >&2
   exit 2
+fi
+
+if [[ "$ENVIRONMENT" == "staging" ]]; then
+  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE VAULT_IMAGE TOR_IMAGE; do
+    image_ref="${!image_var:-}"
+    if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
+      echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
+      exit 2
+    fi
+  done
 fi
 
 TMP_DIR="$(mktemp -d)"
@@ -86,9 +97,16 @@ fi
 if [[ -n "${VAULT_IMAGE:-}" ]]; then
   (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/vault=${VAULT_IMAGE}")
 fi
+if [[ -n "${TOR_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/tor=${TOR_IMAGE}")
+fi
 
 MANIFEST="$TMP_DIR/manifest.yaml"
 "$KUBECTL" kustomize "$WORK_OVERLAY" > "$MANIFEST"
+
+if [[ "$ENVIRONMENT" == "staging" ]]; then
+  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/validate-staging-runtime.sh" "$MANIFEST"
+fi
 
 echo "[*] Validating rendered manifest for namespace $NAMESPACE..."
 "$KUBECTL" apply --dry-run=client -f "$MANIFEST" >/dev/null
@@ -111,29 +129,51 @@ echo "[*] Ensuring namespace exists..."
 
 if [[ "$ENVIRONMENT" == "staging" ]]; then
   echo "[*] Verifying independently provisioned vault secrets..."
-  for required_secret in \
-    server-secrets \
-    kerosene-db-secrets \
-    kerosene-redis-secrets \
-    kerosene-bitcoin-secrets \
-    kerosene-lnd-secrets \
-    kfe-vault-mtls-certs; do
-    "$KUBECTL" -n "$NAMESPACE" get secret "$required_secret" >/dev/null
-  done
+
+  require_secret_keys() {
+    local secret="$1"
+    shift
+    local present_keys
+    present_keys="$(
+      "$KUBECTL" -n "$NAMESPACE" get secret "$secret" \
+        -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'
+    )"
+    local key
+    for key in "$@"; do
+      grep -qx "$key" <<<"$present_keys" || {
+        echo "[!] Secret ${secret} is missing required key ${key}." >&2
+        exit 1
+      }
+    done
+  }
+
+  require_secret_keys server-secrets \
+    jwt-secret password-pepper aes-secret kfe-column-crypto-key \
+    shard-attestation-secret kfe-internal-shared-secret
+  require_secret_keys kerosene-db-secrets \
+    jdbc-url application-user application-password
+  require_secret_keys kerosene-redis-secrets redis-password
+  require_secret_keys kerosene-bitcoin-secrets rpc-user rpc-password
+  require_secret_keys kerosene-lnd-secrets LIGHTNING_LND_MACAROON
+  require_secret_keys kfe-vault-mtls-certs \
+    ca.crt vault-client.crt vault-client.pkcs8.key
+  require_secret_keys staging-smoke-credentials username password
+
+  jdbc_url="$(
+    "$KUBECTL" -n "$NAMESPACE" get secret kerosene-db-secrets \
+      -o jsonpath='{.data.jdbc-url}' | base64 --decode
+  )"
+  if [[ "$jdbc_url" != jdbc:postgresql://kerosene-db-headless:* ]]; then
+    echo "[!] kerosene-db-secrets jdbc-url must target staging-owned kerosene-db-headless." >&2
+    exit 1
+  fi
+
   for vault_id in 1 2 3; do
     data_secret="vault-${vault_id}-secrets"
     cert_secret="vault-${vault_id}-mtls-certs"
-    "$KUBECTL" -n "$NAMESPACE" get secret "$data_secret" >/dev/null
-    "$KUBECTL" -n "$NAMESPACE" get secret "$cert_secret" >/dev/null
-
-    "$KUBECTL" -n "$NAMESPACE" get secret "$data_secret" \
-      -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}' \
-      | grep -qx 'data-passphrase'
-    for required_key in ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key; do
-      "$KUBECTL" -n "$NAMESPACE" get secret "$cert_secret" \
-        -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}' \
-        | grep -qx "$required_key"
-    done
+    require_secret_keys "$data_secret" data-passphrase attestation-root
+    require_secret_keys "$cert_secret" \
+      ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key
   done
 fi
 
@@ -146,6 +186,14 @@ fi
 "$KUBECTL" "${APPLY_ARGS[@]}" -f "$MANIFEST"
 
 echo "[*] Waiting for core workloads..."
+if [[ "$ENVIRONMENT" == "staging" ]]; then
+  echo "[*] Waiting for staging-owned stateful dependencies..."
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-postgres --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-redis --timeout=5m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-bitcoin --timeout=30m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-lnd --timeout=15m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-tor --timeout=10m
+fi
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/server --timeout=10m
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/kfe-service --timeout=10m
 "$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
@@ -154,6 +202,13 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-1 --timeout=10m
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-2 --timeout=10m
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault-3 --timeout=10m
+
+  if [[ "${KEROSENE_SKIP_STAGING_SMOKES:-0}" == "1" ]]; then
+    echo "[!] KEROSENE_SKIP_STAGING_SMOKES=1: post-deploy gates were explicitly skipped." >&2
+  else
+    KUBECTL="$KUBECTL" KEROSENE_STAGING_NAMESPACE="$NAMESPACE" \
+      bash "$SCRIPT_DIR/smoke-staging.sh"
+  fi
 fi
 
 # Local (and any cluster with helm) also keeps Grafana + Prometheus up with the server.

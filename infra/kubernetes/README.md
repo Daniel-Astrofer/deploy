@@ -89,6 +89,16 @@ Validação local-full sem aplicar:
 bash infra/start.sh --dry-run
 ```
 
+Validação do runtime staging autocontido:
+
+```bash
+bash infra/kubernetes/scripts/validate-staging-runtime.sh
+```
+
+O staging possui PostgreSQL, Redis, Bitcoin testnet3, LND e onion próprios.
+Deploys exigem imagens imutáveis e executam os gates de login e prontidão do
+quorum. Consulte `docs/ops/STAGING_DEPLOY.md`.
+
 Compatibilidade legada:
 
 ```bash

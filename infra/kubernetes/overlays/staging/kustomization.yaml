@@ -10,6 +10,8 @@ resources:
   - vault-services.yaml
   - vault-network-policy.yaml
   - vault-prerequisites.yaml
+  - staging-runtime.yaml
+  - staging-onion.yaml
 labels:
   - pairs:
       app.kubernetes.io/environment: staging
@@ -21,6 +23,8 @@ images:
   - name: kerosene/web-page
     newTag: staging
   - name: kerosene/vault
+    newTag: staging
+  - name: kerosene/tor
     newTag: staging
 patches:
   - path: patch-staging.yaml
