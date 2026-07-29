@@ -10,6 +10,11 @@ permissions:
   pull-requests: read
 
 jobs:
+  compatibility:
+    uses: Daniel-Astrofer/.github/.github/workflows/compatibility-ci.yml@13ca0b7eb3992aab286019e398f1fc7dbaee8f8a
+    with:
+      component: deploy
+
   architecture:
     runs-on: ubuntu-latest
     steps:
