@@ -23,6 +23,9 @@ repositório e está bloqueada pelos gates descritos em
   - `kerosene-bitcoin-secrets`;
   - `kerosene-lnd-secrets`.
   - `staging-smoke-credentials`, com um usuário sintético já cadastrado.
+  - `kerosene-node-genesis`, com `genesis-trust-bundle.json`;
+  - `kerosene-node-identity`, com `identity.key` e `member-id`;
+  - `kerosene-node-mtls`, com a CA, folha servidor e identidade cliente.
 
 O script de deploy não cria nem imprime esses valores.
 
@@ -71,6 +74,7 @@ SERVER_IMAGE=registry/kerosene-server@sha256:... \
 KFE_SERVICE_IMAGE=registry/kerosene-kfe@sha256:... \
 WEB_PAGE_IMAGE=registry/kerosene-web@sha256:... \
 VAULT_IMAGE=registry/kerosene-vault@sha256:... \
+NODE_IMAGE=registry/kerosene-node@sha256:... \
 TOR_IMAGE=registry/kerosene-tor@sha256:... \
   infra/kubernetes/scripts/deploy.sh staging --dry-run
 ```
@@ -87,6 +91,7 @@ SERVER_IMAGE=registry/kerosene-server@sha256:... \
 KFE_SERVICE_IMAGE=registry/kerosene-kfe@sha256:... \
 WEB_PAGE_IMAGE=registry/kerosene-web@sha256:... \
 VAULT_IMAGE=registry/kerosene-vault@sha256:... \
+NODE_IMAGE=registry/kerosene-node@sha256:... \
 TOR_IMAGE=registry/kerosene-tor@sha256:... \
   infra/kubernetes/scripts/deploy.sh staging
 ```
@@ -110,8 +115,10 @@ um deploy normal nunca deve usá-lo.
 
 ## Onion
 
-`staging-tor` publica `web-page:8080` como hidden service e mantém a identidade
-no PVC `data-staging-tor-0`. Consulte o hostname sem exportar a chave:
+`staging-tor` publica `web-page:8080` e o Bank-plane Kerosene Node em `8800`
+como hidden services no mesmo onion. O Node não contém chaves FROST nem
+credenciais Bitcoin/LND. A identidade onion permanece no PVC
+`data-staging-tor-0`. Consulte o hostname sem exportar a chave:
 
 ```bash
 kubectl -n kerosene-staging exec staging-tor-0 -- \
@@ -119,6 +126,31 @@ kubectl -n kerosene-staging exec staging-tor-0 -- \
 ```
 
 O snapshot do PVC é parte obrigatória do plano de recuperação.
+
+## Cerimônia do Kerosene Node e primeiro Vault
+
+Antes do deploy, gere a identidade persistente de cada Node com o utilitário
+`kerosene-node-keygen`. Use o `member_id` e a chave pública emitidos para montar
+o `GenesisTrustBundleV1`; então provisione exatamente a mesma `identity.key`.
+Uma identidade aleatória criada no rollout não seria aceita pelo bundle.
+
+O primeiro `staging-vault` inicia isolado, com seu Vault-plane Node e sem
+manifesto. O Vault fica localmente utilizável, mas sem quorum financeiro.
+Depois que Tor materializar o hostname:
+
+1. emita/rotacione a folha TLS do Node com SAN para o onion e, no namespace do
+   Vault, para `tor.kerosene-staging-vault.svc`;
+2. publique no Node um `MembershipManifestV1` assinado com endpoint
+   `https://<onion>:8800`;
+3. reinicie o Vault para ele carregar o snapshot verificado de peers;
+4. configure `vault-discovery` com URLs `https://<mesmo-onion>:7801`;
+5. configure `vault-node-directory.node-url` com
+   `https://<mesmo-onion>:8800`;
+6. habilite KFE/Vault mesh somente depois do roster assinado e do quorum.
+
+Os endpoints de bootstrap são dicas de roteamento, não autorização. Novos
+Vaults entram pelo fluxo OLD → JOINT → NEW do manifesto. O deploy nunca cria
+shares, nunca promove um Vault sozinho a quorum e nunca ativa um signer.
 
 ## Rollback e recuperação
 

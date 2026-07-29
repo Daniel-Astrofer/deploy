@@ -34,6 +34,14 @@ images:
       Vault mesh node (Rust). Lab uses ATTESTATION_MODE=sim; production builds
       must refuse sim (KEROSENE_VAULT_REFUSE_SIM / feature production).
 
+  kerosene-node:
+    image: kerosene/node
+    local_tag: local
+    dockerfile: infra/docker/images/kerosene-node/Dockerfile
+    context_repository: node
+    context: .
+    owner: discovery
+
   tor:
     image: kerosene/tor
     local_tag: local

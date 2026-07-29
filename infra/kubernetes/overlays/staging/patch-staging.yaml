@@ -12,6 +12,10 @@ spec:
             secretName: kfe-vault-mtls-certs
             optional: true
             defaultMode: 0400
+        - name: node-mtls-client
+          secret:
+            secretName: kerosene-node-mtls
+            defaultMode: 0440
       containers:
         - name: kfe-service
           env:
@@ -57,6 +61,30 @@ spec:
               value: "true"
             - name: KFE_VAULTMESH_DAY_ROTATION_ENABLED
               value: "false"
+            - name: KFE_KEROSENE_NODE_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-node-directory
+                  key: enabled
+            - name: KFE_KEROSENE_NODE_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: vault-node-directory
+                  key: node-url
+            - name: KFE_KEROSENE_NODE_NETWORK_ID
+              value: kerosene-staging
+            - name: KFE_KEROSENE_NODE_TRANSPORT
+              value: tor
+            - name: KFE_KEROSENE_NODE_SOCKS_HOST
+              value: tor-onion
+            - name: KFE_KEROSENE_NODE_SOCKS_PORT
+              value: "9050"
+            - name: KFE_KEROSENE_NODE_TLS_CERT_PATH
+              value: /etc/kerosene/node-mtls/client.crt
+            - name: KFE_KEROSENE_NODE_TLS_KEY_PATH
+              value: /etc/kerosene/node-mtls/client.pkcs8.key
+            - name: KFE_KEROSENE_NODE_TLS_CA_PATH
+              value: /etc/kerosene/node-mtls/ca.crt
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -75,6 +103,9 @@ spec:
           volumeMounts:
             - name: vault-mtls-client
               mountPath: /etc/kerosene/vault-mtls
+              readOnly: true
+            - name: node-mtls-client
+              mountPath: /etc/kerosene/node-mtls
               readOnly: true
           resources:
             requests:

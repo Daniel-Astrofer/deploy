@@ -46,12 +46,23 @@ done
 
 require '(value: testnet3|BITCOIN_NETWORK: testnet3)' "Bitcoin network is not testnet3"
 require 'HiddenServicePort 80 web-page:8080' "staging onion does not publish the web gateway"
+require 'HiddenServicePort 8800 127.0.0.1:8800' "Bank-plane Node is not onion-published"
 require '^  name: kerosene-staging$' "staging namespace is missing"
+require 'image: kerosene/node:staging' "Kerosene Node image is missing"
+require 'name: KEROSENE_DISCOVERY_PLANE' "Node discovery plane is not configured"
+require 'value: bank' "Core Node is not bound to the Bank plane"
+require 'name: KEROSENE_NODE_ONION_HOSTNAME_PATH' "Node does not consume the Tor hostname"
 require 'name: KFE_VAULTMESH_TRANSPORT' "KFE Vault transport mode is missing"
+require 'name: KFE_KEROSENE_NODE_TRANSPORT' "KFE Node transport mode is missing"
 require 'value: tor' "Tor-only transport is not enabled"
 
 if grep -Eq 'KFE_VAULTMESH_(BASE_URL|URLS).*(vault-[123]|\\.svc)|https://vault-[123]:' "$manifest"; then
   echo "[!] Staging Core contains a clearnet Kubernetes Vault endpoint." >&2
+  exit 1
+fi
+
+if grep -Eq 'KFE_KEROSENE_NODE_BASE_URL.*(vault-[123]|\\.svc)|https://vault-[123]:' "$manifest"; then
+  echo "[!] Staging Core contains a clearnet Kubernetes Node endpoint." >&2
   exit 1
 fi
 

@@ -8,6 +8,7 @@ data:
     HiddenServiceDir /var/lib/tor/kerosene_service/
     HiddenServiceVersion 3
     HiddenServicePort 80 web-page:8080
+    HiddenServicePort 8800 127.0.0.1:8800
     Log notice stdout
     DataDirectory /var/lib/tor
 ---
@@ -74,10 +75,102 @@ spec:
               readOnly: true
             - name: data
               mountPath: /var/lib/tor
+        - name: kerosene-node
+          image: kerosene/node:staging
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: KEROSENE_NETWORK_ID
+              value: kerosene-staging
+            - name: KEROSENE_DISCOVERY_PLANE
+              value: bank
+            - name: KEROSENE_NODE_LISTEN_ADDR
+              value: 0.0.0.0:8800
+            - name: KEROSENE_NODE_ONION_HOSTNAME_PATH
+              value: /var/lib/tor/kerosene_service/hostname
+            - name: KEROSENE_NODE_ONION_PORT
+              value: "8800"
+            - name: KEROSENE_IDENTITY_KEY_PATH
+              value: /etc/kerosene/node-identity/identity.key
+            - name: KEROSENE_PEER_STORE
+              value: /var/lib/tor/kerosene-node-bank/peer-store
+            - name: KEROSENE_GENESIS_TRUST_BUNDLE
+              value: /etc/kerosene/node-genesis/genesis-trust-bundle.json
+            - name: KEROSENE_TLS_CERT_PATH
+              value: /etc/kerosene/node-mtls/server.crt
+            - name: KEROSENE_TLS_KEY_PATH
+              value: /etc/kerosene/node-mtls/server.key
+            - name: KEROSENE_TLS_CLIENT_CA_PATH
+              value: /etc/kerosene/node-mtls/ca.crt
+            - name: KEROSENE_TLS_CLIENT_IDENTITY_PEM
+              value: /etc/kerosene/node-mtls/client-identity.pem
+            - name: KEROSENE_TOR_SOCKS_PROXY
+              value: socks5h://127.0.0.1:9050
+            - name: KEROSENE_GENESIS_ENDPOINTS
+              valueFrom:
+                configMapKeyRef:
+                  name: kerosene-node-bank-bootstrap
+                  key: genesis-endpoints
+            - name: KEROSENE_DISCOVERY_MIRRORS
+              valueFrom:
+                configMapKeyRef:
+                  name: kerosene-node-bank-bootstrap
+                  key: mirrors
+          ports:
+            - name: node-https
+              containerPort: 8800
+          startupProbe:
+            tcpSocket:
+              port: node-https
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            tcpSocket:
+              port: node-https
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: node-https
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/tor
+            - name: node-genesis
+              mountPath: /etc/kerosene/node-genesis
+              readOnly: true
+            - name: node-mtls
+              mountPath: /etc/kerosene/node-mtls
+              readOnly: true
+            - name: node-identity
+              mountPath: /etc/kerosene/node-identity
+              readOnly: true
       volumes:
         - name: config
           configMap:
             name: staging-tor-config
+        - name: node-genesis
+          secret:
+            secretName: kerosene-node-genesis
+            defaultMode: 0440
+        - name: node-mtls
+          secret:
+            secretName: kerosene-node-mtls
+            defaultMode: 0440
+        - name: node-identity
+          secret:
+            secretName: kerosene-node-identity
+            defaultMode: 0440
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -100,6 +193,19 @@ spec:
     - name: socks
       port: 9050
       targetPort: socks
+    - name: node-https
+      port: 8800
+      targetPort: node-https
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kerosene-node-bank-bootstrap
+data:
+  # Bootstrap addresses are routing hints, never membership authority.
+  # Set only signed-roster Bank Node v3 onion endpoints.
+  genesis-endpoints: ""
+  mirrors: ""
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

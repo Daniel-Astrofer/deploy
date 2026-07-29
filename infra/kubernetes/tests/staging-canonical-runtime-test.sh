@@ -29,6 +29,17 @@ grep -A1 'name: VAULT_TRANSPORT' "$vault_manifest" | grep -q 'value: tor' \
   || fail "independent Vault is not Tor-only"
 grep -q 'HiddenServicePort 7801 vault:7801' "$vault_manifest" \
   || fail "Vault onion service is not published through Tor"
+grep -q 'HiddenServicePort 8800 127.0.0.1:8800' "$vault_manifest" \
+  || fail "Vault-plane Node is not published through Tor"
+grep -q 'image: kerosene/node:staging' "$vault_manifest" \
+  || fail "Vault-plane Node image is missing"
+grep -A1 'name: KEROSENE_DISCOVERY_PLANE' "$vault_manifest" | grep -q 'value: vault' \
+  || fail "independent Node is not bound to the Vault plane"
+grep -A1 'name: VAULT_KEROSENE_NODE_URL' "$vault_manifest" \
+  | grep -q 'https://tor.kerosene-staging-vault.svc:8800' \
+  || fail "Vault does not use its local mTLS Node directory"
+grep -q 'secretName: kerosene-node-identity' "$vault_manifest" \
+  || fail "Vault-plane Node identity is not independently provisioned"
 if grep -Eq 'value: clearnet|https://vault-[123]:' "$vault_manifest"; then
   fail "independent Vault manifest contains a clearnet mesh route"
 fi
