@@ -238,7 +238,10 @@ build_kubernetes_web_bundle() {
   info "Building Flutter web bundle for Kubernetes web-page same-origin routing."
   (
     cd "$frontend_dir"
-    FLUTTER_BUILD_ARGS=(web --release --csp --no-web-resources-cdn --target lib/web_main.dart)
+    # Phosphor icons are selected dynamically. Flutter cannot prove those
+    # IconData instances are constant, so production web builds must retain the
+    # icon font instead of failing during tree shaking.
+    FLUTTER_BUILD_ARGS=(web --release --csp --no-web-resources-cdn --no-tree-shake-icons --target lib/web_main.dart)
     if [[ "${FLUTTER_BUILD_NO_PUB:-0}" == "1" ]]; then
       FLUTTER_BUILD_ARGS+=(--no-pub)
     fi

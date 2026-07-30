@@ -44,3 +44,19 @@ TOR_IMAGE=registry.example/tor@sha256:... \
 operations overlay, immutable images, external audit/recovery evidence and an
 approved change identifier. This public repository never manufactures secrets
 or activates Vault signers.
+
+Every production gate document must conform to
+`infra/production/evidence.schema.json`. The referenced report is checked by
+SHA-256 and its Sigstore bundle is verified against an explicitly trusted
+certificate identity and OIDC issuer. Evidence must be current and carry two
+distinct operator approvals. Configure the trust policy at runtime:
+
+```bash
+export KEROSENE_EVIDENCE_CERTIFICATE_IDENTITY_REGEXP='^release-security@example\.com$'
+export KEROSENE_EVIDENCE_OIDC_ISSUER_REGEXP='^https://token\.actions\.githubusercontent\.com$'
+```
+
+Production requires immutable digest references for `SERVER_IMAGE`,
+`KFE_SERVICE_IMAGE`, `WEB_PAGE_IMAGE`, `VAULT_IMAGE`, `NODE_IMAGE` and
+`TOR_IMAGE`. Missing, expired, unsigned or failed evidence blocks deployment
+before the private manifest is sent to Kubernetes.

@@ -113,6 +113,9 @@ fi
 if [[ "\${1:-}" == "-n" && "\${3:-}" == "delete" ]]; then
   exit 0
 fi
+if [[ "\${1:-}" == "-n" && "\${3:-}" == "patch" ]]; then
+  exit 0
+fi
 if [[ "\${1:-}" == "-n" && "\${2:-}" == "kerosene-local" && "\${3:-}" == "get" ]]; then
   if [[ "\${4:-}" == "deploy/tor-onion" ]]; then
     exit 1

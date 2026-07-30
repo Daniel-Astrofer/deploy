@@ -98,9 +98,34 @@ render_overlay() {
       KEROSENE_LOCAL_ONION_KEYS_PATH="$KEROSENE_LOCAL_ONION_KEYS_PATH" \
       KEROSENE_LOCAL_POSTGRES_DATA="$KEROSENE_LOCAL_POSTGRES_DATA" \
       KEROSENE_LOCAL_BITCOIN_DATA="$KEROSENE_LOCAL_BITCOIN_DATA" \
+      KEROSENE_LOCAL_LND_DATA="$KEROSENE_LOCAL_LND_DATA" \
+      KEROSENE_LOCAL_LND_PEER_DATA="$KEROSENE_LOCAL_LND_PEER_DATA" \
       bash "$SCRIPT_DIR/render-local-full-overlay.sh"
   )"
   echo "[*] Rendered local-full overlay with host paths under $KEROSENE_HOST_HOME"
+}
+
+adopt_existing_pv_host_path() {
+  local pv="$1"
+  local variable="$2"
+  local path
+  path="$(kubectl_cmd get pv "$pv" -o jsonpath='{.spec.hostPath.path}' 2>/dev/null || true)"
+  [[ -n "$path" ]] || return 0
+  if [[ "$path" != /* || "$path" == *$'\n'* ]]; then
+    echo "[!] Existing PV $pv has an invalid hostPath; refusing to render." >&2
+    exit 1
+  fi
+  printf -v "$variable" '%s' "$path"
+  export "$variable"
+  echo "[*] Preserving existing PV $pv hostPath: $path"
+}
+
+adopt_existing_pv_host_paths() {
+  adopt_existing_pv_host_path local-postgres-data KEROSENE_LOCAL_POSTGRES_DATA
+  adopt_existing_pv_host_path local-bitcoin-data KEROSENE_LOCAL_BITCOIN_DATA
+  adopt_existing_pv_host_path local-lnd-data KEROSENE_LOCAL_LND_DATA
+  adopt_existing_pv_host_path local-lnd-peer-data KEROSENE_LOCAL_LND_PEER_DATA
+  adopt_existing_pv_host_path kerosene-local-tor-onion-keys KEROSENE_LOCAL_ONION_KEYS_PATH
 }
 
 record_local_image_id() {
@@ -139,6 +164,23 @@ record_tor_config_hash() {
   kubectl_cmd -n "$NS" patch deployment/tor-onion --type merge -p "$payload" >/dev/null
 }
 
+record_runtime_config_hash() {
+  local config_hash hash_root payload
+  hash_root="$RENDER_ROOT/kubernetes"
+  [[ -d "$hash_root" ]] || hash_root="$WORK_OVERLAY"
+  config_hash="$(
+    find "$hash_root" -type f -print0 \
+      | sort -z \
+      | xargs -0 sha256sum \
+      | sha256sum \
+      | awk '{print $1}'
+  )"
+  payload="$(printf '{"spec":{"template":{"metadata":{"annotations":{"kerosene.io/local-config-hash":"%s"}}}}}' "$config_hash")"
+  echo "[*] Recording rendered runtime config hash"
+  kubectl_cmd -n "$NS" patch deployment/server deployment/kfe-service \
+    --type merge -p "$payload" >/dev/null
+}
+
 record_imported_local_image_ids() {
   record_local_image_id deployment/server localhost:5000/kerosene/server:local
   record_local_image_id deployment/kfe-service localhost:5000/kerosene/kfe-service:local
@@ -154,6 +196,10 @@ cleanup_stale_local_full_resources() {
   kubectl_cmd -n "$NS" delete sa/mpc-sidecar pdb/mpc-sidecar networkpolicy/mpc-sidecar-network --ignore-not-found >/dev/null
   kubectl_cmd -n "$NS" delete deployment/local-vault --ignore-not-found >/dev/null
   kubectl_cmd -n "$NS" delete secret/kerosene-mpc-secrets --ignore-not-found >/dev/null
+  # Removed legacy clear-net LND ingress. Local-full is reachable through Tor
+  # only; deleting the Service does not delete LND data or workloads.
+  kubectl_cmd -n "$NS" delete svc/kerosene-lnd-p2p --ignore-not-found >/dev/null
+  kubectl_cmd -n "$NS" delete networkpolicy/local-full-allow-lnd-p2p-ingress --ignore-not-found >/dev/null
 }
 
 ensure_vault_mesh_lab() {
@@ -231,8 +277,9 @@ done
 ensure_local_host_services
 bash "$SCRIPT_DIR/validate-local-full.sh"
 ensure_vault_mesh_lab
-render_overlay
 require_cluster_access
+adopt_existing_pv_host_paths
+render_overlay
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[*] Server-side dry-run for local-full overlay"
@@ -368,6 +415,7 @@ echo "[*] Applying local-full overlay"
 kubectl_cmd apply -k "$WORK_OVERLAY"
 cleanup_stale_local_full_resources
 record_tor_config_hash
+record_runtime_config_hash
 
 if [[ "$IMAGE_IMPORT_SUCCEEDED" -eq 1 ]]; then
   echo "[*] Recording imported local image ids for Kubernetes rollout detection"

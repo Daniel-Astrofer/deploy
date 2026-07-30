@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kerosene.invalid/schemas/production-evidence-v1.json",
+  "title": "Kerosene production gate evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "environment",
+    "gate",
+    "status",
+    "issued_at",
+    "expires_at",
+    "artifact",
+    "cosign_bundle",
+    "approvals"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "environment": { "const": "production" },
+    "gate": {
+      "enum": [
+        "independent-audit",
+        "penetration-test",
+        "recovery-exercise",
+        "membership-ceremony",
+        "release-verification"
+      ]
+    },
+    "status": { "const": "passed" },
+    "issued_at": { "type": "string", "format": "date-time" },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "cosign_bundle": { "type": "string", "minLength": 1 },
+    "approvals": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["identity", "role", "approved_at"],
+        "properties": {
+          "identity": { "type": "string", "minLength": 1 },
+          "role": { "type": "string", "minLength": 1 },
+          "approved_at": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  }
+}

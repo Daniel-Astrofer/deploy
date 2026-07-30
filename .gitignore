@@ -11,3 +11,4 @@
 **/secrets/
 !**/examples/secrets/
 .smart_build_state.json
+infra/kubernetes/overlays/local-full/local-dev-secrets.yaml

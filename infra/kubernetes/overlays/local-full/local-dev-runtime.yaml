@@ -15,7 +15,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: kerosene-local
   hostPath:
-    path: __KEROSENE_LOCAL_STATE_ROOT__/postgres-data
+    path: __KEROSENE_LOCAL_POSTGRES_DATA__
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -247,7 +247,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: kerosene-local
   hostPath:
-    path: __KEROSENE_LOCAL_STATE_ROOT__/bitcoin-data
+    path: __KEROSENE_LOCAL_BITCOIN_DATA__
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -305,6 +305,23 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: fix-bitcoin-data-permissions
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "chown -R 1000:1000 /data"]
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - name: bitcoin-data
+              mountPath: /data
       containers:
         - name: bitcoind
           image: bitcoin/bitcoin:28.0
@@ -456,7 +473,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: kerosene-local
   hostPath:
-    path: __KEROSENE_LOCAL_STATE_ROOT__/lnd-data
+    path: __KEROSENE_LOCAL_LND_DATA__
     type: DirectoryOrCreate
 ---
 apiVersion: v1

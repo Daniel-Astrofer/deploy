@@ -59,7 +59,7 @@ else
 fi
 (
   cd "$FRONTEND_DIR"
-  FLUTTER_BUILD_ARGS=(web --release --csp --no-web-resources-cdn --target lib/web_main.dart)
+  FLUTTER_BUILD_ARGS=(web --release --csp --no-web-resources-cdn --no-tree-shake-icons --target lib/web_main.dart)
   if [[ "${FLUTTER_BUILD_NO_PUB:-0}" == "1" ]]; then
     FLUTTER_BUILD_ARGS+=(--no-pub)
   fi
