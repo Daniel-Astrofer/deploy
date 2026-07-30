@@ -44,6 +44,14 @@ chmod +x "$TMP_DIR/infra/kubernetes/scripts/validate-local-full.sh"
 cat > "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ -n "\${RENDER_ENV_LOG:-}" ]]; then
+  printf '%s\n' \
+    "\$KEROSENE_LOCAL_POSTGRES_DATA" \
+    "\$KEROSENE_LOCAL_BITCOIN_DATA" \
+    "\$KEROSENE_LOCAL_LND_DATA" \
+    "\$KEROSENE_LOCAL_LND_PEER_DATA" \
+    "\$KEROSENE_LOCAL_ONION_KEYS_PATH" > "\$RENDER_ENV_LOG"
+fi
 echo "$TMP_DIR/infra/kubernetes/overlays/local-full"
 EOF
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/render-local-full-overlay.sh"
@@ -138,6 +146,17 @@ case "${1:-}" in
       # Namespace not yet present on first dry-run.
       exit 1
     fi
+    if [[ "${2:-}" == "pv" ]]; then
+      case "${3:-}" in
+        local-postgres-data) printf /legacy/postgres-data ;;
+        local-bitcoin-data) printf /legacy/bitcoin-data ;;
+        local-lnd-data) printf /legacy/lnd-data ;;
+        local-lnd-peer-data) printf /legacy/lnd-peer-data ;;
+        kerosene-local-tor-onion-keys) printf /current/tor/keys ;;
+        *) exit 1 ;;
+      esac
+      exit 0
+    fi
     ;;
   create)
     if [[ "${2:-}" == "namespace" ]]; then
@@ -156,16 +175,27 @@ EOF
 chmod +x "$TMP_DIR/bin/kubectl"
 
 CALL_LOG="$TMP_DIR/kubectl-default.log"
+RENDER_ENV_LOG="$TMP_DIR/render-env.log"
 : > "$CALL_LOG"
 output="$(
   KEROSENE_HOST_HOME="$TMP_DIR/with-kube-home" \
   PATH="$TMP_DIR/bin:$PATH" \
   CALL_LOG="$CALL_LOG" \
+  RENDER_ENV_LOG="$RENDER_ENV_LOG" \
   KUBECTL=kubectl \
   "$TMP_DIR/infra/kubernetes/scripts/deploy-local-full.sh" --dry-run 2>&1
 )" || fail "deploy-local-full.sh should use default host kubeconfig"
 assert_contains "$output" "Kubernetes context: fake-context"
 grep -qF -- "--kubeconfig $TMP_DIR/with-kube-home/.kube/config" "$CALL_LOG" \
   || fail "deploy should pass the default host kubeconfig to kubectl"
+cat > "$TMP_DIR/expected-render-env.log" <<'EOF'
+/legacy/postgres-data
+/legacy/bitcoin-data
+/legacy/lnd-data
+/legacy/lnd-peer-data
+/current/tor/keys
+EOF
+cmp "$TMP_DIR/expected-render-env.log" "$RENDER_ENV_LOG" \
+  || fail "deploy should preserve immutable host paths from existing PVs"
 
 echo "[PASS] deploy-local-full.sh cluster preflight"
