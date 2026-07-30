@@ -98,9 +98,34 @@ render_overlay() {
       KEROSENE_LOCAL_ONION_KEYS_PATH="$KEROSENE_LOCAL_ONION_KEYS_PATH" \
       KEROSENE_LOCAL_POSTGRES_DATA="$KEROSENE_LOCAL_POSTGRES_DATA" \
       KEROSENE_LOCAL_BITCOIN_DATA="$KEROSENE_LOCAL_BITCOIN_DATA" \
+      KEROSENE_LOCAL_LND_DATA="$KEROSENE_LOCAL_LND_DATA" \
+      KEROSENE_LOCAL_LND_PEER_DATA="$KEROSENE_LOCAL_LND_PEER_DATA" \
       bash "$SCRIPT_DIR/render-local-full-overlay.sh"
   )"
   echo "[*] Rendered local-full overlay with host paths under $KEROSENE_HOST_HOME"
+}
+
+adopt_existing_pv_host_path() {
+  local pv="$1"
+  local variable="$2"
+  local path
+  path="$(kubectl_cmd get pv "$pv" -o jsonpath='{.spec.hostPath.path}' 2>/dev/null || true)"
+  [[ -n "$path" ]] || return 0
+  if [[ "$path" != /* || "$path" == *$'\n'* ]]; then
+    echo "[!] Existing PV $pv has an invalid hostPath; refusing to render." >&2
+    exit 1
+  fi
+  printf -v "$variable" '%s' "$path"
+  export "$variable"
+  echo "[*] Preserving existing PV $pv hostPath: $path"
+}
+
+adopt_existing_pv_host_paths() {
+  adopt_existing_pv_host_path local-postgres-data KEROSENE_LOCAL_POSTGRES_DATA
+  adopt_existing_pv_host_path local-bitcoin-data KEROSENE_LOCAL_BITCOIN_DATA
+  adopt_existing_pv_host_path local-lnd-data KEROSENE_LOCAL_LND_DATA
+  adopt_existing_pv_host_path local-lnd-peer-data KEROSENE_LOCAL_LND_PEER_DATA
+  adopt_existing_pv_host_path kerosene-local-tor-onion-keys KEROSENE_LOCAL_ONION_KEYS_PATH
 }
 
 record_local_image_id() {
@@ -231,8 +256,9 @@ done
 ensure_local_host_services
 bash "$SCRIPT_DIR/validate-local-full.sh"
 ensure_vault_mesh_lab
-render_overlay
 require_cluster_access
+adopt_existing_pv_host_paths
+render_overlay
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[*] Server-side dry-run for local-full overlay"

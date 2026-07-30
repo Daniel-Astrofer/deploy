@@ -15,7 +15,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: kerosene-local
   hostPath:
-    path: __KEROSENE_LOCAL_STATE_ROOT__/postgres-data
+    path: __KEROSENE_LOCAL_POSTGRES_DATA__
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -247,7 +247,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: kerosene-local
   hostPath:
-    path: __KEROSENE_LOCAL_STATE_ROOT__/bitcoin-data
+    path: __KEROSENE_LOCAL_BITCOIN_DATA__
     type: DirectoryOrCreate
 ---
 apiVersion: v1
@@ -456,7 +456,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: kerosene-local
   hostPath:
-    path: __KEROSENE_LOCAL_STATE_ROOT__/lnd-data
+    path: __KEROSENE_LOCAL_LND_DATA__
     type: DirectoryOrCreate
 ---
 apiVersion: v1

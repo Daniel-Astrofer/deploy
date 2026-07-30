@@ -72,7 +72,7 @@ spec:
   persistentVolumeReclaimPolicy: Retain
   storageClassName: ""
   hostPath:
-    path: __KEROSENE_LOCAL_STATE_ROOT__/tor/keys/local-full
+    path: __KEROSENE_LOCAL_ONION_KEYS_PATH__
     type: DirectoryOrCreate
 ---
 apiVersion: v1
