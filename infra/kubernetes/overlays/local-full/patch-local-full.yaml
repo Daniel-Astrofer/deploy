@@ -200,6 +200,9 @@ data:
   KFE_VAULTMESH_REQUIRE_MTLS: "false"
   KFE_MPC_SIGNING_ENABLED: "false"
   KFE_STANDALONE_MPC_DEV_KEYGEN_ENABLED: "false"
+  # Column crypto key (local-only). Required by KFE StringColumnCryptoService.
+  # In production this comes from a Kubernetes Secret.
+  KFE_COLUMN_CRYPTO_KEY_BASE64: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
   LIGHTNING_LND_ENABLED: "true"
   LIGHTNING_LND_HOST: "kerosene-lnd-headless"
   LIGHTNING_LND_PORT: "10009"

@@ -175,17 +175,15 @@ build_server_image() {
     fail "Server build context not found: $context"
   fi
 
-  # The server Dockerfile embeds the Flutter web-admin bundle from
-  # `kerosene-core/web-admin-build/`. In dev machines, that directory may
-  # be absent until someone runs the Flutter build once.
   if [[ ! -f "$web_admin_build/index.html" ]]; then
-    if [[ -f "$frontend_web_bundle/index.html" ]]; then
-      info "web-admin-build missing; copying Flutter bundle from $frontend_web_bundle"
-      rm -rf -- "$web_admin_build"
-      mkdir -p "$web_admin_build"
-      cp -R "$frontend_web_bundle"/. "$web_admin_build"/
-    else
-      info "web-admin-build missing; building Flutter web admin bundle (no-jar) to $web_admin_build"
+    info "web-admin-build missing; building Flutter web admin bundle to $web_admin_build"
+    bash "$REPO_ROOT/infra/kubernetes/scripts/build-web-admin-backend.sh" --no-jar
+  elif [[ -f "$frontend_web_bundle/.kerosene-bundle-hash" && -f "$web_admin_build/.kerosene-bundle-hash" ]]; then
+    local frontend_hash admin_hash
+    frontend_hash="$(cat "$frontend_web_bundle/.kerosene-bundle-hash")"
+    admin_hash="$(cat "$web_admin_build/.kerosene-bundle-hash")"
+    if [[ "$frontend_hash" != "$admin_hash" ]]; then
+      info "web-admin-build hash mismatch; rebuilding"
       bash "$REPO_ROOT/infra/kubernetes/scripts/build-web-admin-backend.sh" --no-jar
     fi
   fi
@@ -251,6 +249,7 @@ build_kubernetes_web_bundle() {
   )
   rm -f "$web_build/kerosene-runtime-config.json"
   kerosene_chown_sudo_user "$frontend_dir/.dart_tool" "$frontend_dir/build"
+  sha256sum "$web_build/index.html" | awk '{print $1}' > "$web_build/.kerosene-bundle-hash"
 }
 
 build_web_page_image() {
@@ -311,11 +310,7 @@ ensure_local_registry_alias() {
   local source="$1"
   local alias="$2"
 
-  if docker image inspect "$alias" >/dev/null 2>&1; then
-    info "Docker image already exists: $alias"
-    return 0
-  fi
-
+  docker rmi "$alias" 2>/dev/null || true
   info "Tagging $source as $alias"
   docker tag "$source" "$alias"
 }

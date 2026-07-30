@@ -75,11 +75,15 @@ spec:
           command:
             - sh
             - -c
-            - chown -R 70:70 /var/lib/postgresql/data && chmod 700 /var/lib/postgresql/data
+            - chown -R 70:70 /var/lib/postgresql/data 2>/dev/null || true; chmod 700 /var/lib/postgresql/data 2>/dev/null || true
           securityContext:
             runAsNonRoot: false
             runAsUser: 0
             runAsGroup: 0
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN"]
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
@@ -569,6 +573,12 @@ spec:
 
                 sleep 2
               done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 65532
           env:
             - name: BITCOIN_RPC_HOST
               value: bitcoin-core
@@ -710,6 +720,8 @@ spec:
               memory: 1Gi
           securityContext:
             allowPrivilegeEscalation: false
+            # LND writes data under /root/.lnd at runtime; read-only rootfs prevents that.
+            readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
               add: ["NET_BIND_SERVICE", "DAC_OVERRIDE", "CHOWN", "FOWNER"]
