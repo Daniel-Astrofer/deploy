@@ -164,6 +164,23 @@ record_tor_config_hash() {
   kubectl_cmd -n "$NS" patch deployment/tor-onion --type merge -p "$payload" >/dev/null
 }
 
+record_runtime_config_hash() {
+  local config_hash hash_root payload
+  hash_root="$RENDER_ROOT/kubernetes"
+  [[ -d "$hash_root" ]] || hash_root="$WORK_OVERLAY"
+  config_hash="$(
+    find "$hash_root" -type f -print0 \
+      | sort -z \
+      | xargs -0 sha256sum \
+      | sha256sum \
+      | awk '{print $1}'
+  )"
+  payload="$(printf '{"spec":{"template":{"metadata":{"annotations":{"kerosene.io/local-config-hash":"%s"}}}}}' "$config_hash")"
+  echo "[*] Recording rendered runtime config hash"
+  kubectl_cmd -n "$NS" patch deployment/server deployment/kfe-service \
+    --type merge -p "$payload" >/dev/null
+}
+
 record_imported_local_image_ids() {
   record_local_image_id deployment/server localhost:5000/kerosene/server:local
   record_local_image_id deployment/kfe-service localhost:5000/kerosene/kfe-service:local
@@ -398,6 +415,7 @@ echo "[*] Applying local-full overlay"
 kubectl_cmd apply -k "$WORK_OVERLAY"
 cleanup_stale_local_full_resources
 record_tor_config_hash
+record_runtime_config_hash
 
 if [[ "$IMAGE_IMPORT_SUCCEEDED" -eq 1 ]]; then
   echo "[*] Recording imported local image ids for Kubernetes rollout detection"
