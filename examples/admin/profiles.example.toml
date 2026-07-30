@@ -1,0 +1,15 @@
+# Endpoints and credential references only. Never place tokens or private keys here.
+[profiles.local]
+environment = "local"
+core_endpoint = "https://localhost:8443"
+node_endpoint = "https://localhost:9443"
+vault_endpoint = "https://localhost:7801"
+
+[profiles.staging]
+environment = "staging"
+core_endpoint = "https://core-admin.example.onion"
+node_endpoint = "https://node-admin.example.onion"
+vault_endpoint = "https://vault-admin.example.onion"
+ca_file = "/run/credentials/kerosene-ca.pem"
+identity_file = "/run/credentials/operator.pem"
+socks5h = "socks5h://127.0.0.1:9050"

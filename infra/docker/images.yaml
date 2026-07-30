@@ -42,6 +42,28 @@ images:
     context: .
     owner: discovery
 
+  kerosene-rsctl:
+    image: kerosene/rsctl
+    local_tag: local
+    dockerfile: infra/docker/images/kerosene-rsctl/Dockerfile
+    context_repository: node
+    context: .
+    owner: operations
+    notes: >-
+      Ephemeral operator image. It is not installed in Node or Vault service
+      images and carries no credentials.
+
+  kerosene-jctl:
+    image: kerosene/jctl
+    local_tag: local
+    dockerfile: infra/docker/images/kerosene-jctl/Dockerfile
+    context_repository: core
+    context: .
+    owner: operations
+    notes: >-
+      Ephemeral operator image. Credentials are mounted or obtained at runtime,
+      never copied into this image.
+
   tor:
     image: kerosene/tor
     local_tag: local
