@@ -179,6 +179,10 @@ cleanup_stale_local_full_resources() {
   kubectl_cmd -n "$NS" delete sa/mpc-sidecar pdb/mpc-sidecar networkpolicy/mpc-sidecar-network --ignore-not-found >/dev/null
   kubectl_cmd -n "$NS" delete deployment/local-vault --ignore-not-found >/dev/null
   kubectl_cmd -n "$NS" delete secret/kerosene-mpc-secrets --ignore-not-found >/dev/null
+  # Removed legacy clear-net LND ingress. Local-full is reachable through Tor
+  # only; deleting the Service does not delete LND data or workloads.
+  kubectl_cmd -n "$NS" delete svc/kerosene-lnd-p2p --ignore-not-found >/dev/null
+  kubectl_cmd -n "$NS" delete networkpolicy/local-full-allow-lnd-p2p-ingress --ignore-not-found >/dev/null
 }
 
 ensure_vault_mesh_lab() {
