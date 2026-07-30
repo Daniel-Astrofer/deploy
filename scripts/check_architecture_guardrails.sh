@@ -6,6 +6,7 @@ deployment="${repo_root}/infra/kubernetes/base/server/deployment.yaml"
 configmap="${repo_root}/infra/kubernetes/base/server/configmap.yaml"
 images="${repo_root}/infra/docker/images.yaml"
 vault_compose="${repo_root}/infra/docker/compose/vault-mesh-lab.compose.yaml"
+vault_composes=("${repo_root}"/infra/docker/compose/vault-mesh-*.compose.yaml)
 
 test -f "${deployment}"
 test -f "${configmap}"
@@ -33,6 +34,14 @@ if grep -Eq 'mpc-sidecar:|backend/mpc-sidecar' "${images}" "${vault_compose}"; t
 fi
 
 grep -Eq 'kerosene-vault|vault-1' "${vault_compose}"
+
+for compose in "${vault_composes[@]}"; do
+  if grep -q 'dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile' "${compose}"; then
+    echo "Vault Compose still resolves its Dockerfile through the removed monorepo layout: ${compose}"
+    exit 1
+  fi
+done
+grep -q 'KEROSENE_DEPLOY_DIR' "${vault_compose}"
 
 if grep -RInE \
   --exclude-dir=.git \

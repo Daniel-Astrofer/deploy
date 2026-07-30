@@ -59,7 +59,7 @@ services:
   vault-1:
     build:
       context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
-      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ${KEROSENE_DEPLOY_DIR:?set KEROSENE_DEPLOY_DIR}/infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-1-lab
     environment:
       <<: *vault-lab-env
@@ -73,7 +73,7 @@ services:
   vault-2:
     build:
       context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
-      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ${KEROSENE_DEPLOY_DIR:?set KEROSENE_DEPLOY_DIR}/infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-2-lab
     environment:
       <<: *vault-lab-env
@@ -87,7 +87,7 @@ services:
   vault-3:
     build:
       context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
-      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ${KEROSENE_DEPLOY_DIR:?set KEROSENE_DEPLOY_DIR}/infra/docker/images/kerosene-vault/Dockerfile
     container_name: kerosene-vault-3-lab
     environment:
       <<: *vault-lab-env

@@ -50,7 +50,7 @@ services:
   vault-1:
     build:
       context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
-      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ${KEROSENE_DEPLOY_DIR:?set KEROSENE_DEPLOY_DIR}/infra/docker/images/kerosene-vault/Dockerfile
       args:
         CARGO_FEATURES: production
     container_name: kerosene-vault-1-ceremony
@@ -69,7 +69,7 @@ services:
   vault-2:
     build:
       context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
-      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ${KEROSENE_DEPLOY_DIR:?set KEROSENE_DEPLOY_DIR}/infra/docker/images/kerosene-vault/Dockerfile
       args:
         CARGO_FEATURES: production
     container_name: kerosene-vault-2-ceremony
@@ -88,7 +88,7 @@ services:
   vault-3:
     build:
       context: ${KEROSENE_VAULT_DIR:?set KEROSENE_VAULT_DIR}
-      dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile
+      dockerfile: ${KEROSENE_DEPLOY_DIR:?set KEROSENE_DEPLOY_DIR}/infra/docker/images/kerosene-vault/Dockerfile
       args:
         CARGO_FEATURES: production
     container_name: kerosene-vault-3-ceremony
