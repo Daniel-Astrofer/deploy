@@ -169,8 +169,8 @@ data:
   #   api.secret.pepper.secret
   # Stable local key: changing it without re-encrypting existing rows makes
   # StringCryptoConverter reject every existing credential.
-  AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
-  API_SECRET_AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+  AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+  API_SECRET_AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
   API_SECRET_TOKEN_SECRET: "kerosene-local-token-secret"
   API_SECRET_PEPPER_SECRET: "kerosene-local-pepper-secret"
   # OperationalHealthService.checkStorage requires this path to be an
