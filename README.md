@@ -20,3 +20,27 @@ The resolver supports both flat sibling clones and the canonical
 ```bash
 bash scripts/check-polyrepo-workspace.sh
 ```
+
+Start the complete local integration environment with:
+
+```bash
+bash infra/start-complete.sh local
+```
+
+The closest production-like topology deploys Core and the first Vault into
+independent staging namespaces and requires immutable image digests:
+
+```bash
+SERVER_IMAGE=registry.example/server@sha256:... \
+KFE_SERVICE_IMAGE=registry.example/kfe@sha256:... \
+WEB_PAGE_IMAGE=registry.example/web@sha256:... \
+VAULT_IMAGE=registry.example/vault@sha256:... \
+NODE_IMAGE=registry.example/node@sha256:... \
+TOR_IMAGE=registry.example/tor@sha256:... \
+  bash infra/start-complete.sh staging
+```
+
+`infra/start-complete.sh production` is fail-closed. It requires a private
+operations overlay, immutable images, external audit/recovery evidence and an
+approved change identifier. This public repository never manufactures secrets
+or activates Vault signers.
