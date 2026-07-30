@@ -24,6 +24,7 @@ resolve_kerosene_repo() {
 }
 
 KEROSENE_WORKSPACE_ROOT="${KEROSENE_WORKSPACE_ROOT:-$(cd "${REPO_ROOT}/../.." 2>/dev/null && pwd || dirname "${REPO_ROOT}")}"
+KEROSENE_DEPLOY_DIR="${REPO_ROOT}"
 CORE_DIR="$(resolve_kerosene_repo "${KEROSENE_CORE_DIR:-}" services kerosene-core)"
 CLIENTS_DIR="$(resolve_kerosene_repo "${KEROSENE_CLIENTS_DIR:-}" platform kerosene-clients)"
 VAULT_DIR="$(resolve_kerosene_repo "${KEROSENE_VAULT_DIR:-}" services kerosene-vault)"
@@ -40,6 +41,7 @@ BACKEND_DIR="${KEROSENE_BACKEND_DIR:-${CORE_DIR}}"
 FRONTEND_DIR="${KEROSENE_FRONTEND_DIR:-${CLIENTS_DIR}}"
 
 export KEROSENE_WORKSPACE_ROOT CORE_DIR CLIENTS_DIR VAULT_DIR NODE_DIR CONTRACTS_DIR
+export KEROSENE_DEPLOY_DIR
 export KEROSENE_CORE_DIR KEROSENE_CLIENTS_DIR KEROSENE_VAULT_DIR
 export KEROSENE_NODE_DIR KEROSENE_CONTRACTS_DIR
 export BACKEND_DIR FRONTEND_DIR
