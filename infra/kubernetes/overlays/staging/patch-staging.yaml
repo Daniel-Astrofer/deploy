@@ -198,7 +198,7 @@ kind: ConfigMap
 metadata:
   name: kfe-service-config
 data:
-  SPRING_PROFILES_ACTIVE: "staging,kfe"
+  SPRING_PROFILES_ACTIVE: "staging,kfe,dev"
   KEROSENE_RUNTIME_ROLE: "kfe-service"
   BITCOIN_NETWORK: "testnet3"
   REGION: "STAGING"
