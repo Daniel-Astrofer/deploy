@@ -24,7 +24,7 @@ spec:
             - name: KFE_VAULTMESH_ENABLED
               value: "false"
             - name: KFE_VAULTMESH_MESH_ONLY
-              value: "true"
+              value: "false"
             - name: KFE_MPC_SIGNING_ENABLED
               value: "false"
             # Enabled only after authenticated discovery supplies one or more

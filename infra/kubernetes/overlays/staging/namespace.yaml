@@ -6,6 +6,6 @@ metadata:
     app.kubernetes.io/name: kerosene
     app.kubernetes.io/part-of: kerosene
     app.kubernetes.io/environment: staging
-    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

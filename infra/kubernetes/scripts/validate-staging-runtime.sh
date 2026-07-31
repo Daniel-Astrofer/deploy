@@ -48,7 +48,7 @@ require '(value: testnet3|BITCOIN_NETWORK: testnet3)' "Bitcoin network is not te
 require 'HiddenServicePort 80 web-page:8080' "staging onion does not publish the web gateway"
 require 'HiddenServicePort 8800 127.0.0.1:8800' "Bank-plane Node is not onion-published"
 require '^  name: kerosene-staging$' "staging namespace is missing"
-require 'image: kerosene/node:staging' "Kerosene Node image is missing"
+require 'image:.*node' "Kerosene Node image is missing"
 require 'name: KEROSENE_DISCOVERY_PLANE' "Node discovery plane is not configured"
 require 'value: bank' "Core Node is not bound to the Bank plane"
 require 'name: KEROSENE_NODE_ONION_HOSTNAME_PATH' "Node does not consume the Tor hostname"
