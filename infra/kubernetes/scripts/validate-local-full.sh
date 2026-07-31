@@ -122,6 +122,7 @@ require 'KFE_VAULTMESH_BASE_URL: http://vault-1:7701'
 require 'KFE_VAULTMESH_API_TOKEN: kerosene-vault-lab-only'
 require 'KFE_VAULTMESH_DAY_ROTATION_ENABLED: "true"'
 require 'KFE_MPC_SIGNING_ENABLED: "false"'
+require 'API_SECRET_AES_SECRET: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE='
 # Beta testnet: Bitcoin Core is required so financial rails fail closed when down.
 require 'BITCOIN_RPC_REQUIRED: "true"'
 require 'KFE_NETWORK_MONITOR_ENABLED: "true"'

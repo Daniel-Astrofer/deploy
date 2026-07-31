@@ -209,7 +209,6 @@ ensure_vault_mesh_lab() {
   fi
   local profile="${KEROSENE_VAULT_MESH_PROFILE:-lab}"
   echo "[*] Ensuring vault mesh (profile=$profile, testnet3)"
-  # Captures host IP on stdout; progress logs go to stderr from the helper.
   local host_ip
   host_ip="$(
     KEROSENE_VAULT_MESH_PROFILE="$profile" \
@@ -217,6 +216,12 @@ ensure_vault_mesh_lab() {
   )"
   export KEROSENE_VAULT_MESH_HOST_IP="${KEROSENE_VAULT_MESH_HOST_IP:-$host_ip}"
   echo "[*] Vault mesh host bridge: $KEROSENE_VAULT_MESH_HOST_IP"
+  if [[ "$profile" != "tor" ]]; then
+    echo "[*] Running vault mesh health check (all 3 nodes + quorum)"
+    bash "$SCRIPT_DIR/check-vault-mesh-health.sh" || {
+      echo "[!] Vault mesh health check failed (non-fatal; continuing)" >&2
+    }
+  fi
   if [[ "$profile" == "tor" ]]; then
     echo "[!] profile=tor: kfe Endpoints bridge expects clearnet :7701 — Tor mesh does not publish it." >&2
     echo "[!] Use lab (default) for local-full kfe visualize; tor for private mesh / distributed_wire." >&2

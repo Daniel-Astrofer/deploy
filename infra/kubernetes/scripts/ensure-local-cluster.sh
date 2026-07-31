@@ -97,7 +97,7 @@ install_kind_bin() {
 
 write_kind_config() {
   local config_path="$1"
-  cat >"$config_path" <<EOF
+  cat >"$config_path" <<KINDEOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 name: ${KEROSENE_KIND_CLUSTER_NAME}
@@ -108,7 +108,16 @@ nodes:
         containerPath: ${KEROSENE_REPO_ROOT}/.local
       - hostPath: ${KEROSENE_HOST_HOME}/.local/state/kerosene
         containerPath: ${KEROSENE_HOST_HOME}/.local/state/kerosene
-EOF
+KINDEOF
+  local legacy="${KEROSENE_HOST_HOME}/../Kerosene/.local"
+  legacy="$(realpath "$legacy" 2>/dev/null || true)"
+  if [[ -d "$legacy" ]]; then
+    cat >>"$config_path" <<KINDEOF
+      - hostPath: ${legacy}
+        containerPath: ${legacy}
+KINDEOF
+    echo "[*] Also mounting legacy data path: $legacy"
+  fi
 }
 
 create_kind_cluster() {

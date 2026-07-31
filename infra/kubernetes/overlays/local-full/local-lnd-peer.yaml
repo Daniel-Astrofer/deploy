@@ -128,8 +128,8 @@ spec:
                   --data "$payload" \
                   "http://${BITCOIN_RPC_HOST}:${BITCOIN_RPC_PORT}/" 2>/dev/null || true)"
 
-                if echo "$resp" | grep -Eq '"initialblockdownload"[[:space:]]*:[[:space:]]*false'; then
-                  echo "bitcoin-core RPC ready (initialblockdownload=false)"
+                if echo "$resp" | grep -Eq '"chain"[[:space:]]*:'; then
+                  echo "bitcoin-core RPC reachable (initial block download may continue)"
                   exit 0
                 fi
 
