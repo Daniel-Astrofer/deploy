@@ -90,6 +90,13 @@ spec:
                 secretKeyRef:
                   name: server-secrets
                   key: jwt-secret
+            - name: API_SECRET_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: server-secrets
+                  key: jwt-secret
+            - name: KFE_STANDALONE
+              value: "true"
             - name: PASSWORD_PEPPER
               valueFrom:
                 secretKeyRef:
