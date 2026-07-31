@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: bash scripts/check_architecture_guardrails.sh
+      - run: bash infra/scripts/check_architecture_guardrails.sh
 
   smoke:
     runs-on: ubuntu-latest

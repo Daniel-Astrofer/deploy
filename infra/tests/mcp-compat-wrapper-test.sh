@@ -15,14 +15,14 @@ fail() {
   exit 1
 }
 
-for script in scripts/kerosene-mcp scripts/kerosene-readonly-mcp; do
+for script in infra/mcp/kerosene-mcp-wrapper infra/mcp/kerosene-readonly-mcp-wrapper; do
   [[ -x "$REPO_ROOT/$script" ]] || fail "missing executable compatibility wrapper: $script"
 done
 
-mkdir -p "$TMP_DIR/scripts" "$TMP_DIR/infra/mcp"
-cp "$REPO_ROOT/scripts/kerosene-mcp" "$TMP_DIR/scripts/kerosene-mcp"
-cp "$REPO_ROOT/scripts/kerosene-readonly-mcp" "$TMP_DIR/scripts/kerosene-readonly-mcp"
-chmod +x "$TMP_DIR/scripts/kerosene-mcp" "$TMP_DIR/scripts/kerosene-readonly-mcp"
+mkdir -p "$TMP_DIR/infra/mcp"
+cp "$REPO_ROOT/infra/mcp/kerosene-mcp-wrapper" "$TMP_DIR/infra/mcp/kerosene-mcp-wrapper"
+cp "$REPO_ROOT/infra/mcp/kerosene-readonly-mcp-wrapper" "$TMP_DIR/infra/mcp/kerosene-readonly-mcp-wrapper"
+chmod +x "$TMP_DIR/infra/mcp/kerosene-mcp-wrapper" "$TMP_DIR/infra/mcp/kerosene-readonly-mcp-wrapper"
 
 cat > "$TMP_DIR/infra/mcp/kerosene-mcp" <<'EOF'
 #!/usr/bin/env bash
@@ -34,11 +34,11 @@ chmod +x "$TMP_DIR/infra/mcp/kerosene-mcp"
 : > "$LOG_FILE"
 (
   cd "$TMP_DIR"
-  CALL_LOG="$LOG_FILE" sh scripts/kerosene-mcp --help
-  CALL_LOG="$LOG_FILE" sh scripts/kerosene-readonly-mcp --readonly
+  CALL_LOG="$LOG_FILE" sh infra/mcp/kerosene-mcp-wrapper --help
+  CALL_LOG="$LOG_FILE" sh infra/mcp/kerosene-readonly-mcp-wrapper --readonly
 )
 
-grep -qxF "infra-mcp:--help" "$LOG_FILE" || fail "scripts/kerosene-mcp should delegate to infra/mcp/kerosene-mcp"
-grep -qxF "infra-mcp:--readonly" "$LOG_FILE" || fail "scripts/kerosene-readonly-mcp should delegate to infra/mcp/kerosene-mcp"
+grep -qxF "infra-mcp:--help" "$LOG_FILE" || fail "infra/mcp/kerosene-mcp-wrapper should delegate to infra/mcp/kerosene-mcp"
+grep -qxF "infra-mcp:--readonly" "$LOG_FILE" || fail "infra/mcp/kerosene-readonly-mcp-wrapper should delegate to infra/mcp/kerosene-mcp"
 
 echo "[PASS] MCP compatibility wrappers"

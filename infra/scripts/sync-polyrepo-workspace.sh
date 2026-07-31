@@ -2,13 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=scripts/polyrepo-env.sh
-source "$SCRIPT_DIR/polyrepo-env.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=infra/scripts/polyrepo-env.sh
+source "${SCRIPT_DIR}/polyrepo-env.sh"
 
 MODE="${1:---check}"
 if [[ "$MODE" != "--check" && "$MODE" != "--apply" ]]; then
-  echo "Usage: scripts/sync-polyrepo-workspace.sh [--check|--apply]" >&2
+  echo "Usage: infra/scripts/sync-polyrepo-workspace.sh [--check|--apply]" >&2
   exit 2
 fi
 

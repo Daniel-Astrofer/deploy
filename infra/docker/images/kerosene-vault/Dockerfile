@@ -7,6 +7,7 @@ ARG CARGO_FEATURES=
 ENV CARGO_BUILD_JOBS=1
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY crates ./crates
 # Tests run in CI before image construction. The image stage performs one
 # reproducible release build to keep peak memory bounded.
 RUN if [ -n "$CARGO_FEATURES" ]; then \

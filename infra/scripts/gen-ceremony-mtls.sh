@@ -5,8 +5,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-# shellcheck source=scripts/polyrepo-env.sh
-source "$REPO_ROOT/scripts/polyrepo-env.sh"
+# shellcheck source=infra/scripts/polyrepo-env.sh
+source "$REPO_ROOT/infra/scripts/polyrepo-env.sh"
 VAULT_SCRIPTS="$VAULT_DIR/scripts"
 
 WITH_AUDIT=1

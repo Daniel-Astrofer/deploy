@@ -17,7 +17,7 @@ COPY kerosene-contracts kerosene-contracts/
 COPY kerosene-shared kerosene-shared/
 COPY kfe-service kfe-service/
 
-COPY deploy/docker docker/
+COPY docker/healthcheck docker/
 ARG GRADLE_MAX_WORKERS=2
 RUN ./gradlew :kfe-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
 RUN javac docker/Healthcheck.java -d /workspace/healthcheck
