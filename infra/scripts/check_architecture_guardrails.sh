@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 deployment="${repo_root}/infra/kubernetes/base/server/deployment.yaml"
 configmap="${repo_root}/infra/kubernetes/base/server/configmap.yaml"
 images="${repo_root}/infra/docker/images.yaml"
@@ -49,8 +49,7 @@ if grep -RInE \
   --exclude='*.bak' \
   --exclude='check_architecture_guardrails.sh' \
   '(/home/[^/]+/Kerosene|\\$REPO_ROOT/(backend/kerosene(-vault)?|frontend)|\\.\\./\\.\\./\\.\\./backend/kerosene-vault)' \
-  "${repo_root}/infra" \
-  "${repo_root}/scripts"
+  "${repo_root}/infra"
 then
   echo "Deploy contains a forbidden monorepo source path."
   exit 1

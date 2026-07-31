@@ -14,8 +14,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-# shellcheck source=scripts/polyrepo-env.sh
-source "$REPO_ROOT/scripts/polyrepo-env.sh"
+# shellcheck source=infra/scripts/polyrepo-env.sh
+source "$REPO_ROOT/infra/scripts/polyrepo-env.sh"
 
 COMPOSE_FILE="${KEROSENE_VAULT_MESH_COMPOSE_FILE:-$REPO_ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml}"
 PROFILE="${KEROSENE_VAULT_MESH_PROFILE:-lab}"

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-# shellcheck source=scripts/polyrepo-env.sh
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=infra/scripts/polyrepo-env.sh
 source "${SCRIPT_DIR}/polyrepo-env.sh"
 
 require_kerosene_repo core "${CORE_DIR}"

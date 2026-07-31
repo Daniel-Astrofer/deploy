@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-  echo "Source scripts/polyrepo-env.sh from a Deploy script." >&2
+  echo "Source infra/scripts/polyrepo-env.sh from a Deploy script." >&2
   exit 1
 fi
 
-: "${REPO_ROOT:?REPO_ROOT must point to kerosene-deploy before loading polyrepo-env.sh}"
+: "${REPO_ROOT:?REPO_ROOT must point to kerosene-deploy before loading infra/scripts/polyrepo-env.sh}"
 
 resolve_kerosene_repo() {
   local override="$1"

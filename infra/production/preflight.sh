@@ -87,7 +87,7 @@ manifest="$(mktemp)"
 cleanup() { rm -f "$manifest"; }
 trap cleanup EXIT
 kustomize build "$OPS_DIR" > "$manifest"
-bash "$ROOT/scripts/check_architecture_guardrails.sh"
+bash "$ROOT/infra/scripts/check_architecture_guardrails.sh"
 bash "$ROOT/infra/production/validate-manifest.sh" "$manifest"
 kubectl apply --dry-run=client -f "$manifest" >/dev/null
 

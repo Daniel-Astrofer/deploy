@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 REPO_ROOT="$ROOT"
-# shellcheck source=scripts/polyrepo-env.sh
-source "$ROOT/scripts/polyrepo-env.sh"
+# shellcheck source=infra/scripts/polyrepo-env.sh
+source "$ROOT/infra/scripts/polyrepo-env.sh"
 CONTRACT="$ROOT/infra/docker/images.yaml"
 IMAGE_KEY="${1:-}"
 
