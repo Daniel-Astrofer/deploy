@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# LEGACY COMPATIBILITY WRAPPER.
+# The implementation is infra/kubernetes/scripts/deploy.sh.
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
@@ -26,7 +29,7 @@ Environments:
 
 Default local/beta settlement: testnet3 vault-mesh-lab (dealer_lab + static_token).
 Opt-in profiles via KEROSENE_VAULT_MESH_PROFILE:
-  staging  — mTLS mesh (falls back to lab if certs missing)
+  staging  — LEGACY local profile; may fall back to clear-token lab
   tor      — vault-mesh-tor + distributed_wire (no clearnet vault ports)
 
 Production overlays/helpers are kept outside the public repository.

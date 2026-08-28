@@ -29,7 +29,10 @@ mkdir -p "$TMP_DIR/bin" "$TMP_DIR/infra/kubernetes/scripts" "$TMP_DIR/infra/scri
   "$TMP_DIR/infra/docker/images/tor" \
   "$TMP_DIR/infra/runtime/tor" \
   "$TMP_DIR/infra/runtime/web" \
-  "$TMP_DIR/kerosene-core"
+  "$TMP_DIR/kerosene-core" \
+  "$TMP_DIR/kerosene-kfe" \
+  "$TMP_DIR/kerosene-shared" \
+  "$TMP_DIR/kerosene-contracts"
 cp "$SUBJECT" "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
 cp "$REPO_ROOT/infra/kubernetes/scripts/local-host-env.sh" "$TMP_DIR/infra/kubernetes/scripts/local-host-env.sh"
 chmod +x "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh"
@@ -124,6 +127,8 @@ set +e
 noninteractive_output="$(
   PATH="$TMP_DIR/bin:$PATH" CALL_LOG="$LOG_FILE" \
     CORE_DIR="$TMP_DIR/kerosene-core" CLIENTS_DIR="$TMP_DIR/kerosene-clients" \
+    CONTRACTS_DIR="$TMP_DIR/kerosene-contracts" \
+    KFE_DIR="$TMP_DIR/kerosene-kfe" SHARED_DIR="$TMP_DIR/kerosene-shared" \
     "$TMP_DIR/infra/kubernetes/scripts/import-local-docker-images.sh" \
       --skip-kfe-service-build --skip-web-page-build 2>&1
 )"
@@ -149,6 +154,9 @@ env["PATH"] = f"{tmp_dir}/bin:{env['PATH']}"
 env["CALL_LOG"] = log_file
 env["CORE_DIR"] = f"{tmp_dir}/kerosene-core"
 env["CLIENTS_DIR"] = f"{tmp_dir}/kerosene-clients"
+env["CONTRACTS_DIR"] = f"{tmp_dir}/kerosene-contracts"
+env["KFE_DIR"] = f"{tmp_dir}/kerosene-kfe"
+env["SHARED_DIR"] = f"{tmp_dir}/kerosene-shared"
 cmd = [
     f"{tmp_dir}/infra/kubernetes/scripts/import-local-docker-images.sh",
     "--skip-kfe-service-build",

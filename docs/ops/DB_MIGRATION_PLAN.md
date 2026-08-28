@@ -2,7 +2,8 @@
 
 Phased migration adding 20 columns to `financial.transactions_master` and 3 new tables for notification outbox, network observation logging, and idempotency claims.
 
-Flyway migration file: `backend/kerosene/kfe-service/src/main/resources/db/migration/V49__security_audit_hardening.sql`
+Flyway migration file:
+`kerosene-kfe:src/main/resources/db/migration/V49__security_audit_hardening.sql`.
 
 ---
 

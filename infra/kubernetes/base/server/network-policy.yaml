@@ -53,13 +53,6 @@ spec:
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: vault
-      ports:
-        - protocol: TCP
-          port: 8200
-    - to:
-        - podSelector:
-            matchLabels:
               app.kubernetes.io/name: bitcoin-core
       ports:
         - protocol: TCP
@@ -94,13 +87,6 @@ spec:
           port: 6379
         - protocol: TCP
           port: 26379
-    - to:
-        - podSelector:
-            matchLabels:
-              app: kerosene-vault
-      ports:
-        - protocol: TCP
-          port: 8200
     - to:
         - podSelector:
             matchLabels:

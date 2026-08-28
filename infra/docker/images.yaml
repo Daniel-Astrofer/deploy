@@ -1,10 +1,10 @@
 # Kerosene image contract.
 #
-# This file is the canonical inventory for image names, local tags,
-# Dockerfiles and build contexts.
+# This file is Deploy's packaging inventory for image names, local tags,
+# Dockerfiles and external build contexts. It does not define source ownership.
 #
-# dockerfile points to the canonical infra/ path. Legacy duplicates must be removed
-# after active references are migrated.
+# dockerfile points to a Deploy-owned packaging recipe. Service implementation
+# remains in context_repository and must never be copied into this repository.
 
 images:
   server:
@@ -19,7 +19,7 @@ images:
     image: kerosene/kfe-service
     local_tag: local
     dockerfile: infra/docker/images/kfe-service/Dockerfile
-    context_repository: core
+    context_repository: kfe
     context: .
     owner: kfe
 
@@ -57,7 +57,7 @@ images:
     image: kerosene/jctl
     local_tag: local
     dockerfile: infra/docker/images/kerosene-jctl/Dockerfile
-    context_repository: core
+    context_repository: admin
     context: .
     owner: operations
     notes: >-

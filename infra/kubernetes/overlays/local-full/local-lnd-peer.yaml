@@ -418,3 +418,5 @@ spec:
           port: 28332
         - protocol: TCP
           port: 28333
+        - protocol: TCP
+          port: 28334

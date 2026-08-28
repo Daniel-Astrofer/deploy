@@ -30,20 +30,30 @@ CLIENTS_DIR="$(resolve_kerosene_repo "${KEROSENE_CLIENTS_DIR:-}" platform kerose
 VAULT_DIR="$(resolve_kerosene_repo "${KEROSENE_VAULT_DIR:-}" services kerosene-vault)"
 NODE_DIR="$(resolve_kerosene_repo "${KEROSENE_NODE_DIR:-}" services kerosene-node)"
 CONTRACTS_DIR="$(resolve_kerosene_repo "${KEROSENE_CONTRACTS_DIR:-}" platform kerosene-contracts)"
+ADMIN_DIR="$(resolve_kerosene_repo "${KEROSENE_ADMIN_DIR:-}" platform kerosene-admin)"
+RAILS_DIR="$(resolve_kerosene_repo "${KEROSENE_RAILS_DIR:-}" services kerosene-rails)"
+KFE_DIR="$(resolve_kerosene_repo "${KEROSENE_KFE_DIR:-}" services kerosene-kfe)"
+SHARED_DIR="$(resolve_kerosene_repo "${KEROSENE_SHARED_DIR:-}" platform kerosene-shared)"
 KEROSENE_CORE_DIR="${CORE_DIR}"
 KEROSENE_CLIENTS_DIR="${CLIENTS_DIR}"
 KEROSENE_VAULT_DIR="${VAULT_DIR}"
 KEROSENE_NODE_DIR="${NODE_DIR}"
 KEROSENE_CONTRACTS_DIR="${CONTRACTS_DIR}"
+KEROSENE_ADMIN_DIR="${ADMIN_DIR}"
+KEROSENE_RAILS_DIR="${RAILS_DIR}"
+KEROSENE_KFE_DIR="${KFE_DIR}"
+KEROSENE_SHARED_DIR="${SHARED_DIR}"
 
 # Backward-compatible variable names used by existing Deploy helpers.
 BACKEND_DIR="${KEROSENE_BACKEND_DIR:-${CORE_DIR}}"
 FRONTEND_DIR="${KEROSENE_FRONTEND_DIR:-${CLIENTS_DIR}}"
 
-export KEROSENE_WORKSPACE_ROOT CORE_DIR CLIENTS_DIR VAULT_DIR NODE_DIR CONTRACTS_DIR
+export KEROSENE_WORKSPACE_ROOT CORE_DIR CLIENTS_DIR VAULT_DIR NODE_DIR CONTRACTS_DIR ADMIN_DIR RAILS_DIR KFE_DIR SHARED_DIR
 export KEROSENE_DEPLOY_DIR
 export KEROSENE_CORE_DIR KEROSENE_CLIENTS_DIR KEROSENE_VAULT_DIR
 export KEROSENE_NODE_DIR KEROSENE_CONTRACTS_DIR
+export KEROSENE_ADMIN_DIR KEROSENE_RAILS_DIR
+export KEROSENE_KFE_DIR KEROSENE_SHARED_DIR
 export BACKEND_DIR FRONTEND_DIR
 
 require_kerosene_repo() {

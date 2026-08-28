@@ -21,7 +21,7 @@ groups:
           description: >-
             Full-blocks-from-now retention will grow continuously. Expand disk or
             triage prune policy before the node fills and stalls IBD/RPC.
-          runbook: "docs/kfe/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md#node-storage"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md#node-storage"
 
       - alert: BitcoinNodeDiskCritical
         expr: |
@@ -39,4 +39,4 @@ groups:
           description: >-
             Critical free space on Bitcoin datadir. Plan expansion immediately;
             do not re-enable aggressive prune without ops approval.
-          runbook: "docs/kfe/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md#node-storage"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md#node-storage"

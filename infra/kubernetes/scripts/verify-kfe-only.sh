@@ -7,9 +7,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$REPO_ROOT/infra/scripts/polyrepo-env.sh"
 
 AUTH_DIR="$CORE_DIR/auth-service"
-KFE_DIR="$CORE_DIR/kfe-service"
-CORE_CONTRACTS_DIR="$CORE_DIR/kerosene-contracts"
-SHARED_DIR="$CORE_DIR/kerosene-shared"
+CANONICAL_CONTRACTS_DIR="$CONTRACTS_DIR"
 
 fail=0
 TMP="$(mktemp)"
@@ -50,13 +48,13 @@ done
 
 run_grep_check \
   "legacy financial package dependencies must not exist" \
-  -RInE --exclude-dir=.git --exclude-dir=build 'source\.(ledger|payments|wallet|bitcoinaccounts)' $AUTH_DIR/src/main $AUTH_DIR/src/test $KFE_DIR/src/main $KFE_DIR/src/test $CORE_CONTRACTS_DIR/src/main $SHARED_DIR/src/main
+  -RInE --exclude-dir=.git --exclude-dir=build 'source\.(ledger|payments|wallet|bitcoinaccounts)' $AUTH_DIR/src/main $AUTH_DIR/src/test $KFE_DIR/src/main $KFE_DIR/src/test $CANONICAL_CONTRACTS_DIR/src/main $SHARED_DIR/src/main
 
 
 : > "$TMP"
 if grep -RIn --exclude-dir=.git --exclude-dir=build -E 'import (source\.kfe\.|com\.kerosene\.kfe\.)' \
   $AUTH_DIR/src/main/java \
-  $CORE_CONTRACTS_DIR/src/main/java \
+  $CANONICAL_CONTRACTS_DIR/src/main/java \
   $SHARED_DIR/src/main/java \
   2>/dev/null \
   | grep -vE '/(source/kfe|com/kerosene/kfe)/' > "$TMP"; then
@@ -165,7 +163,7 @@ fi
 
 run_grep_check \
   "kerosene-contracts must not depend on implementation packages" \
-  -RInE --exclude-dir=.git --exclude-dir=build 'import (source\.(kfe|auth|notification|security|sovereign)\.|com\.kerosene\.kfe\.|org\.springframework\.|jakarta\.persistence\.|javax\.persistence\.)' $CORE_CONTRACTS_DIR/src/main/java
+  -RInE --exclude-dir=.git --exclude-dir=build 'import (source\.(kfe|auth|notification|security|sovereign)\.|com\.kerosene\.kfe\.|org\.springframework\.|jakarta\.persistence\.|javax\.persistence\.)' $CANONICAL_CONTRACTS_DIR/src/main/java
 
 
 

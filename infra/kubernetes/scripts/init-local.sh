@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-bash infra/scripts/local/init.sh "$@"
+# LEGACY COMPOSE WRAPPER.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+exec bash "$REPO_ROOT/infra/scripts/local/init.sh" "$@"

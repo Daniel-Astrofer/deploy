@@ -20,7 +20,7 @@ redis_password="$(rand_b64 36)"
 lnd_wallet_password="$(rand_b64 32)"
 
 cat <<EOF
-# Paste these into backend/.env (or backend/kerosene/.env), then set domain/xpub/LND-specific values.
+# Store these in the approved secret manager; never commit them to a service checkout.
 # Ops AES loads from AES_SECRET only; treasury custody is vault-mesh (kerosene-vault).
 POSTGRES_PASSWORD=${postgres_password}
 REDIS_PASSWORD=${redis_password}

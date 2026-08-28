@@ -10,7 +10,7 @@ groups:
         annotations:
           summary: "Blockchain confirmation regression detected"
           description: "At least one transfer moved to NEEDS_REVIEW because observed confirmations regressed."
-          runbook: "backend/kerosene/docs/RUNBOOK_FINANCIAL_RECONCILIATION.md"
+          runbook: "docs/en/FINANCIAL_RECONCILIATION_RUNBOOK.md"
 
       - alert: KeroseneFinancialProviderSagaIncomplete
         expr: increase(kerosene_financial_reconciliation_issue_total{type="PROVIDER_SAGA_INCOMPLETE"}[10m]) > 0
@@ -21,7 +21,7 @@ groups:
         annotations:
           summary: "External provider saga requires operator review"
           description: "A provider operation is stale or failed and was moved to NEEDS_REVIEW."
-          runbook: "backend/kerosene/docs/RUNBOOK_FINANCIAL_RECONCILIATION.md"
+          runbook: "docs/en/FINANCIAL_RECONCILIATION_RUNBOOK.md"
 
       - alert: KeroseneFinancialOutboxNotDispatched
         expr: increase(kerosene_financial_reconciliation_issue_total{type="PROVIDER_OUTBOX_NOT_DISPATCHED"}[15m]) > 0
@@ -32,7 +32,7 @@ groups:
         annotations:
           summary: "External provider outbox has undispatched operation"
           description: "A durable outbox record is due but has not reached DISPATCHED."
-          runbook: "backend/kerosene/docs/RUNBOOK_FINANCIAL_RECONCILIATION.md"
+          runbook: "docs/en/FINANCIAL_RECONCILIATION_RUNBOOK.md"
 
       - alert: KeroseneFinancialRejectedValidationSpike
         expr: increase(kerosene_financial_validation_rejected_total[5m]) > 20

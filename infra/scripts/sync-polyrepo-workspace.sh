@@ -12,7 +12,7 @@ if [[ "$MODE" != "--check" && "$MODE" != "--apply" ]]; then
   exit 2
 fi
 
-repositories=("$CORE_DIR" "$CLIENTS_DIR" "$VAULT_DIR" "$NODE_DIR" "$CONTRACTS_DIR" "$REPO_ROOT")
+repositories=("$CORE_DIR" "$CLIENTS_DIR" "$VAULT_DIR" "$NODE_DIR" "$CONTRACTS_DIR" "$ADMIN_DIR" "$RAILS_DIR" "$KFE_DIR" "$SHARED_DIR" "$REPO_ROOT")
 wrong_branch_repos=()
 uncommitted_repos=()
 outdated_repos=()

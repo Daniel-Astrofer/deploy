@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# LEGACY COMPOSE WRAPPER. Do not use in new automation.
 # Legacy local.kfe.compose.yaml (mpc-sidecar shards) was removed.
 # Settlement compose is vault-mesh-lab; KFE runs via local-full / kfe-service image.
 

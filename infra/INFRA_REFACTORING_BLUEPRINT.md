@@ -1,5 +1,10 @@
 # Infra Quorum Local — plano de simplificação
 
+> **Documento histórico.** Este plano registra a simplificação inicial do
+> runtime local e não define a fronteira atual do repositório. Para decisões
+> atuais, consulte `docs/pt-BR/LIMITES-DOS-SERVICOS.md` e
+> `docs/pt-BR/INDICE-DEPLOY.md`.
+
 ## 1. Tese correta
 
 `infra/` não é a infraestrutura final de produção dos serviços da Kerosene.
@@ -158,15 +163,16 @@ infra/
     images/
       server/
       kfe-service/
-      mpc-sidecar/
+      kerosene-vault/
+      kerosene-node/
       web-page/
       tor/
-      vault/
     compose/
-      local.compose.yaml
-      local.kfe.compose.yaml
-      local.limits.compose.yaml
-      hardened.compose.yaml  # (ops-private; not in public tree)
+      vault-mesh-lab.compose.yaml
+      vault-mesh-staging.compose.yaml
+      vault-mesh-tor.compose.yaml
+      vault-mesh-ceremony.compose.yaml
+      local.limits.compose.yaml  # legado; não executável isoladamente
     scripts/
       build-image.sh
 
@@ -209,13 +215,19 @@ O usuário chama `infra/start.sh`. Internamente ele pode chamar `infra/scripts/q
 
 `infra/` não deve conter código real de aplicação.
 
-Código real deve morar fora de `infra/`:
+Código real deve morar nos repositórios proprietários, fora do
+`kerosene-deploy`:
 
 ```text
-backend/             servidor Java Spring
-frontend/            web/app/admin
-mpc-sidecar/         implementação do sidecar, se existir como projeto próprio
-kfe/                 futuro serviço financeiro independente
+kerosene-core/       Auth e gateway público
+kerosene-kfe/        ledger e execução financeira
+kerosene-shared/     utilitários Java neutros
+kerosene-rails/      adapters Bitcoin Core e LND
+kerosene-admin/      clientes administrativos
+kerosene-clients/    web/app/admin
+kerosene-vault/      custódia e assinatura
+kerosene-node/       identidade, discovery e membership
+kerosene-contracts/  schemas e versões de compatibilidade
 ```
 
 Dentro de `infra/` podem existir apenas:
@@ -263,25 +275,17 @@ O Kubernetes em `infra/` deve responder apenas:
 
 > Como eu subo todos os serviços juntos localmente para testar o conjunto?
 
-A estrutura recomendada é uma única área clara:
+A estrutura operacional atual usa overlays explícitos:
 
 ```text
-infra/kubernetes/quorum/
+infra/kubernetes/overlays/local-full/
+infra/kubernetes/overlays/staging/
+infra/kubernetes/overlays/staging-vault/
 ```
 
-Ela deve conter os manifests necessários para o quorum local.
-
-Se no futuro cada serviço tiver seu próprio Kubernetes, a estrutura vira:
-
-```text
-services/server/kubernetes/
-services/kfe/kubernetes/
-services/mpc-sidecar/kubernetes/
-apps/web/kubernetes/
-infra/kubernetes/quorum/
-```
-
-Nesse futuro, `infra/kubernetes/quorum/` apenas junta tudo para teste integrado.
+Os repositórios de serviço publicam imagens e contratos de configuração. O
+`kerosene-deploy` mantém a composição entre esses artefatos e os recursos
+operacionais compartilhados, sem copiar o código dos serviços.
 
 ## 9. Compose neste momento
 

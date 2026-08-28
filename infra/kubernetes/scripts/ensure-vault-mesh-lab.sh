@@ -35,7 +35,7 @@ Environment:
 
 Profiles:
   lab      vault-mesh-lab.compose.yaml — clearnet :7701–7703, dealer_lab (default)
-  staging  vault-mesh-staging.compose.yaml — mTLS if certs exist; else falls back to lab
+  staging  LEGACY local profile — mTLS if certs exist; else clear-token lab fallback
   tor      vault-mesh-tor.compose.yaml — real Tor HS + distributed_wire (no clearnet vault ports)
 USAGE
 }
@@ -56,6 +56,8 @@ case "$PROFILE" in
     COMPOSE_FILE="${KEROSENE_VAULT_MESH_COMPOSE_FILE:-$REPO_ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml}"
     ;;
   staging)
+    echo "[!] LEGACY compatibility profile: staging may fall back to lab clear-token mesh." >&2
+    echo "[!] This path is local-only and is not staging/production readiness evidence." >&2
     COMPOSE_FILE="${KEROSENE_VAULT_MESH_COMPOSE_FILE:-$REPO_ROOT/infra/docker/compose/vault-mesh-staging.compose.yaml}"
     if [[ ! -d "${KEROSENE_VAULT_MESH_CERTS_DIR:-$VAULT_DIR/lab-certs}" ]]; then
       echo "[!] staging mesh profile needs mTLS certs; generating automatically..." >&2

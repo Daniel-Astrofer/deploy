@@ -2,9 +2,9 @@
 # Avoids the standalone Dockerfile's expected repo layout (no root build.gradle.kts/src/deploy).
 #
 # Build (from repo root), after producing app.jar via:
-#   ./gradlew :kfe-service:bootJar -x test
-#   cp kerosene-core/kfe-service/build/libs/*-boot.jar /tmp/kfe-build-ctx/app.jar
-#   cp kerosene-core/docker/healthcheck/Healthcheck.java /tmp/kfe-build-ctx/Healthcheck.java
+#   (cd kerosene-kfe && ./gradlew bootJar -x test)
+#   cp kerosene-kfe/build/libs/*-boot.jar /tmp/kfe-build-ctx/app.jar
+#   cp kerosene-deploy/infra/docker/healthcheck/Healthcheck.java /tmp/kfe-build-ctx/Healthcheck.java
 #   docker build -f infra/docker/images/kfe-service/Dockerfile.localjar \
 #     -t kerosene/kfe-service:local /tmp/kfe-build-ctx
 

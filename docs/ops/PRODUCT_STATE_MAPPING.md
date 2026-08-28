@@ -87,7 +87,7 @@ These are documented for forward compatibility. The `KfeProductStatusMapper` han
 ## 6. Implementation
 
 Java mapping lives at:
-`backend/kerosene/kfe-service/src/main/java/com/kerosene/kfe/dto/KfeProductStatusMapper.java`
+`kerosene-kfe:src/main/java/com/kerosene/kfe/dto/KfeProductStatusMapper.java`
 
 Usage in `KfeResponseMapper`:
 

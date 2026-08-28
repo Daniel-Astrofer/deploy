@@ -58,4 +58,4 @@ curl -fsS -X POST -H "Authorization: Bearer $ADMIN_JWT" \
 echo
 
 echo "OK: smoke requests completed (pay invoice externally; wait for LN PR monitor)."
-echo "Full checklist: docs/kfe/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
+echo "Full checklist: https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"

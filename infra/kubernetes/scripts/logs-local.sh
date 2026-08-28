@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-bash infra/scripts/local/control.sh logs "$@"
+# LEGACY COMPOSE WRAPPER. Canonical local-full entrypoint: infra/logs.sh.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+exec bash "$REPO_ROOT/infra/scripts/local/control.sh" logs "$@"

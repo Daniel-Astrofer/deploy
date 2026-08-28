@@ -71,7 +71,7 @@ if [[ "${VAULT_TOR_AUTH_CLIENTS:-false}" == "true" ]]; then
     echo "==> The torrc must contain: HiddenServiceAuthorizeClient stealth kerosene_service"
   else
     echo "[!] VAULT_TOR_AUTH_CLIENTS=true but no .auth files found." >&2
-    echo "[!] Generate with: ./scripts/vault/gen_tor_auth_clients.sh" >&2
+    echo "[!] Generate with kerosene-vault/scripts/gen_tor_auth_clients.sh from the Vault repository." >&2
     echo "[!] Continuing with v3 public onion (no client auth)." >&2
   fi
 fi

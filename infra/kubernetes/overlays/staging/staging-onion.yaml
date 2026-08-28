@@ -40,6 +40,18 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: fix-tor-permissions
+          image: busybox:latest
+          command: ["sh", "-c", "chown -R 1000:1000 /var/lib/tor && chmod 700 /var/lib/tor"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/tor
       containers:
         - name: tor
           image: kerosene/tor:staging
