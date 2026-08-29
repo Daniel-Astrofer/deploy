@@ -14,7 +14,7 @@ groups:
           description: >-
             More than 5 rebalance failures in 30m. Check LND routes, Loop daemon,
             and SYSTEM_PROFIT available balance for fee reserves.
-          runbook: "docs/kfe/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
 
       - alert: KfeSettlementGateRejectSpike
         expr: increase(kfe_settlement_gate_total{result="fail"}[15m]) > 20
@@ -27,4 +27,4 @@ groups:
           description: >-
             Gate failures spiked (saldo, liquidez, jamming, quorum). Inspect
             KFE_SETTLEMENT_GATE audit flags.
-          runbook: "docs/kfe/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/EXECUTION_PLAN_LIQUIDATION_LIGHTNING_ONCHAIN.md"

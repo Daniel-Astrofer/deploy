@@ -28,7 +28,7 @@ groups:
         annotations:
           summary: "Funds LOCKED > 30min without progress"
           description: "At least one transaction has remained in LOCKED status for over 30 minutes."
-          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeExecutingNoTxid
         expr: kfe_transactions_stuck_total{status="EXECUTING"} > 0 and (time() - kfe_transactions_stuck_since_seconds{status="EXECUTING"}) > 300
@@ -39,7 +39,7 @@ groups:
         annotations:
           summary: "Transaction EXECUTING without txid > 5min"
           description: "A transaction entered EXECUTING but no blockchain txid was recorded within 5 minutes."
-          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeTxidDisappeared
         expr: increase(kfe_network_not_found_total[15m]) > 3
@@ -50,7 +50,7 @@ groups:
         annotations:
           summary: "Transaction not found by Bitcoin Core > 3 occurrences in 15min"
           description: "Multiple transactions have been reported as NOT_FOUND by Bitcoin Core node."
-          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeLightningPaymentUnknown
         expr: kfe_lightning_inflight_sats > 0
@@ -61,7 +61,7 @@ groups:
         annotations:
           summary: "Lightning payment UNKNOWN > 15min"
           description: "At least one Lightning payment has been in-flight without resolution for over 15 minutes."
-          runbook: "docs/kfe/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
 
       - alert: KfeNotificationDeadLetter
         expr: increase(kfe_notification_dead_letter_total[10m]) > 0
@@ -83,7 +83,7 @@ groups:
         annotations:
           summary: "Ledger vs chain divergence > 10000 sats"
           description: "Absolute difference between internal ledger and chain-observed balance exceeds 10000 sats."
-          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeNoopNotificationPort
         expr: kfe_financial_notification_port_active{provider="noop"} == 1
@@ -137,7 +137,7 @@ groups:
         annotations:
           summary: "Blockchain reorg event detected"
           description: "At least one reorg event has been detected by the confirmation monitor."
-          runbook: "docs/kfe/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeIdempotencyConflictSpike
         expr: increase(kfe_idempotency_conflict_total[5m]) > 10

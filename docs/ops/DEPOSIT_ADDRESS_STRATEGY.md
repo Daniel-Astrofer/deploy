@@ -84,6 +84,6 @@ Current implementation in `FrostTrBitcoinOrchestrator::deposit_info()` always re
 
 ## Related
 
-- `DepositInfo` struct: `backend/kerosene-vault/src/adapters/frost_tr_bitcoin.rs:347`
-- `deposit_info()`: `backend/kerosene-vault/src/adapters/frost_tr_bitcoin.rs:405`
+- `DepositInfo` struct: see `kerosene-vault:src/adapters/frost_tr_bitcoin.rs`.
+- `deposit_info()`: see `kerosene-vault:src/adapters/frost_tr_bitcoin.rs`.
 - PQ strategy: `docs/VAULT_IMPLEMENTATION_PLAN.md` — Tier 0 (Quantum Threat)

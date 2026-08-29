@@ -3,7 +3,7 @@
 This document describes the developer-only Kubernetes runtime that boots Kerosene inside the local cluster with the renamed workloads:
 
 - `server` for the backend service.
-- `kfe-service` for the separated Krinse Financial Engine runtime (vault mesh settlement).
+- `kfe-service` for the separated Kerosene Financial Engine runtime (vault mesh settlement).
 - `web-page` for the web UI.
 - `vault-mesh-lab` (Docker Compose) for kerosene-vault treasury mesh on testnet3.
 
@@ -68,7 +68,9 @@ Default (no args) is `local-full --wait`. Deploy starts `vault-mesh-lab.compose.
 Optional mesh profiles (`KEROSENE_VAULT_MESH_PROFILE`):
 
 ```bash
-# Staging mTLS mesh (falls back to lab if certs missing)
+# LEGACY compatibility behavior: requests staging mTLS, but currently falls
+# back to the insecure lab profile when certificate generation fails.
+# Do not use this path as evidence of staging or production readiness.
 KEROSENE_VAULT_MESH_PROFILE=staging bash infra/deploy.sh --wait
 
 # Real Tor private mesh + distributed_wire (no host :7701–7703; not for kfe bridge)
@@ -76,8 +78,8 @@ KEROSENE_VAULT_MESH_PROFILE=tor bash infra/deploy.sh --wait
 ```
 
 Tor profile starts `vault-mesh-tor.compose.yaml` via `ensure-vault-mesh-lab.sh`.
-Lab remains the default for local-full kfe visualize. See
-`backend/kerosene-vault/docs/CEREMONY_TOR.md`.
+Lab remains the default for local-full KFE visualization. See
+`docs/CEREMONY_TOR.md` in the independent `kerosene-vault` repository.
 
 ## Production boundary
 

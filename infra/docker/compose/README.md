@@ -15,7 +15,7 @@ infra/docker/compose/vault-mesh-lab.compose.yaml      # deploy.sh settlement (te
 infra/docker/compose/vault-mesh-staging.compose.yaml  # mTLS staging (opt-in)
 infra/docker/compose/vault-mesh-tor.compose.yaml      # real Tor private mesh + distributed_wire
 infra/docker/compose/vault-mesh-ceremony.compose.yaml # production-native flags (pair with Tor for go-live)
-infra/docker/compose/local.limits.compose.yaml
+infra/docker/compose/local.limits.compose.yaml             # legacy override; not standalone
 ```
 
 `bash infra/deploy.sh` defaults to **vault-mesh-lab** (kerosene-vault ×3, clearnet ports,
@@ -29,16 +29,26 @@ KEROSENE_VAULT_MESH_PROFILE=tor bash infra/deploy.sh --wait
 ```
 
 That starts `vault-mesh-tor.compose.yaml` (`distributed_wire`, no clearnet vault ports).
-For a full over-wire DKG exercise use `scripts/vault/lab_dkg_wire_tor.sh`.
-See `backend/kerosene-vault/docs/CEREMONY_TOR.md`.
+For a full over-wire DKG exercise, use the script owned by the independent
+`kerosene-vault` repository:
+
+```bash
+export KEROSENE_VAULT_DIR=/path/to/kerosene-vault
+bash "$KEROSENE_VAULT_DIR/scripts/lab_dkg_wire_tor.sh"
+```
+
+See `docs/CEREMONY_TOR.md` in that repository.
 
 A topologia `hardened` fica fora do repositório público (ops privado).
 
 Os caminhos legados continuam presentes para compatibilidade com scripts antigos.
+`local.limits.compose.yaml` ainda aponta para serviços do Compose local removido;
+não o use isoladamente nem com os Compose atuais do Vault Mesh.
 
-## Wrappers canônicos
+## Wrappers de compatibilidade
 
-Use os wrappers em `infra/docker/scripts` para operar Compose a partir da nova camada:
+Estes wrappers continuam executáveis para não quebrar fluxos locais antigos,
+mas automações novas devem usar `infra/start.sh`:
 
 ```bash
 bash infra/docker/scripts/compose-local.sh up -d
@@ -46,12 +56,10 @@ bash infra/docker/scripts/compose-local.sh ps
 bash infra/docker/scripts/compose-local-kfe.sh up -d
 ```
 
-`compose-local-kfe.sh` includes the split KFE overlay. In that mode each shard
-starts an API gateway and its Tor hidden service publishes the gateway: Core
-routes such as `/auth/**` go to `server-*`, while `/kfe/**`,
-`/api/public/kfe/**` and `/api/admin/kfe/**` go to `kfe-service-*`.
+`compose-local-kfe.sh` hoje é apenas um alias da composição Vault Mesh. Ele não
+inicia o KFE; o nome permanece somente por compatibilidade.
 
 ## Próxima etapa
 
-Migrar gradualmente scripts raiz para os wrappers canônicos e remover os Compose
+Migrar consumidores desses wrappers para `infra/start.sh` e remover os Compose
 legados apenas depois de uma janela de validação.

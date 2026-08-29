@@ -11,10 +11,10 @@
 #
 # --- mTLS end-to-end (default) ---
 # 1) Materialize certs (SPIFFE-like layout under lab-certs/spiffe/):
-#      ./scripts/vault/gen_lab_mtls_certs.sh
+#      $KEROSENE_VAULT_DIR/scripts/gen_lab_mtls_certs.sh
 #    Short-lived leaf rotation (reuses CA):
-#      VAULT_LAB_MTLS_TTL_HOURS=24 ./scripts/vault/rotate_lab_mtls_certs.sh
-#    Docs: backend/kerosene-vault/docs/MTLS_SPIFFE_LAYOUT.md
+#      VAULT_LAB_MTLS_TTL_HOURS=24 $KEROSENE_VAULT_DIR/scripts/rotate_lab_mtls_certs.sh
+#    Docs: kerosene-vault/docs/MTLS_SPIFFE_LAYOUT.md
 # 2) Bring up mesh (HTTPS + client cert required):
 #      docker compose -f infra/docker/compose/vault-mesh-staging.compose.yaml up --build
 # 3) Point kfe at vault with client TLS (go-live props):

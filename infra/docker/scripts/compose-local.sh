@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# LEGACY COMPOSE WRAPPER. Use infra/start.sh for the supported local runtime.
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 export KEROSENE_INFRA_DIR="${KEROSENE_INFRA_DIR:-$ROOT/infra}"
 export KEROSENE_COMPOSE_FILE="${KEROSENE_COMPOSE_FILE:-$ROOT/infra/docker/compose/vault-mesh-lab.compose.yaml}"

@@ -45,6 +45,7 @@ spec:
         - name: vault-mesh-certs
           secret:
             secretName: vault-client-mtls
+            optional: true
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -124,7 +125,14 @@ metadata:
   name: server-config
 data:
   SPRING_PROFILES_ACTIVE: "docker"
+  # The local PostgreSQL volume predates the auth schema split. Let Hibernate
+  # add missing compatibility tables in the lab; production remains validate-only.
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
   SERVER_PORT: "8080"
+  # The persisted lab DB contains legacy Flyway history from before the
+  # auth/KFE schema split. Hibernate updates the lab schema; production keeps
+  # Flyway validation enabled.
+  SPRING_FLYWAY_ENABLED: "false"
   SPRING_DATA_REDIS_HOST: "kerosene-redis-headless"
   SPRING_DATA_REDIS_PORT: "6379"
   TOR_HEALTH_REQUIRED: "false"
@@ -162,6 +170,7 @@ data:
   TICKER_PROXY_SOCKS_PORT: "9050"
   # WARN: KFE_VAULTMESH_REQUIRE_MTLS=false is LOCAL-ONLY. Must be set to "true" or removed before promotion to staging/production.
   KFE_VAULTMESH_REQUIRE_MTLS: "false"
+  KFE_VAULTMESH_TLS_ENABLED: "false"
   # Security material (local-only): in prod this must come from injected secrets.
   # Spring binds these env vars to:
   #   api.secret.aes.secret
@@ -188,6 +197,15 @@ data:
   KEROSENE_RUNTIME_ROLE: "kfe-service"
   SPRING_DATA_REDIS_HOST: "kerosene-redis-headless"
   SPRING_DATA_REDIS_PORT: "6379"
+  # The persisted local database may already contain later repair migrations
+  # from before the KFE schema split. Apply missing local migrations out of
+  # order; production keeps Flyway validation strict.
+  FLYWAY_OUT_OF_ORDER: "true"
+  SPRING_FLYWAY_OUT_OF_ORDER: "true"
+  # The lab DB predates the KFE schema split; Hibernate compatibility update
+  # is used locally while production keeps Flyway + validate-only JPA.
+  SPRING_FLYWAY_ENABLED: "false"
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
   SPRING_CONFIG_ADDITIONAL_LOCATION: "optional:classpath:kfe-service-vaultmesh-testnet3.properties"
   # Vault mesh settlement (compose lab vault-1 via Service/Endpoints bridge).
   KFE_VAULTMESH_ENABLED: "true"
@@ -203,6 +221,7 @@ data:
   # Column crypto key (local-only). Required by KFE StringColumnCryptoService.
   # In production this comes from a Kubernetes Secret.
   KFE_COLUMN_CRYPTO_KEY_BASE64: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+  JWT_SECRET: "kerosene-local-jwt-secret-change-before-production-32-bytes"
   LIGHTNING_LND_ENABLED: "true"
   LIGHTNING_LND_HOST: "kerosene-lnd-headless"
   LIGHTNING_LND_PORT: "10009"

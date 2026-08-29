@@ -1,4 +1,4 @@
-# KFE — Krinse Financial Engine runtime image.
+# KFE — Kerosene Financial Engine runtime image.
 #
 # The image builds the dedicated kfe-service Spring Boot artifact instead of the
 # Core bootJar, so the container only carries the KFE HTTP runtime and its direct
@@ -13,20 +13,20 @@ COPY gradle gradle/
 RUN chmod +x gradlew
 
 COPY settings.gradle.kts build.gradle.kts gradle.properties ./
-COPY kerosene-contracts kerosene-contracts/
-COPY kerosene-shared kerosene-shared/
-COPY kfe-service kfe-service/
+COPY src src/
+COPY --from=contracts . /kerosene-contracts
+COPY --from=shared . /kerosene-shared
 
-COPY docker/healthcheck docker/
+COPY --from=deploy infra/docker/healthcheck/Healthcheck.java docker/Healthcheck.java
 ARG GRADLE_MAX_WORKERS=2
-RUN ./gradlew :kfe-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
+RUN ./gradlew bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
 RUN javac docker/Healthcheck.java -d /workspace/healthcheck
 
 FROM gcr.io/distroless/java21-debian12:nonroot AS runtime
 
 WORKDIR /app
 
-COPY --chown=65532:65532 --from=builder /workspace/kfe-service/build/libs/*-boot.jar app.jar
+COPY --chown=65532:65532 --from=builder /workspace/build/libs/*-boot.jar app.jar
 COPY --chown=65532:65532 --from=builder /workspace/healthcheck /app/healthcheck
 
 USER 65532:65532

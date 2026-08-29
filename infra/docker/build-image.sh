@@ -30,12 +30,15 @@ python3 - \
   "$CLIENTS_DIR" \
   "$VAULT_DIR" \
   "$NODE_DIR" \
-  "$CONTRACTS_DIR" <<'PY'
+  "$CONTRACTS_DIR" \
+  "$ADMIN_DIR" \
+  "$KFE_DIR" \
+  "$SHARED_DIR" <<'PY'
 import subprocess
 import sys
 from pathlib import Path
 
-contract, key, root, core, clients, vault, node, contracts = sys.argv[1:]
+contract, key, root, core, clients, vault, node, contracts, admin, kfe, shared = sys.argv[1:]
 text = Path(contract).read_text(encoding="utf-8").splitlines()
 
 current = None
@@ -77,6 +80,9 @@ repository_roots = {
     "vault": Path(vault),
     "node": Path(node),
     "contracts": Path(contracts),
+    "admin": Path(admin),
+    "kfe": Path(kfe),
+    "shared": Path(shared),
 }
 context_repository = item["context_repository"]
 if context_repository == "generated":
@@ -100,7 +106,16 @@ if not context.exists():
     sys.exit(4)
 
 image = f"{item['image']}:{item['local_tag']}"
-cmd = ["docker", "build", "-t", image, "-f", str(dockerfile), str(context)]
+cmd = ["docker", "build"]
+if context_repository == "core":
+    cmd.extend(["--build-context", f"contracts={contracts}"])
+    cmd.extend(["--build-context", f"deploy={root}"])
+    cmd.extend(["--build-context", f"shared={shared}"])
+elif context_repository == "kfe":
+    cmd.extend(["--build-context", f"contracts={contracts}"])
+    cmd.extend(["--build-context", f"deploy={root}"])
+    cmd.extend(["--build-context", f"shared={shared}"])
+cmd.extend(["-t", image, "-f", str(dockerfile), str(context)])
 print(" ".join(cmd))
 subprocess.check_call(cmd)
 PY

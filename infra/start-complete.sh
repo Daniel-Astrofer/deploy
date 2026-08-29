@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# LEGACY COMPATIBILITY WRAPPER.
+# Kept during entrypoint migration; see docs/en/DEPLOYMENT_INDEX.md.
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENVIRONMENT="${1:-local}"
 shift || true

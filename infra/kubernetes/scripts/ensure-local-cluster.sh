@@ -118,6 +118,14 @@ KINDEOF
 KINDEOF
     echo "[*] Also mounting legacy data path: $legacy"
   fi
+  local bitcoin_hdd_mount="${KEROSENE_BITCOIN_HDD_MOUNT:-/mnt/hd_500gb_1}"
+  if command -v mountpoint >/dev/null 2>&1 && mountpoint -q "$bitcoin_hdd_mount"; then
+    cat >>"$config_path" <<KINDEOF
+      - hostPath: ${bitcoin_hdd_mount}
+        containerPath: ${bitcoin_hdd_mount}
+KINDEOF
+    echo "[*] Also mounting Bitcoin HDD path: $bitcoin_hdd_mount"
+  fi
 }
 
 create_kind_cluster() {

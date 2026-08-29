@@ -43,26 +43,6 @@ spec:
       targetPort: sentinel
       protocol: TCP
 ---
-apiVersion: v1
-kind: Service
-metadata:
-  name: kerosene-vault-raft-headless
-  labels:
-    app.kubernetes.io/name: vault
-    app.kubernetes.io/component: secrets
-spec:
-  clusterIP: None
-  selector:
-    app: kerosene-vault
-  ports:
-    - name: vault-api
-      port: 8200
-      targetPort: vault-api
-      protocol: TCP
-    - name: vault-cluster
-      port: 8201
-      targetPort: vault-cluster
-      protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -92,6 +72,10 @@ spec:
       port: 28333
       targetPort: zmq-tx
       protocol: TCP
+    - name: zmq-rawfull
+      port: 28334
+      targetPort: zmq-rawfull
+      protocol: TCP
 ---
 apiVersion: v1
 kind: Service
@@ -120,6 +104,10 @@ spec:
     - name: zmq-rawtx
       port: 28333
       targetPort: zmq-tx
+      protocol: TCP
+    - name: zmq-rawfull
+      port: 28334
+      targetPort: zmq-rawfull
       protocol: TCP
 ---
 apiVersion: v1

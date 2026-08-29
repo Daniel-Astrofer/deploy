@@ -48,18 +48,25 @@ restaurar o material de recuperação cria outra identidade Lightning.
 
 ## Certificados e secrets dos vaults
 
+Os scripts de cerimônia pertencem ao repositório `kerosene-vault`. Antes dos
+comandos abaixo, aponte explicitamente para o checkout correto:
+
+```bash
+export KEROSENE_VAULT_DIR=/caminho/para/kerosene-vault
+```
+
 Gere uma CA de cerimônia e folhas independentes:
 
 ```bash
 VAULT_CEREMONY_MTLS_OUT=/caminho/seguro/ceremony-certs \
-  scripts/vault/gen_ceremony_mtls_certs.sh
+  bash "$KEROSENE_VAULT_DIR/scripts/gen_ceremony_mtls_certs.sh"
 ```
 
 Provisione os seis Secrets dos três vaults e o Secret cliente mTLS do KFE:
 
 ```bash
 VAULT_CEREMONY_MTLS_OUT=/caminho/seguro/ceremony-certs \
-  scripts/vault/provision_staging_k8s_secrets.sh
+  bash "$KEROSENE_VAULT_DIR/scripts/provision_staging_k8s_secrets.sh"
 ```
 
 Cada vault recebe certificado servidor, certificado cliente e passphrase

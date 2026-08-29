@@ -37,7 +37,17 @@ kerosene_load_local_host_env() {
   export KEROSENE_LOCAL_STATE_ROOT="${KEROSENE_LOCAL_STATE_ROOT:-$KEROSENE_HOST_HOME/.local/state/kerosene}"
   export KEROSENE_LOCAL_ONION_KEYS_PATH="${KEROSENE_LOCAL_ONION_KEYS_PATH:-$KEROSENE_LOCAL_STATE_ROOT/tor/keys/local-full}"
   export KEROSENE_LOCAL_POSTGRES_DATA="${KEROSENE_LOCAL_POSTGRES_DATA:-$KEROSENE_LOCAL_STATE_ROOT/postgres-data}"
-  export KEROSENE_LOCAL_BITCOIN_DATA="${KEROSENE_LOCAL_BITCOIN_DATA:-$KEROSENE_LOCAL_STATE_ROOT/bitcoin-data}"
+  # Prefer the mounted 500 GB HDD for the chain when it is present. An
+  # explicit KEROSENE_LOCAL_BITCOIN_DATA always wins, which keeps this portable
+  # across hosts with a different mount layout.
+  if [[ -z "${KEROSENE_LOCAL_BITCOIN_DATA:-}" ]]; then
+    local bitcoin_hdd_mount="${KEROSENE_BITCOIN_HDD_MOUNT:-/mnt/hd_500gb_1}"
+    if command -v mountpoint >/dev/null 2>&1 && mountpoint -q "$bitcoin_hdd_mount"; then
+      export KEROSENE_LOCAL_BITCOIN_DATA="$bitcoin_hdd_mount/kerosene/bitcoin-data"
+    else
+      export KEROSENE_LOCAL_BITCOIN_DATA="$KEROSENE_LOCAL_STATE_ROOT/bitcoin-data"
+    fi
+  fi
   export KEROSENE_LOCAL_LND_DATA="${KEROSENE_LOCAL_LND_DATA:-$KEROSENE_LOCAL_STATE_ROOT/lnd-data}"
   export KEROSENE_LOCAL_LND_PEER_DATA="${KEROSENE_LOCAL_LND_PEER_DATA:-$KEROSENE_LOCAL_STATE_ROOT/lnd-peer-data}"
 

@@ -29,3 +29,6 @@ local/             Compose legado e rotinas específicas de banco/log/reparo.
 ```
 
 Scripts MCP ficam em `infra/mcp/`, não em Kubernetes.
+
+Classificação completa dos scripts e wrappers de compatibilidade:
+`docs/pt-BR/INDICE-DEPLOY.md`.

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# LEGACY ENTRYPOINT WITH EMBEDDED IMPLEMENTATION.
+# Preserved in this wave; migrate behavior before replacing it with a wrapper.
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 K8S="$ROOT/infra/kubernetes"
 OVERLAY="$K8S/overlays/local-ha"

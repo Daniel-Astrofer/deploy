@@ -24,17 +24,16 @@ COPY gradle gradle/
 RUN chmod +x gradlew
 
 # ── Layer 2: Dependency resolution (cache until build.gradle.kts changes) ─────
-COPY build.gradle.kts settings.gradle.kts ./
+COPY settings.gradle.kts ./
 COPY gradle.properties ./
-COPY kerosene-contracts kerosene-contracts/
-COPY kerosene-shared kerosene-shared/
-COPY kfe-service kfe-service/
+COPY --from=contracts . /kerosene-contracts
+COPY --from=shared . /kerosene-shared
 COPY auth-service auth-service/
 ARG GRADLE_MAX_WORKERS=2
-RUN ./gradlew dependencies --no-daemon --max-workers=${GRADLE_MAX_WORKERS} --quiet || true
+RUN ./gradlew :auth-service:dependencies --no-daemon --max-workers=${GRADLE_MAX_WORKERS} --quiet
 
 # ── Layer 3: Source compilation ───────────────────────────────────────────────
-COPY docker/healthcheck docker/
+COPY --from=deploy infra/docker/healthcheck/Healthcheck.java docker/Healthcheck.java
 COPY web-admin-build web-admin-build/
 RUN ./gradlew :auth-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
 RUN javac docker/Healthcheck.java -d /workspace/healthcheck

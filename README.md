@@ -1,31 +1,44 @@
 # Kerosene Deploy
 
-Private deployment templates, orchestration and operational runbooks for
-Kerosene.
+Deployment templates, orchestration and operational runbooks for Kerosene.
 
-This repository contains generic Docker/Kubernetes/Tor/observability
-configuration extracted from the monorepo. It must not contain runtime secrets,
+Documentation entrypoints:
+
+- [English operator documentation](docs/en/README.md)
+- [Documentação para operadores em português](docs/pt-BR/README.md)
+- [Docker, Kubernetes and scripts index](docs/en/DEPLOYMENT_INDEX.md)
+
+This repository contains Docker/Kubernetes/Tor/observability configuration and
+operational validation for independently released services. It must not contain runtime secrets,
 shares, seed phrases, macaroons, private Onion keys, TPM keys, user data or real
 logs. Private visibility is an additional control, not a secret manager.
 
 ## Polyrepo workspace
 
-Deploy never reads the archived monorepo. Source builds resolve independent
-repositories with `KEROSENE_CORE_DIR`, `KEROSENE_CLIENTS_DIR`,
+Deploy never reads an archived source tree. Optional local image builds resolve
+independent repositories with `KEROSENE_CORE_DIR`, `KEROSENE_CLIENTS_DIR`,
 `KEROSENE_VAULT_DIR`, `KEROSENE_NODE_DIR` and `KEROSENE_CONTRACTS_DIR`.
 
-The resolver supports both flat sibling clones and the canonical
-`workspaces/kerosene/{services,platform}` layout. Validate a local checkout with:
+The supported default is a flat workspace of sibling repositories. Explicit
+environment variables may point to another checkout layout. Validate a local
+checkout with:
 
 ```bash
-bash scripts/check-polyrepo-workspace.sh
+bash infra/scripts/check-polyrepo-workspace.sh
 ```
 
-Start the complete local integration environment with:
+Service source remains owned by its repository; Deploy only supplies packaging
+recipes and runtime composition. See the [service boundary](docs/en/SERVICE_BOUNDARIES.md).
+
+Start the local integration environment through the canonical public entrypoint:
 
 ```bash
-bash infra/start-complete.sh local
+bash infra/start.sh
 ```
+
+`infra/start-complete.sh` is a legacy compatibility wrapper. It remains
+available during the transition, but new automation must use the environment
+entrypoints documented in `docs/en/DEPLOYMENT_INDEX.md`.
 
 The closest production-like topology deploys Core and the first Vault into
 independent staging namespaces and requires immutable image digests:

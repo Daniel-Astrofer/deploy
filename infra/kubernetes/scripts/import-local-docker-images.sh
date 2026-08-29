@@ -193,13 +193,13 @@ build_server_image() {
   fi
 
   info "Building $target from $dockerfile"
-  docker build -t "$target" -f "$dockerfile" "$context"
+  docker build --build-context "contracts=$CONTRACTS_DIR" --build-context "deploy=$REPO_ROOT" --build-context "shared=$SHARED_DIR" -t "$target" -f "$dockerfile" "$context"
 }
 
 build_kfe_service_image() {
   local target="kerosene/kfe-service:local"
   local dockerfile="$REPO_ROOT/infra/docker/images/kfe-service/Dockerfile"
-  local context="$CORE_DIR"
+  local context="$KFE_DIR"
 
   if [[ "$SKIP_KFE_SERVICE_BUILD" -eq 1 ]]; then
     info "Skipping kfe-service image build by request."
@@ -221,7 +221,7 @@ build_kfe_service_image() {
   fi
 
   info "Building $target from $dockerfile"
-  docker build -t "$target" -f "$dockerfile" "$context"
+  docker build --build-context "contracts=$CONTRACTS_DIR" --build-context "deploy=$REPO_ROOT" --build-context "shared=$SHARED_DIR" -t "$target" -f "$dockerfile" "$context"
 }
 
 build_kubernetes_web_bundle() {
@@ -299,6 +299,14 @@ build_tor_image() {
 
   if docker image inspect "$target" >/dev/null 2>&1; then
     info "Docker image already exists: $target"
+    return 0
+  fi
+
+  # A staging Tor image uses the same canonical Dockerfile/runtime. Reuse it
+  # locally when the Tor rebuild is blocked by an external apt mirror issue.
+  if docker image inspect "kerosene/tor:staging" >/dev/null 2>&1; then
+    info "Reusing kerosene/tor:staging as $target"
+    docker tag "kerosene/tor:staging" "$target"
     return 0
   fi
 

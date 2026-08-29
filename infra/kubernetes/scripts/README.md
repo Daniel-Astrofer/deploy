@@ -28,3 +28,10 @@ gravando arquivos separados em `infra/runtime/logs/kubernetes/<timestamp>/`.
 
 Scripts antigos nesta pasta são compatibilidade temporária ou diagnósticos
 especializados. Novos scripts públicos não devem ser adicionados aqui.
+
+O inventário e a classificação canônica estão em
+`docs/pt-BR/INDICE-DEPLOY.md` e `docs/en/DEPLOYMENT_INDEX.md`.
+
+O profile local `KEROSENE_VAULT_MESH_PROFILE=staging` ainda possui fallback
+legado para a mesh lab quando a geração de certificados falha. Esse fallback é
+exclusivamente local e não serve como evidência de staging ou produção.

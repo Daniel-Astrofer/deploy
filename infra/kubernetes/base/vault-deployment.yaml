@@ -48,7 +48,7 @@ spec:
             - |
               if [ ! -f /certs-out/vault-server.crt ]; then
                 echo "[!] mTLS certs not found. Expect ceremony-generated certs mounted via Secret." >&2
-                echo "[!] Run: scripts/vault/gen_ceremony_mtls_certs.sh" >&2
+                echo "[!] Run kerosene-vault/scripts/gen_ceremony_mtls_certs.sh from the Vault repository." >&2
                 exit 1
               fi
           volumeMounts:

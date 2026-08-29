@@ -93,6 +93,6 @@ if [[ "$BUILD_JAR" -eq 1 ]]; then
   info "Packaging backend jar with embedded web admin."
   (
     cd "$BACKEND_DIR"
-    ./gradlew bootJar -x test --max-workers="${GRADLE_MAX_WORKERS:-2}"
+    ./gradlew :auth-service:bootJar -x test --max-workers="${GRADLE_MAX_WORKERS:-2}"
   )
 fi

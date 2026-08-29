@@ -244,8 +244,8 @@ metadata:
     kerosene.io/local-dependency: "true"
 spec:
   capacity:
-    # Full classic testnet / testnet3 (and room to grow). Data lives on external HDD via bind-mount
-    # onto this hostPath — see scripts/migrate-chain-storage-to-hdd.sh
+    # Full classic testnet / testnet3 (and room to grow). The rendered hostPath
+    # must point at the external HDD; do not fall back to the workspace/NVMe.
     storage: 400Gi
   accessModes: ["ReadWriteOnce"]
   persistentVolumeReclaimPolicy: Retain
@@ -351,22 +351,18 @@ spec:
                   "$@"
               }
 
-              # Steady-state: pruned classic testnet (no txindex). For faster initial
-              # sync, run: bash infra/kubernetes/scripts/bitcoin-ibd-mode.sh boost
-              # which scales down app pods and raises dbcache/CPU/RAM temporarily.
-              bitcoind \
-                -testnet \
-                -datadir="$bitcoin_dir" \
-                -server=1 \
-                -printtoconsole \
-                -prune=10000 \
-                -txindex=0 \
-                -rpcbind=0.0.0.0 \
-                -rpcallowip=0.0.0.0/0 \
-                -rpcport="$rpc_port" \
-                -port="$p2p_port" \
-                -rpcuser="$BITCOIN_RPC_USER" \
-                -rpcpassword="$BITCOIN_RPC_PASSWORD" \
+              # Preserve the existing nearly-synchronized local datadir.
+              # Removing -prune from a pruned database requires -reindex and
+              # redownloads discarded blocks; local-full must not trigger that
+              # operation automatically. Full-chain conversion is a separate,
+              # explicitly supervised migration. A large rolling window keeps
+              # the blocks from the current era and all future blocks complete
+              # without downloading historical blocks that were already pruned.
+              bitcoind -testnet -datadir="$bitcoin_dir" -server=1 \
+                -printtoconsole -prune=300000 -txindex=0 \
+                -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0 \
+                -rpcport="$rpc_port" -port="$p2p_port" \
+                -rpcuser="$BITCOIN_RPC_USER" -rpcpassword="$BITCOIN_RPC_PASSWORD" \
                 -zmqpubrawtx=tcp://0.0.0.0:28332 \
                 -zmqpubhashblock=tcp://0.0.0.0:28333 \
                 -zmqpubrawblock=tcp://0.0.0.0:28334 &
@@ -423,6 +419,9 @@ spec:
             - name: zmq-tx
               containerPort: 28333
               protocol: TCP
+            - name: zmq-rawfull
+              containerPort: 28334
+              protocol: TCP
           readinessProbe:
             exec:
               command:
@@ -445,8 +444,8 @@ spec:
               memory: 512Mi
             limits:
               cpu: 1000m
-              # Bitcoin Core (pruned classic testnet) can exceed 1Gi during
-              # block index loading with the wallet enabled.
+              # Full classic testnet can exceed 1Gi during block index loading
+              # with the wallet enabled.
               memory: 2Gi
           securityContext:
             allowPrivilegeEscalation: false

@@ -49,7 +49,7 @@ infra/
   logs.sh       Mostra logs gerais ou por serviço.
   test.sh       Valida scripts e manifests do quorum local.
 
-  docker/       Contrato de imagens, Dockerfiles e Compose legado/auxiliar.
+  docker/       Contrato de imagens, Dockerfiles e Compose auxiliar.
   kubernetes/   Manifests e helpers internos do quorum Kubernetes local.
   runtime/      Configurações locais de Bitcoin, Vault, Tor, Web/Nginx, Postgres etc.
   scripts/      Helpers internos chamados pelos entrypoints públicos.
@@ -117,9 +117,13 @@ legado/local específico. O caminho de settlement do deploy é
 
 ## Regras
 
-- Código de produto fica em `backend/` e `frontend/`.
+- Código de produto fica nos repositórios `kerosene-core`,
+  `kerosene-clients`, `kerosene-vault` e `kerosene-node`.
 - Dockerfiles e contratos de imagem ficam sob `infra/docker`.
 - Kubernetes em `infra/` representa o quorum local, não a plataforma final.
 - Scripts públicos novos devem ser apenas os entrypoints `infra/*.sh` acima.
 - Scripts antigos devem virar internos ou wrappers de compatibilidade sem lógica.
 - Arquivos sensíveis, certificados, chaves e segredos não devem ser movidos sem plano explícito de rotação.
+
+O índice completo de Docker, Kubernetes, scripts públicos, helpers e wrappers
+legados está em `docs/pt-BR/INDICE-DEPLOY.md`.
