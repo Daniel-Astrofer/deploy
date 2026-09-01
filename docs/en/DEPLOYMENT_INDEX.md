@@ -72,11 +72,14 @@ It remains only because legacy `infra/scripts/local/` still references it.
 |---|---|
 | `infra/kubernetes/base/` | Shared Kubernetes resources |
 | `infra/kubernetes/components/` | Reusable Kustomize components |
+| `infra/kubernetes/components/spire/` | Staging-only workload identity control plane |
 | `infra/kubernetes/overlays/local/` | Lightweight workstation overlay |
 | `infra/kubernetes/overlays/local-full/` | Canonical integrated local runtime |
 | `infra/kubernetes/overlays/local-ha/` | Local HA test topology |
 | `infra/kubernetes/overlays/staging/` | Public staging core runtime |
 | `infra/kubernetes/overlays/staging-vault/` | Independent staging Vault runtime |
+| `infra/kubernetes/overlays/staging-spiffe/` | Core staging with additive Workload API mount |
+| `infra/kubernetes/overlays/staging-vault-spiffe/` | Independent Vault staging with additive Workload API mount |
 | `infra/kubernetes/scripts/` | Deploy, validation, smoke and operations helpers |
 | `infra/kubernetes/tests/` | Shell regression tests for deploy behavior |
 

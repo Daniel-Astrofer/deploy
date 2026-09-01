@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+spec:
+  template:
+    metadata:
+      labels:
+        kerosene.io/spiffe-role: auth
+    spec:
+      containers:
+        - name: server
+          env:
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: unix:///run/spire/sockets/spire-agent.sock
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /run/spire/sockets
+              readOnly: true
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kfe-service
+spec:
+  template:
+    metadata:
+      labels:
+        kerosene.io/spiffe-role: kfe
+    spec:
+      containers:
+        - name: kfe-service
+          env:
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: unix:///run/spire/sockets/spire-agent.sock
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /run/spire/sockets
+              readOnly: true
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: staging-tor
+spec:
+  template:
+    metadata:
+      labels:
+        kerosene.io/spiffe-role: node
+        kerosene.io/discovery-plane: bank
+    spec:
+      serviceAccountName: kerosene-node
+      containers:
+        - name: kerosene-node
+          env:
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: unix:///run/spire/sockets/spire-agent.sock
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /run/spire/sockets
+              readOnly: true
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true

@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<USAGE
-Usage: $0 <local|staging|staging-vault> [--dry-run]
+Usage: $0 <local|staging|staging-spiffe|staging-vault|staging-vault-spiffe> [--dry-run]
 
 Optional:
   SERVER_IMAGE=registry/server@sha256:...
@@ -29,9 +29,11 @@ if [[ -z "$ENVIRONMENT" || "$ENVIRONMENT" == "-h" || "$ENVIRONMENT" == "--help" 
 fi
 
 case "$ENVIRONMENT" in
-  local) NAMESPACE="kerosene-local" ;;
-  staging) NAMESPACE="kerosene-staging" ;;
-  staging-vault) NAMESPACE="kerosene-staging-vault" ;;
+  local) NAMESPACE="kerosene-local"; PROFILE="local"; SPIFFE_SCOPE="" ;;
+  staging) NAMESPACE="kerosene-staging"; PROFILE="staging-core"; SPIFFE_SCOPE="" ;;
+  staging-spiffe) NAMESPACE="kerosene-staging"; PROFILE="staging-core"; SPIFFE_SCOPE="core" ;;
+  staging-vault) NAMESPACE="kerosene-staging-vault"; PROFILE="staging-vault"; SPIFFE_SCOPE="" ;;
+  staging-vault-spiffe) NAMESPACE="kerosene-staging-vault"; PROFILE="staging-vault"; SPIFFE_SCOPE="vault" ;;
   production)
     echo "Production overlay is not shipped in the public repository." >&2
     echo "Use a private ops checkout for production deploys." >&2
@@ -70,7 +72,7 @@ if [[ ! -d "$OVERLAY" ]]; then
   exit 2
 fi
 
-if [[ "$ENVIRONMENT" == "staging" ]]; then
+if [[ "$PROFILE" == "staging-core" ]]; then
   for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE NODE_IMAGE TOR_IMAGE; do
     image_ref="${!image_var:-}"
     if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
@@ -78,7 +80,7 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
       exit 2
     fi
   done
-elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
+elif [[ "$PROFILE" == "staging-vault" ]]; then
   for image_var in VAULT_IMAGE NODE_IMAGE TOR_IMAGE; do
     image_ref="${!image_var:-}"
     if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
@@ -117,7 +119,7 @@ fi
 MANIFEST="$TMP_DIR/manifest.yaml"
 "$KUBECTL" kustomize "$WORK_OVERLAY" > "$MANIFEST"
 
-if [[ "$ENVIRONMENT" == "staging" ]]; then
+if [[ "$PROFILE" == "staging-core" ]]; then
   KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/validate-staging-runtime.sh" "$MANIFEST"
 fi
 
@@ -137,10 +139,14 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   exit 0
 fi
 
+if [[ -n "$SPIFFE_SCOPE" ]]; then
+  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/preflight-staging-spire.sh" "$SPIFFE_SCOPE"
+fi
+
 echo "[*] Ensuring namespace exists..."
 "$KUBECTL" create namespace "$NAMESPACE" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
-if [[ "$ENVIRONMENT" == "staging" ]]; then
+if [[ "$PROFILE" == "staging-core" ]]; then
   echo "[*] Verifying independently provisioned Core secrets..."
 
   require_secret_keys() {
@@ -183,7 +189,7 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
     exit 1
   fi
 
-elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
+elif [[ "$PROFILE" == "staging-vault" ]]; then
   echo "[*] Verifying independently provisioned Vault secrets..."
   require_secret_keys() {
     local secret="$1"
@@ -201,7 +207,6 @@ elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
       }
     done
   }
-  require_secret_keys vault-identity node-id
   require_secret_keys vault-secrets data-passphrase attestation-root
   require_secret_keys vault-mtls-certs \
     ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key
@@ -219,7 +224,7 @@ if [[ "${KEROSENE_FORCE_CONFLICTS:-0}" == "1" ]]; then
 fi
 "$KUBECTL" "${APPLY_ARGS[@]}" -f "$MANIFEST"
 
-if [[ "$ENVIRONMENT" == "staging" ]]; then
+if [[ "$PROFILE" == "staging-core" ]]; then
   echo "[*] Waiting for Core workloads..."
   echo "[*] Waiting for staging-owned stateful dependencies..."
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-postgres --timeout=10m
@@ -228,19 +233,19 @@ if [[ "$ENVIRONMENT" == "staging" ]]; then
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-lnd --timeout=15m
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-tor --timeout=10m
 fi
-if [[ "$ENVIRONMENT" != "staging-vault" ]]; then
+if [[ "$PROFILE" != "staging-vault" ]]; then
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/server --timeout=10m
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/kfe-service --timeout=10m
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
 fi
-if [[ "$ENVIRONMENT" == "staging" ]]; then
+if [[ "$PROFILE" == "staging-core" ]]; then
   if [[ "${KEROSENE_SKIP_STAGING_SMOKES:-0}" == "1" ]]; then
     echo "[!] KEROSENE_SKIP_STAGING_SMOKES=1: post-deploy gates were explicitly skipped." >&2
   else
     KUBECTL="$KUBECTL" KEROSENE_STAGING_NAMESPACE="$NAMESPACE" \
       bash "$SCRIPT_DIR/smoke-staging.sh"
   fi
-elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
+elif [[ "$PROFILE" == "staging-vault" ]]; then
   echo "[*] Waiting for the independent Vault and its Tor transport..."
   "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/vault-tor --timeout=10m
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault --timeout=10m
@@ -249,7 +254,7 @@ elif [[ "$ENVIRONMENT" == "staging-vault" ]]; then
 fi
 
 # Local (and any cluster with helm) also keeps Grafana + Prometheus up with the server.
-if [[ "$ENVIRONMENT" == "local" || "${KEROSENE_ENSURE_MONITORING:-0}" == "1" ]]; then
+if [[ "$PROFILE" == "local" || "${KEROSENE_ENSURE_MONITORING:-0}" == "1" ]]; then
   echo "[*] Ensuring Grafana + Prometheus (monitoring namespace)"
   KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/ensure-local-monitoring.sh" || {
     echo "[!] Monitoring stack ensure failed (non-fatal for core API)." >&2

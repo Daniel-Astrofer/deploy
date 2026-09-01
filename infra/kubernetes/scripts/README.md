@@ -21,6 +21,8 @@ wait.sh               Aguarda workloads do quorum.
 status.sh             Mostra recursos, serviços e URLs.
 logs.sh               Mostra logs por serviço.
 validate-local-full.sh Renderiza e valida o overlay local-full.
+validate-staging-spire.sh Valida a base SPIRE e recusa promoção para produção.
+preflight-staging-spire.sh Confirma SPIRE/CSI/reconciliação antes do rollout.
 ```
 
 `bash infra/logs.sh --follow` acompanha o quorum completo em tempo real,

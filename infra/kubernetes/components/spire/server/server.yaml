@@ -1,0 +1,246 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-bundle
+  namespace: spire-system
+data:
+  bundle.crt: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-server-config
+  namespace: spire-server
+data:
+  server.conf: |
+    server {
+      bind_address = "0.0.0.0"
+      bind_port = "8081"
+      trust_domain = "staging.kerosene.internal"
+      data_dir = "/run/spire/server/data"
+      socket_path = "/tmp/spire-server/private/api.sock"
+      log_level = "INFO"
+      default_x509_svid_ttl = "1h"
+      ca_ttl = "24h"
+    }
+
+    plugins {
+      DataStore "sql" {
+        plugin_data {
+          database_type = "sqlite3"
+          connection_string = "/run/spire/server/data/datastore.sqlite3"
+        }
+      }
+
+      NodeAttestor "k8s_psat" {
+        plugin_data {
+          clusters = {
+            "kerosene-staging" = {
+              service_account_allow_list = ["spire-system:spire-agent"]
+              audience = ["spire-server"]
+            }
+          }
+        }
+      }
+
+      KeyManager "disk" {
+        plugin_data {
+          keys_path = "/run/spire/server/data/keys.json"
+        }
+      }
+
+      Notifier "k8sbundle" {
+        plugin_data {
+          namespace = "spire-system"
+          config_map = "spire-bundle"
+        }
+      }
+    }
+
+    health_checks {
+      listener_enabled = true
+      bind_address = "0.0.0.0"
+      bind_port = "8080"
+      live_path = "/live"
+      ready_path = "/ready"
+    }
+
+  controller-manager.yaml: |
+    apiVersion: spire.spiffe.io/v1alpha1
+    kind: ControllerManagerConfig
+    metrics:
+      bindAddress: 127.0.0.1:8082
+    health:
+      healthProbeBindAddress: 0.0.0.0:8083
+    leaderElection:
+      leaderElect: false
+    clusterName: kerosene-staging
+    clusterDomain: cluster.local
+    trustDomain: staging.kerosene.internal
+    spireServerSocketPath: /spire-server/api.sock
+    logLevel: info
+    className: kerosene-staging
+    entryIDPrefix: kerosene-staging
+    reconcile:
+      clusterSPIFFEIDs: true
+      clusterFederatedTrustDomains: false
+      clusterStaticEntries: false
+    ignoreNamespaces:
+      - kube-system
+      - kube-public
+      - kube-node-lease
+      - spire-system
+      - spire-server
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spire-server
+  namespace: spire-server
+  labels:
+    app.kubernetes.io/name: spire-server
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: spire-server
+  ports:
+    - name: grpc
+      port: 8081
+      targetPort: grpc
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: spire-server
+  namespace: spire-server
+  labels:
+    app.kubernetes.io/name: spire-server
+    app.kubernetes.io/component: identity-control-plane
+spec:
+  serviceName: spire-server
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spire-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spire-server
+        app.kubernetes.io/component: identity-control-plane
+    spec:
+      serviceAccountName: spire-server
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 60
+      nodeSelector:
+        kubernetes.io/os: linux
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: spire-server
+          image: ghcr.io/spiffe/spire-server@sha256:aa74ef1be86bc8e0684007d84a4d9859d294384d842c30425048d73429f3216e
+          imagePullPolicy: IfNotPresent
+          args: ["-config", "/run/spire/server/config/server.conf"]
+          ports:
+            - name: grpc
+              containerPort: 8081
+              protocol: TCP
+            - name: health
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: health
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /live
+              port: health
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /run/spire/server/config
+              readOnly: true
+            - name: data
+              mountPath: /run/spire/server/data
+            - name: admin-socket
+              mountPath: /tmp/spire-server/private
+        - name: spire-controller-manager
+          image: ghcr.io/spiffe/spire-controller-manager@sha256:d7b9e710f5428ea25daa35a07083fe517ed70c23df902d21c54a0f444455a84b
+          imagePullPolicy: IfNotPresent
+          args: ["--config=/run/spire/controller/controller-manager.yaml"]
+          env:
+            - name: ENABLE_WEBHOOKS
+              value: "false"
+          ports:
+            - name: controller-health
+              containerPort: 8083
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: controller-health
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: controller-health
+            periodSeconds: 30
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /run/spire/controller
+              readOnly: true
+            - name: admin-socket
+              mountPath: /spire-server
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: spire-server-config
+        - name: admin-socket
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

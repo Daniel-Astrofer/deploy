@@ -9,6 +9,7 @@ Start here:
 - [Service boundaries](SERVICE_BOUNDARIES.md): ownership and consumed artifacts.
 - [Repository boundary](../REPOSITORY_BOUNDARY.md): source and artifact boundaries.
 - [Staging runbook](../ops/STAGING_DEPLOY.md): current staging procedure and gates.
+- [SPIRE staging identity](SPIRE_STAGING.md): workload identity rollout and limits.
 
 ## Supported entrypoints
 
@@ -27,6 +28,7 @@ Validation:
 bash infra/test.sh
 bash infra/start.sh --dry-run
 bash infra/kubernetes/scripts/validate-staging-runtime.sh
+bash infra/kubernetes/scripts/validate-staging-spire.sh
 ```
 
 Production is private and fail-closed. Public manifests must not manufacture

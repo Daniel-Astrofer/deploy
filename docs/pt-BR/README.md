@@ -10,6 +10,7 @@ Comece por estes documentos:
 - [Limites dos serviços](LIMITES-DOS-SERVICOS.md): responsabilidades e artefatos consumidos.
 - [Fronteira do repositório](../REPOSITORY_BOUNDARY.md): separação entre código e deploy.
 - [Procedimento de staging](../ops/STAGING_DEPLOY.md): processo atual e bloqueios.
+- [Identidade SPIFFE/SPIRE em staging](SPIRE-STAGING.md): arquitetura, rollout e limites.
 
 ## Uso local
 
@@ -26,6 +27,7 @@ bash infra/stop.sh
 bash infra/test.sh
 bash infra/start.sh --dry-run
 bash infra/kubernetes/scripts/validate-staging-runtime.sh
+bash infra/kubernetes/scripts/validate-staging-spire.sh
 ```
 
 Produção usa overlays privados e deve falhar se imagens imutáveis, secrets ou
