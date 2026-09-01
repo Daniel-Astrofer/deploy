@@ -41,7 +41,10 @@ jobs:
         with:
           version: v1.33.0
       - name: Run deployment and SPIRE manifest gates
-        run: bash infra/test.sh
+        run: |
+          bash infra/kubernetes/tests/staging-canonical-runtime-test.sh
+          bash infra/kubernetes/tests/staging-spire-manifests-test.sh
+          bash infra/kubernetes/tests/staging-spire-preflight-test.sh
 
   security:
     uses: Daniel-Astrofer/.github/.github/workflows/security-scan.yml@2552ff2125c2d72accebe93804b8e139a52ded13
