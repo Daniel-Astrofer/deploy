@@ -38,7 +38,14 @@ for claim in data-staging-postgres-0 data-staging-redis-0 data-staging-bitcoin-0
   # still expose a named data volume for each owner.
   owner="${claim#data-}"
   owner="${owner%-0}"
-  grep -A180 -E "^  name: ${owner}$" "$manifest" | grep -q '^      name: data$' || {
+  resource="$({
+    awk -v owner="$owner" '
+      BEGIN { RS = "---" }
+      $0 ~ /kind: StatefulSet/ && $0 ~ ("\n  name: " owner "\n") { print }
+    ' "$manifest"
+  })"
+  grep -q '^  volumeClaimTemplates:$' <<<"$resource" \
+    && grep -q '^      name: data$' <<<"$resource" || {
     echo "[!] Staging manifest gate failed: ${owner} has no data claim template" >&2
     exit 1
   }

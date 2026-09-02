@@ -1,0 +1,15 @@
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: kerosene-attacker-admin
+spec:
+  spiffeIDTemplate: spiffe://staging.kerosene.internal/admin
+  className: kerosene-staging
+  admin: true
+  ttl: 24h
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: attacker
+  namespaceSelector:
+    matchLabels:
+      kerosene.io/spire-trust-domain: staging.kerosene.internal

@@ -1,0 +1,50 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: spire-system
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: spire-agent
+  namespace: spire-system
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: spire-agent
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: spire-server
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: spire-server
+      ports:
+        - protocol: TCP
+          port: 8081
+    # The k8s workload attestor queries each node's kubelet. Staging keeps this
+    # portable; production MUST replace 0.0.0.0/0 with the node CIDRs.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 10250

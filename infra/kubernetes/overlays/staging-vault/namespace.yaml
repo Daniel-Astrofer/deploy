@@ -3,6 +3,11 @@ kind: Namespace
 metadata:
   name: kerosene-staging-vault
   labels:
+    app.kubernetes.io/name: kerosene-vault
+    app.kubernetes.io/part-of: kerosene
+    app.kubernetes.io/environment: staging
+    kerosene.io/spire-trust-domain: staging.kerosene.internal
+    kerosene.io/workload-identity-boundary: enforced
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

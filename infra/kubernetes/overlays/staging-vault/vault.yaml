@@ -41,6 +41,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: vault
+        vault.kerosene.io/node-id: staging-vault-1
     spec:
       serviceAccountName: vault
       automountServiceAccountToken: false
@@ -66,9 +67,8 @@ spec:
               value: testnet3
             - name: VAULT_NODE_ID
               valueFrom:
-                secretKeyRef:
-                  name: vault-identity
-                  key: node-id
+                fieldRef:
+                  fieldPath: metadata.labels['vault.kerosene.io/node-id']
             - name: VAULT_LISTEN_ADDR
               value: 0.0.0.0:7801
             - name: VAULT_DATA_DIR

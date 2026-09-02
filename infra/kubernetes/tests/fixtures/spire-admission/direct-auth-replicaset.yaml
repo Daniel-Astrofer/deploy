@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: server-attacker
+  namespace: kerosene-staging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: server-attacker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: server-attacker
+        kerosene.io/spiffe-role: auth
+    spec:
+      serviceAccountName: server
+      automountServiceAccountToken: false
+      containers:
+        - name: server
+          image: registry.example/kerosene-core@sha256:1111111111111111111111111111111111111111111111111111111111111111
+          volumeMounts:
+            - name: spiffe-workload-api
+              mountPath: /run/spire/sockets
+              readOnly: true
+      volumes:
+        - name: spiffe-workload-api
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true

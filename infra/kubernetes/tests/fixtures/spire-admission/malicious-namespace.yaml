@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kerosene-attacker
+  labels:
+    kerosene.io/spire-trust-domain: staging.kerosene.internal
+    kerosene.io/workload-identity-boundary: enforced

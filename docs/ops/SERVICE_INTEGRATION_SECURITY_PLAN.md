@@ -105,7 +105,10 @@ Regras:
 ### P1 — endurecimento
 
 - Imagens por digest, assinatura Cosign e SBOM; tags `:staging` não são identidade de release.
-- Admission policy para recusar imagem sem digest/assinatura, root, capabilities, host mounts e service-account token desnecessário.
+- A admissão SPIFFE já recusa repositório não aprovado, imagem sem digest,
+  ServiceAccount/token ou mount CSI divergente nos workloads de identidade. A
+  verificação de assinatura Cosign e a política geral para root, capabilities e
+  host mounts em todos os workloads continuam pendentes.
 - `PodDisruptionBudget`, anti-affinity e topology spread para workloads de quorum em staging.
 - Egress explícito para DNS, Onion/Tor, Bitcoin Core/LND e endpoints de attestation necessários. Todo o restante negado.
 - Rate limit Redis deve falhar fechado em produção nos adapters BTC/LND.

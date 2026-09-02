@@ -53,6 +53,13 @@ TOR_IMAGE=registry.example/tor@sha256:... \
   bash infra/start-complete.sh staging
 ```
 
+Before enabling the SPIFFE profiles, provision the native admission boundary
+with `infra/kubernetes/scripts/install-staging-spire.sh`. It pins the approved
+image repositories, installs fail-closed CEL policies and limits workload
+writes to the dedicated `kerosene-deployer` principal. The CI negative suite
+proves that direct Pods, copied service accounts/labels, CSI socket sidecars and
+arbitrary ClusterSPIFFEID resources are denied by a real Kubernetes API server.
+
 `infra/start-complete.sh production` is fail-closed. It requires a private
 operations overlay, immutable images, external audit/recovery evidence and an
 approved change identifier. This public repository never manufactures secrets

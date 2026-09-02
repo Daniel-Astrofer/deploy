@@ -72,13 +72,17 @@ somente porque `infra/scripts/local/` ainda o referencia.
 |---|---|
 | `infra/kubernetes/base/` | Recursos compartilhados |
 | `infra/kubernetes/components/` | Componentes Kustomize reutilizáveis |
+| `infra/kubernetes/components/spire/` | Plano de identidade de workloads exclusivo de staging |
+| `infra/kubernetes/components/spire/admission/` | Admissão nativa fail-closed e RBAC GitOps de identidade |
 | `infra/kubernetes/overlays/local/` | Ambiente local leve |
 | `infra/kubernetes/overlays/local-full/` | Ambiente local integrado canônico |
 | `infra/kubernetes/overlays/local-ha/` | Topologia local de alta disponibilidade |
 | `infra/kubernetes/overlays/staging/` | Runtime público do Core em staging |
 | `infra/kubernetes/overlays/staging-vault/` | Runtime independente do Vault em staging |
+| `infra/kubernetes/overlays/staging-spiffe/` | Core de staging com mount aditivo da Workload API |
+| `infra/kubernetes/overlays/staging-vault-spiffe/` | Vault independente com mount aditivo da Workload API |
 | `infra/kubernetes/scripts/` | Deploy, validação, smoke e operação |
-| `infra/kubernetes/tests/` | Testes de regressão dos scripts de deploy |
+| `infra/kubernetes/tests/` | Regressão de scripts e ataques de admissão em Kind descartável |
 
 `infra/kubernetes/scripts/deploy-local-ha.sh` é um executor especializado do
 ambiente `local-ha`, não um wrapper de compatibilidade. Ele não é a entrada

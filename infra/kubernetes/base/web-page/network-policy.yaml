@@ -25,10 +25,3 @@ spec:
       ports:
         - protocol: TCP
           port: 8080
-    - to:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: kfe-service
-      ports:
-        - protocol: TCP
-          port: 8080

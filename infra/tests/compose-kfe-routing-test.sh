@@ -18,10 +18,19 @@ require_text() {
   grep -Fq -- "$text" "$file" || fail "$file does not contain: $text"
 }
 
+reject_text() {
+  local file="$1"
+  local text="$2"
+  if grep -Fq -- "$text" "$file"; then
+    fail "$file still contains forbidden direct KFE routing: $text"
+  fi
+}
+
 require_text "$NGINX_TEMPLATE" 'location ~ ^/(kfe|api/public/kfe|api/admin/kfe)(/|$)'
-require_text "$NGINX_TEMPLATE" 'proxy_pass http://kerosene_kfe;'
-require_text "$NGINX_TEMPLATE" 'location ~ ^/(auth|notifications|api|sovereignty|actuator)(/|$)'
 require_text "$NGINX_TEMPLATE" 'proxy_pass http://kerosene_core;'
+require_text "$NGINX_TEMPLATE" 'location ~ ^/(auth|notifications|api|sovereignty|actuator)(/|$)'
+reject_text "$NGINX_TEMPLATE" 'kerosene_kfe'
+reject_text "$NGINX_TEMPLATE" 'KEROSENE_KFE_UPSTREAM'
 
 require_text "$REPO_ROOT/infra/runtime/tor/torrc-kfe-is" 'HiddenServicePort 80 10.241.0.20:8080'
 require_text "$REPO_ROOT/infra/runtime/tor/torrc-kfe-ch" 'HiddenServicePort 80 10.241.0.21:8080'

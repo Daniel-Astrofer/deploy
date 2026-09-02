@@ -42,7 +42,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: fix-tor-permissions
-          image: busybox:latest
+          image: docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0
           command: ["sh", "-c", "chown -R 1000:1000 /var/lib/tor && chmod 700 /var/lib/tor"]
           securityContext:
             allowPrivilegeEscalation: false
