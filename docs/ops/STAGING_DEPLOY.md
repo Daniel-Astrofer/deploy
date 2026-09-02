@@ -36,6 +36,10 @@ No perfil comum `staging`, `server-secrets` ainda precisa conter
 `staging-spiffe`, esse valor não é montado em Auth nem KFE e é substituído por
 identidades SPIFFE rotativas e autorização exata do par.
 
+O perfil comum só é válido antes da ativação da barreira SPIFFE. Depois de
+instalar as políticas de admissão, rollback usa digests anteriores do próprio
+perfil `staging-spiffe`; workloads sem o contrato de identidade são recusados.
+
 O namespace é proprietário dos StatefulSets `staging-postgres`,
 `staging-redis`, `staging-bitcoin`, `staging-lnd` e `staging-tor`. Nenhum
 Service de staging seleciona pods de `kerosene-local`.
@@ -110,8 +114,20 @@ TOR_IMAGE=registry/kerosene-tor@sha256:... \
   infra/kubernetes/scripts/deploy.sh staging
 ```
 
-Depois de instalar e validar o SPIRE conforme `docs/pt-BR/SPIRE-STAGING.md`, use
-o perfil que ativa mTLS entre Auth e KFE:
+Instale primeiro o plano de identidade e congele os repositórios de imagem
+permitidos. A identidade de bootstrap/CI precisa poder impersonar somente a
+ServiceAccount `kerosene-deployer`:
+
+```bash
+SERVER_IMAGE=registry/kerosene-server@sha256:... \
+KFE_SERVICE_IMAGE=registry/kerosene-kfe@sha256:... \
+VAULT_IMAGE=registry/kerosene-vault@sha256:... \
+NODE_IMAGE=registry/kerosene-node@sha256:... \
+TOR_IMAGE=registry/kerosene-tor@sha256:... \
+  infra/kubernetes/scripts/install-staging-spire.sh
+```
+
+Depois use o perfil que ativa mTLS entre Auth e KFE:
 
 ```bash
 SERVER_IMAGE=registry/kerosene-server@sha256:... \
@@ -130,8 +146,17 @@ O deploy falha se:
 - o manifesto mencionar `kerosene-local` ou outro namespace Kerosene;
 - PostgreSQL, Redis, Bitcoin, LND ou Tor não ficar pronto;
 - houver conflito de ownership no server-side apply;
+- as políticas de admissão não estiverem em `Fail` com `Deny` e `Audit`;
+- existir namespace inesperado selecionado pelo trust domain;
+- a imagem vier de repositório diferente da allow-list imutável do namespace;
+- a identidade GitOps puder criar Pods, ler Secrets ou escrever nos namespaces do SPIRE;
 - server, KFE, web ou qualquer um dos três vaults não ficar pronto.
 - o login sintético ou a prontidão de três nós do quorum falhar.
+
+Os manifests dos perfis SPIFFE são aplicados com
+`--as=system:serviceaccount:kerosene-gitops:kerosene-deployer`. Esse principal
+escreve recursos declarativos de aplicação, mas não lê Secrets, não cria Pods
+diretos e não possui permissão em `spire-server` ou `spire-system`.
 
 `KEROSENE_FORCE_CONFLICTS=1` existe somente para recuperação operacional
 deliberada e emite aviso.

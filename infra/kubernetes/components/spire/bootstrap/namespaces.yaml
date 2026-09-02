@@ -5,6 +5,7 @@ metadata:
   labels:
     app.kubernetes.io/name: spire-server
     app.kubernetes.io/part-of: kerosene
+    kerosene.io/security-boundary: spire-control-plane
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
@@ -16,6 +17,7 @@ metadata:
   labels:
     app.kubernetes.io/name: spire
     app.kubernetes.io/part-of: kerosene
+    kerosene.io/security-boundary: spire-node-agent
     # Only the node agent and CSI driver live here. They require hostPID and
     # privileged mount propagation. The SPIRE server is isolated elsewhere.
     pod-security.kubernetes.io/enforce: privileged

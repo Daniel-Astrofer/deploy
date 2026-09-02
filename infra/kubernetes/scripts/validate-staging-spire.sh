@@ -66,6 +66,7 @@ actual_crd_sha256="$(sha256sum "$K8S_ROOT/components/spire/bootstrap/clusterspif
 render "$K8S_ROOT/components/spire/bootstrap" "$TMP_DIR/bootstrap.yaml"
 render "$K8S_ROOT/components/spire/server" "$TMP_DIR/server.yaml"
 render "$K8S_ROOT/components/spire/agent" "$TMP_DIR/agent.yaml"
+render "$K8S_ROOT/components/spire/admission" "$TMP_DIR/admission.yaml"
 render "$K8S_ROOT/components/spire/registration" "$TMP_DIR/registration.yaml"
 render "$K8S_ROOT/overlays/staging-spiffe" "$TMP_DIR/staging-spiffe.yaml"
 render "$K8S_ROOT/overlays/staging-vault-spiffe" "$TMP_DIR/staging-vault-spiffe.yaml"
@@ -79,6 +80,27 @@ require "$TMP_DIR/bootstrap.yaml" '^  name: spire-system$' "privileged SPIRE age
 require "$TMP_DIR/bootstrap.yaml" 'pod-security.kubernetes.io/enforce: restricted' "server namespace is not restricted"
 require "$TMP_DIR/bootstrap.yaml" 'pod-security.kubernetes.io/enforce: privileged' "agent privilege exception is missing"
 require "$TMP_DIR/bootstrap.yaml" '^  - endpoints$' "controller cannot watch service endpoints"
+require "$TMP_DIR/bootstrap.yaml" 'kerosene.io/security-boundary: spire-control-plane' "SPIRE server namespace boundary is not explicit"
+require "$TMP_DIR/bootstrap.yaml" 'kerosene.io/security-boundary: spire-node-agent' "SPIRE agent namespace boundary is not explicit"
+
+require_count "$TMP_DIR/admission.yaml" '^kind: ValidatingAdmissionPolicy$' 5 "SPIFFE admission policy count drifted"
+require_count "$TMP_DIR/admission.yaml" '^kind: ValidatingAdmissionPolicyBinding$' 5 "SPIFFE admission binding count drifted"
+require_count "$TMP_DIR/admission.yaml" '^  failurePolicy: Fail$' 5 "SPIFFE admission is not uniformly fail-closed"
+require_count "$TMP_DIR/admission.yaml" '^  validationActions:$' 5 "SPIFFE admission bindings do not all declare enforcement actions"
+require_count "$TMP_DIR/admission.yaml" '^  - Deny$' 5 "SPIFFE admission bindings do not all deny invalid requests"
+require_count "$TMP_DIR/admission.yaml" '^  - Audit$' 5 "SPIFFE admission bindings do not all audit invalid requests"
+require "$TMP_DIR/admission.yaml" 'system:serviceaccount:kerosene-gitops:kerosene-deployer' "dedicated GitOps writer identity is missing"
+require "$TMP_DIR/admission.yaml" 'system:serviceaccount:kube-system:deployment-controller' "Deployment owner controller identity is not constrained"
+require "$TMP_DIR/admission.yaml" 'system:serviceaccount:kube-system:replicaset-controller' "ReplicaSet owner controller identity is not constrained"
+require "$TMP_DIR/admission.yaml" 'system:serviceaccount:kube-system:statefulset-controller' "StatefulSet owner controller identity is not constrained"
+require "$TMP_DIR/admission.yaml" 'kerosene.io/workload-identity-boundary' "identity namespace boundary selector is missing"
+require "$TMP_DIR/admission.yaml" 'kerosene.io/approved-auth-image' "Auth image repository allow-list is missing"
+require "$TMP_DIR/admission.yaml" 'kerosene.io/approved-kfe-image' "KFE image repository allow-list is missing"
+require "$TMP_DIR/admission.yaml" 'kerosene.io/approved-vault-image' "Vault image repository allow-list is missing"
+require "$TMP_DIR/admission.yaml" 'kerosene.io/approved-node-image' "Node image repository allow-list is missing"
+require "$TMP_DIR/admission.yaml" 'kerosene.io/approved-tor-image' "Tor image repository allow-list is missing"
+require "$TMP_DIR/admission.yaml" 'resources:$' "GitOps RBAC resources are missing"
+reject "$TMP_DIR/admission.yaml" 'namespace: spire-(system|server)' "application GitOps identity is bound inside a SPIRE control-plane namespace"
 
 require_count "$TMP_DIR/server.yaml" 'image: .+@sha256:[0-9a-f]{64}$' 2 "SPIRE server images are not all immutable"
 require_count "$TMP_DIR/agent.yaml" 'image: .+@sha256:[0-9a-f]{64}$' 3 "SPIRE agent/CSI images are not all immutable"
@@ -86,6 +108,8 @@ require "$TMP_DIR/server.yaml" 'trust_domain = "staging.kerosene.internal"' "ser
 require "$TMP_DIR/server.yaml" 'socket_path = "/tmp/spire-server/private/api.sock"' "server admin socket path drifted"
 require "$TMP_DIR/server.yaml" 'mountPath: /spire-server' "controller cannot reach the server admin socket"
 require "$TMP_DIR/server.yaml" 'spireServerSocketPath: /spire-server/api.sock' "controller server socket path drifted"
+require "$TMP_DIR/server.yaml" 'name: ctrl-health' "controller health port is absent or exceeds the Kubernetes name limit"
+reject "$TMP_DIR/server.yaml" 'controller-health' "controller health port exceeds the Kubernetes 15-character name limit"
 require "$TMP_DIR/server.yaml" 'name: ENABLE_WEBHOOKS' "unused controller webhooks were not disabled"
 grep -A1 'name: ENABLE_WEBHOOKS' "$TMP_DIR/server.yaml" | grep -q 'value: "false"' \
   || fail "controller webhooks are enabled without admission RBAC/service"
@@ -119,6 +143,8 @@ done
 
 require_count "$TMP_DIR/staging-spiffe.yaml" 'value: unix:///run/spire/sockets/spire-agent.sock' 3 "Core workloads do not all receive the Workload API endpoint"
 require_count "$TMP_DIR/staging-spiffe.yaml" 'driver: csi.spiffe.io' 3 "Core workloads do not all use the CSI socket"
+require "$TMP_DIR/staging-spiffe.yaml" 'kerosene.io/workload-identity-boundary: enforced' "Core namespace is outside the admission boundary"
+require "$TMP_DIR/staging-spiffe.yaml" 'docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0' "Node init image is not pinned to the reviewed digest"
 require "$TMP_DIR/staging-spiffe.yaml" 'kerosene.io/spiffe-role: auth' "Auth workload label is missing"
 require "$TMP_DIR/staging-spiffe.yaml" 'kerosene.io/spiffe-role: kfe' "KFE workload label is missing"
 require "$TMP_DIR/staging-spiffe.yaml" 'kerosene.io/discovery-plane: bank' "Bank Node plane label is missing"
@@ -175,6 +201,7 @@ grep -q '^  namespace: kerosene-staging$' <<<"$core_node_service_account" \
 
 require_count "$TMP_DIR/staging-vault-spiffe.yaml" 'value: unix:///run/spire/sockets/spire-agent.sock' 2 "Vault workloads do not all receive the Workload API endpoint"
 require_count "$TMP_DIR/staging-vault-spiffe.yaml" 'driver: csi.spiffe.io' 2 "Vault workloads do not all use the CSI socket"
+require "$TMP_DIR/staging-vault-spiffe.yaml" 'kerosene.io/workload-identity-boundary: enforced' "Vault namespace is outside the admission boundary"
 require "$TMP_DIR/staging-vault-spiffe.yaml" 'vault.kerosene.io/node-id: staging-vault-1' "Vault node identity label is missing"
 vault_node_service_account="$(awk '
   BEGIN { RS = "---" }

@@ -50,6 +50,7 @@ fi
 
 KUBECTL="${KUBECTL:-kubectl}"
 KUSTOMIZE_BIN="${KUSTOMIZE:-kustomize}"
+GITOPS_USER="system:serviceaccount:kerosene-gitops:kerosene-deployer"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 K8S_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 OVERLAY="$K8S_ROOT/overlays/$ENVIRONMENT"
@@ -126,10 +127,55 @@ fi
 echo "[*] Validating rendered manifest for namespace $NAMESPACE..."
 "$KUBECTL" apply --dry-run=client -f "$MANIFEST" >/dev/null
 
+if [[ -n "$SPIFFE_SCOPE" ]]; then
+  "$KUBECTL" get namespace "$NAMESPACE" >/dev/null 2>&1 || {
+    echo "[!] Namespace $NAMESPACE must be provisioned before a SPIFFE deployment." >&2
+    echo "[!] Install the SPIRE admission component and its reviewed namespace/image policy first." >&2
+    exit 1
+  }
+
+  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/preflight-staging-spire.sh" "$SPIFFE_SCOPE"
+
+  image_repository() {
+    local image_ref="$1"
+    printf '%s' "${image_ref%@sha256:*}"
+  }
+
+  require_approved_repository() {
+    local annotation="$1"
+    local image_ref="$2"
+    local approved expected
+    approved="$(
+      "$KUBECTL" get namespace "$NAMESPACE" \
+        -o "go-template={{ index .metadata.annotations \"${annotation}\" }}"
+    )"
+    expected="$(image_repository "$image_ref")"
+    if [[ -z "$approved" || "$approved" != "$expected" ]]; then
+      echo "[!] Namespace ${NAMESPACE} must approve ${expected} in annotation ${annotation}." >&2
+      echo "[!] Image repository allow-lists are provisioned before admission activation and are immutable." >&2
+      exit 1
+    fi
+  }
+
+  if [[ "$SPIFFE_SCOPE" == "core" ]]; then
+    require_approved_repository kerosene.io/approved-auth-image "$SERVER_IMAGE"
+    require_approved_repository kerosene.io/approved-kfe-image "$KFE_SERVICE_IMAGE"
+  else
+    require_approved_repository kerosene.io/approved-vault-image "$VAULT_IMAGE"
+  fi
+  require_approved_repository kerosene.io/approved-node-image "$NODE_IMAGE"
+  require_approved_repository kerosene.io/approved-tor-image "$TOR_IMAGE"
+fi
+
 if [[ "$DRY_RUN" == "--dry-run" ]]; then
   echo "[*] Running server-side dry-run..."
   if "$KUBECTL" get namespace "$NAMESPACE" >/dev/null 2>&1; then
-    "$KUBECTL" apply --server-side --dry-run=server -f "$MANIFEST"
+    if [[ -n "$SPIFFE_SCOPE" ]]; then
+      "$KUBECTL" --as="$GITOPS_USER" apply --server-side --dry-run=server \
+        --field-manager=kerosene-gitops -f "$MANIFEST"
+    else
+      "$KUBECTL" apply --server-side --dry-run=server -f "$MANIFEST"
+    fi
   else
     echo "[!] Namespace $NAMESPACE does not exist yet."
     echo "[!] Kubernetes server-side dry-run does not create the namespace for later objects in the same dry-run batch."
@@ -139,12 +185,10 @@ if [[ "$DRY_RUN" == "--dry-run" ]]; then
   exit 0
 fi
 
-if [[ -n "$SPIFFE_SCOPE" ]]; then
-  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/preflight-staging-spire.sh" "$SPIFFE_SCOPE"
+if [[ -z "$SPIFFE_SCOPE" ]]; then
+  echo "[*] Ensuring namespace exists..."
+  "$KUBECTL" create namespace "$NAMESPACE" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 fi
-
-echo "[*] Ensuring namespace exists..."
-"$KUBECTL" create namespace "$NAMESPACE" --dry-run=client -o yaml | "$KUBECTL" apply -f -
 
 if [[ "$PROFILE" == "staging-core" ]]; then
   echo "[*] Verifying independently provisioned Core secrets..."
@@ -227,7 +271,12 @@ if [[ "${KEROSENE_FORCE_CONFLICTS:-0}" == "1" ]]; then
   echo "[!] KEROSENE_FORCE_CONFLICTS=1: overriding server-side apply ownership conflicts." >&2
   APPLY_ARGS+=(--force-conflicts)
 fi
-"$KUBECTL" "${APPLY_ARGS[@]}" -f "$MANIFEST"
+if [[ -n "$SPIFFE_SCOPE" ]]; then
+  "$KUBECTL" --as="$GITOPS_USER" "${APPLY_ARGS[@]}" \
+    --field-manager=kerosene-gitops -f "$MANIFEST"
+else
+  "$KUBECTL" "${APPLY_ARGS[@]}" -f "$MANIFEST"
+fi
 
 if [[ "$PROFILE" == "staging-core" ]]; then
   echo "[*] Waiting for Core workloads..."

@@ -194,19 +194,19 @@ spec:
             - name: ENABLE_WEBHOOKS
               value: "false"
           ports:
-            - name: controller-health
+            - name: ctrl-health
               containerPort: 8083
               protocol: TCP
           readinessProbe:
             httpGet:
               path: /readyz
-              port: controller-health
+              port: ctrl-health
             periodSeconds: 10
             timeoutSeconds: 3
           livenessProbe:
             httpGet:
               path: /healthz
-              port: controller-health
+              port: ctrl-health
             periodSeconds: 30
             timeoutSeconds: 3
           resources:

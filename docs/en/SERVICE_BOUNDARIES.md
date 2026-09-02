@@ -32,6 +32,8 @@ compile service source from the Deploy checkout.
   are versioned here.
 
 Auth/KFE SPIFFE mTLS is implemented in the service branches and activated only
-by the explicit `staging-spiffe` overlay. Cluster evidence remains a promotion
-gate. Vault/Node workload-identity migration and CometBFT remain service-owned
-work; Deploy will wire them only after their contracts are released.
+by the explicit `staging-spiffe` overlay. In-cluster admission evidence now
+proves that copied labels, service accounts, CSI mounts and registrations are
+denied; application handshake and rotation evidence remain a promotion gate.
+Vault/Node workload-identity migration and CometBFT remain service-owned work;
+Deploy will wire them only after their contracts are released.

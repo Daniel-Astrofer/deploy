@@ -18,15 +18,18 @@ direta para o KFE; o Auth preserva a rota e encaminha somente headers permitidos
 pelo conector interno autenticado.
 
 Essa ativação depende de imagens construídas com as mudanças correspondentes
-em Shared, Auth e KFE. Os testes de código e manifesto passam, mas ainda falta
-evidência end-to-end e de rotação em cluster. Vault e Kerosene Node recebem
-SVIDs, porém ainda não os usam como identidade ativa de transporte.
+em Shared, Auth e KFE. A barreira de admissão agora impede que um editor comum
+copie labels, ServiceAccount, nome de container e volume CSI para obter a mesma
+identidade. Vault e Kerosene Node recebem SVIDs, porém ainda não os usam como
+identidade ativa de transporte. Ainda falta evidência end-to-end de handshake,
+rotação e alta disponibilidade.
 
 ## Separação de responsabilidades
 
 | Camada | Responsabilidade |
 |---|---|
 | `bootstrap` | Cria namespaces, CRD fixada e RBAC mínimo |
+| `admission` | Reserva identidades e permite escrita de workloads somente pelo principal GitOps |
 | `server` | Emite identidades no trust domain de staging |
 | `agent` | Atesta processos no nó e oferece a Workload API |
 | `registration` | Define qual container pode receber qual identidade |
@@ -47,10 +50,13 @@ Kerosene Node não recebe o socket e não corresponde ao seletor do Node.
 | Vault | `spiffe://staging.kerosene.internal/service/vault/node/<node-id>` |
 | Node | `spiffe://staging.kerosene.internal/service/node/plane/<plano>/instance/<pod>` |
 
-Uma label isolada não concede identidade. O registro também exige namespace
-autorizado, ServiceAccount exata e nome exato do container. A autorização de
-negócio continuará dependendo do roster assinado: possuir um SVID válido prova
-identidade de workload, mas não autoriza assinatura, custódia ou membership.
+Uma label isolada não concede identidade. O API server exige a combinação exata
+de namespace, controller/owner, ServiceAccount, role e container. Somente o
+container registrado monta o socket; Tor, init containers, sidecars e
+ephemeral containers são recusados. As imagens precisam usar digest e o
+repositório previamente aprovado no namespace. A autorização de negócio
+continua dependendo do roster assinado: possuir um SVID válido prova identidade
+de workload, mas não autoriza assinatura, custódia ou membership.
 
 ## Validação
 
@@ -58,27 +64,33 @@ identidade de workload, mas não autoriza assinatura, custódia ou membership.
 bash infra/kubernetes/scripts/validate-staging-spire.sh
 ```
 
-O gate verifica checksum da CRD, imagens por digest, isolamento dos namespaces,
-registros específicos e mounts CSI. Ele recusa explicitamente
+O gate verifica checksum da CRD, políticas CEL fail-closed, bindings `Deny` e
+`Audit`, RBAC negativo, imagens por digest, isolamento dos namespaces,
+registros específicos e mounts CSI. O teste
+`staging-spire-admission-kind-test.sh` também executa ataques reais contra um
+Kind efêmero e apaga apenas esse cluster. O gate recusa explicitamente
 `KEROSENE_SPIRE_TARGET=production`.
 
 ## Aplicação por fases
 
-Use comandos Kubernetes nativos para a infraestrutura de identidade:
+Use o instalador transacional, que apenas organiza comandos Kubernetes nativos
+na ordem segura:
 
 ```bash
-kubectl apply -k infra/kubernetes/components/spire/bootstrap
-kubectl apply -k infra/kubernetes/components/spire/server
-kubectl -n spire-server rollout status statefulset/spire-server --timeout=5m
-test -n "$(kubectl -n spire-system get configmap/spire-bundle -o jsonpath='{.data.bundle\.crt}')"
-kubectl apply -k infra/kubernetes/components/spire/agent
-kubectl -n spire-system rollout status daemonset/spire-agent --timeout=10m
-kubectl apply -f infra/kubernetes/overlays/staging/namespace.yaml
-kubectl apply -f infra/kubernetes/overlays/staging-vault/namespace.yaml
-kubectl apply -k infra/kubernetes/components/spire/registration
-bash infra/kubernetes/scripts/preflight-staging-spire.sh core
-bash infra/kubernetes/scripts/preflight-staging-spire.sh vault
+SERVER_IMAGE=registry.example/kerosene-core@sha256:... \
+KFE_SERVICE_IMAGE=registry.example/kerosene-kfe@sha256:... \
+VAULT_IMAGE=registry.example/kerosene-vault@sha256:... \
+NODE_IMAGE=registry.example/kerosene-node@sha256:... \
+TOR_IMAGE=registry.example/kerosene-tor@sha256:... \
+  bash infra/kubernetes/scripts/install-staging-spire.sh
 ```
+
+A ordem aplicada é: bootstrap → dois namespaces revisados e allow-list de
+repositórios → admissão/RBAC → registros via GitOps → servidor → agente. A
+identidade que executa a instalação precisa poder impersonar exclusivamente
+`system:serviceaccount:kerosene-gitops:kerosene-deployer`. Essa permissão de
+cluster não é concedida pelo repositório público e deve pertencer ao pipeline
+ou operador de bootstrap.
 
 Depois aplique os workloads com o executor existente, sempre informando imagens
 imutáveis. Para o Core use `staging-spiffe`; para o Vault independente use
@@ -94,22 +106,22 @@ Não aplique o overlay de workload antes de o DaemonSet estar pronto: o kubelet
 não conseguirá montar o volume CSI e os pods ficarão pendentes.
 
 O controller reconcilia somente a classe `kerosene-staging` e prefixa as
-entradas que possui. O webhook de admissão do controller está desligado nesta
-base mínima; a CRD oferece validação estrutural e o gate do repositório valida
-os objetos conhecidos, mas produção precisa habilitar validação semântica.
+entradas que possui. O webhook do controller continua desligado. A validação
+semântica é feita pelas `ValidatingAdmissionPolicy` nativas: somente quatro
+registros exatos são aceitos e `admin`, downstream, federação, DNS adicional e
+TTL divergente são recusados.
 
 ## Rollback seguro
 
-1. Reimplante `staging` e `staging-vault`, com os mesmos digests, para restaurar
-   o transporte anterior e remover os mounts CSI sem trocar as imagens. Durante
-   essa janela, o perfil sem SPIFFE ainda exige
-   `server-secrets/kfe-internal-shared-secret`.
-2. Confirme a saúde dos serviços e dos certificados estáticos.
-3. Remova `components/spire/registration`.
-4. Remova `components/spire/agent` e depois `components/spire/server`.
-5. Preserve o PVC do servidor para diagnóstico e backup.
-6. Remova RBAC e CRD somente após confirmar que não existe nenhum
-   `ClusterSPIFFEID`.
+1. Reimplante os digests anteriores, já aprovados, dos perfis
+   `staging-spiffe` e `staging-vault-spiffe`.
+2. Confirme mTLS, saúde e identidade exata dos pares.
+3. Preserve o PVC do SPIRE Server e as evidências para diagnóstico.
+
+Depois que a admissão é ativada, os perfis antigos sem SPIFFE são recusados
+porque reutilizam ServiceAccounts reservadas sem o contrato de identidade.
+Remover a barreira ou restaurar o segredo compartilhado é uma migração
+break-glass separada, com aprovação de segurança; não é rollback automático.
 
 ## Por que ainda não serve para produção
 
@@ -120,9 +132,6 @@ os objetos conhecidos, mas produção precisa habilitar validação semântica.
   os testes negativos de SPIFFE ID incorreta;
 - Vault e Node ainda precisam migrar dos arquivos de certificado estático para
   identidades de workload;
-- ainda falta uma política de admissão que impeça editores do namespace de
-  reutilizar ServiceAccounts e labels reservadas fora do fluxo GitOps;
-- o webhook semântico dos recursos SPIRE não faz parte deste staging mínimo;
 - máquinas fora do cluster ainda não possuem fluxo de node attestation;
 - backup, restauração, rotação de CA e federação entre clusters precisam de
   ensaio operacional.
@@ -132,5 +141,7 @@ monitoramento de expiração/rotação e política fail-closed. O SPIRE não des
 serviços: endpoints vêm do deploy e membership vem do roster assinado; o SPIRE
 somente prova a identidade do processo que está se conectando.
 
-Bloqueios rastreados: [controle contra impersonação de SPIFFE ID #36](https://github.com/Daniel-Astrofer/kerosene-deploy/issues/36)
-e [evidência end-to-end/HA do SPIRE #37](https://github.com/Daniel-Astrofer/kerosene-deploy/issues/37).
+A implementação e a evidência da admissão são rastreadas em
+[controle contra impersonação de SPIFFE ID #36](https://github.com/Daniel-Astrofer/kerosene-deploy/issues/36).
+A evidência de produção ainda pendente está em
+[SPIRE end-to-end/HA #37](https://github.com/Daniel-Astrofer/kerosene-deploy/issues/37).

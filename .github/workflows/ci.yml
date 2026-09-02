@@ -18,15 +18,33 @@ jobs:
   architecture:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: bash infra/scripts/check_architecture_guardrails.sh
 
   smoke:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Run progressive chain readiness smoke tests
         run: bash infra/tests/progressive-chain-readiness-test.sh
+
+  spiffe-admission:
+    name: SPIFFE admission impersonation tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out deploy revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install pinned Kind and kubectl
+        uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          install_only: true
+          version: v0.27.0
+          kubectl_version: v1.32.3
+      - name: Prove SPIFFE impersonation attacks are denied in-cluster
+        run: bash infra/kubernetes/tests/staging-spire-admission-kind-test.sh
 
   infrastructure:
     name: Kubernetes manifests and rollout gates

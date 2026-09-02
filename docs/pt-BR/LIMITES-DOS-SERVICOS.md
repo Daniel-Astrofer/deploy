@@ -30,7 +30,9 @@ devem compilar os serviços a partir do checkout do Deploy.
 - Secrets: ambiente operacional; aqui ficam somente nomes e contratos de montagem.
 
 O mTLS SPIFFE entre Auth e KFE está implementado nas branches dos serviços e é
-ativado somente pelo overlay explícito `staging-spiffe`. Evidência em cluster
-ainda é gate de promoção. A migração de identidade de Vault/Node e o CometBFT
-continuam pertencendo aos serviços; o Deploy apenas os conectará após a
-publicação dos contratos correspondentes.
+ativado somente pelo overlay explícito `staging-spiffe`. A evidência de admissão
+em cluster já prova o bloqueio de labels, ServiceAccounts, mounts CSI e registros
+copiados; handshake da aplicação e rotação ainda são gates de promoção. A
+migração de identidade de Vault/Node e o CometBFT continuam pertencendo aos
+serviços; o Deploy apenas os conectará após a publicação dos contratos
+correspondentes.

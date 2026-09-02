@@ -73,6 +73,7 @@ It remains only because legacy `infra/scripts/local/` still references it.
 | `infra/kubernetes/base/` | Shared Kubernetes resources |
 | `infra/kubernetes/components/` | Reusable Kustomize components |
 | `infra/kubernetes/components/spire/` | Staging-only workload identity control plane |
+| `infra/kubernetes/components/spire/admission/` | Native fail-closed identity admission and GitOps RBAC |
 | `infra/kubernetes/overlays/local/` | Lightweight workstation overlay |
 | `infra/kubernetes/overlays/local-full/` | Canonical integrated local runtime |
 | `infra/kubernetes/overlays/local-ha/` | Local HA test topology |
@@ -81,7 +82,7 @@ It remains only because legacy `infra/scripts/local/` still references it.
 | `infra/kubernetes/overlays/staging-spiffe/` | Core staging with additive Workload API mount |
 | `infra/kubernetes/overlays/staging-vault-spiffe/` | Independent Vault staging with additive Workload API mount |
 | `infra/kubernetes/scripts/` | Deploy, validation, smoke and operations helpers |
-| `infra/kubernetes/tests/` | Shell regression tests for deploy behavior |
+| `infra/kubernetes/tests/` | Shell regression and disposable Kind admission tests |
 
 `infra/kubernetes/scripts/deploy-local-ha.sh` is a specialized environment
 executor, not a compatibility wrapper. It is not the default local entrypoint.
