@@ -41,10 +41,14 @@ ports.
 
 ```text
 onion port 80 -> web-page:8080
-web-page     -> server:8080 for Core routes
-web-page     -> kfe-service:8080 for KFE routes
+web-page     -> server:8080 for Auth and public KFE gateway routes
+server       -> kfe-service:8080 with the local compatibility credential
 kfe-service  -> vault-1:7701 (vault mesh lab on host via Endpoints bridge)
 ```
+
+The browser-facing Nginx never connects directly to KFE. This keeps Auth as the
+single public policy boundary. The local runtime uses the explicit compatibility
+credential; the `staging-spiffe` profile replaces that hop with SPIFFE mTLS.
 
 ## Validate only
 

@@ -18,6 +18,8 @@ repositório e está bloqueada pelos gates descritos em
 - StorageClass padrão capaz de provisionar PVCs `ReadWriteOnce`.
 - Secrets centrais já provisionados:
   - `server-secrets`;
+  - `kfe-service-secrets`, obrigatório no perfil `staging-spiffe`, com
+    `fee-quote-signing-secret` independente;
   - `kerosene-db-secrets`;
   - `kerosene-redis-secrets`;
   - `kerosene-bitcoin-secrets`;
@@ -28,6 +30,11 @@ repositório e está bloqueada pelos gates descritos em
   - `kerosene-node-mtls`, com a CA, folha servidor e identidade cliente.
 
 O script de deploy não cria nem imprime esses valores.
+
+No perfil comum `staging`, `server-secrets` ainda precisa conter
+`kfe-internal-shared-secret` para permitir rollback. No perfil
+`staging-spiffe`, esse valor não é montado em Auth nem KFE e é substituído por
+identidades SPIFFE rotativas e autorização exata do par.
 
 O namespace é proprietário dos StatefulSets `staging-postgres`,
 `staging-redis`, `staging-bitcoin`, `staging-lnd` e `staging-tor`. Nenhum
@@ -101,6 +108,18 @@ VAULT_IMAGE=registry/kerosene-vault@sha256:... \
 NODE_IMAGE=registry/kerosene-node@sha256:... \
 TOR_IMAGE=registry/kerosene-tor@sha256:... \
   infra/kubernetes/scripts/deploy.sh staging
+```
+
+Depois de instalar e validar o SPIRE conforme `docs/pt-BR/SPIRE-STAGING.md`, use
+o perfil que ativa mTLS entre Auth e KFE:
+
+```bash
+SERVER_IMAGE=registry/kerosene-server@sha256:... \
+KFE_SERVICE_IMAGE=registry/kerosene-kfe@sha256:... \
+WEB_PAGE_IMAGE=registry/kerosene-web@sha256:... \
+NODE_IMAGE=registry/kerosene-node@sha256:... \
+TOR_IMAGE=registry/kerosene-tor@sha256:... \
+  infra/kubernetes/scripts/deploy.sh staging-spiffe
 ```
 
 O deploy falha se:

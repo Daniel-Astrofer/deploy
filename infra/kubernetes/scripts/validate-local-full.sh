@@ -182,5 +182,5 @@ fi
 
 echo "[+] local-full overlay renders successfully."
 echo "[+] Expected access: Tor hidden service only."
-echo "[+] web-page routes /kfe, /api/public/kfe and /api/admin/kfe to kfe-service."
+echo "[+] web-page routes all public KFE API namespaces through the Auth gateway."
 echo "[+] tor-onion publishes the web-page gateway as a Tor hidden service."

@@ -5,3 +5,4 @@ resources:
   - service-account.yaml
 patches:
   - path: workload-patches.yaml
+  - path: mtls-network-policies.yaml

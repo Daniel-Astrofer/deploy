@@ -5,7 +5,8 @@ nem assume a responsabilidade de domínio dos demais repositórios.
 
 | Repositório | Responsabilidade própria | O que o Deploy consome |
 |---|---|---|
-| `kerosene-core` | Comportamento do Auth e do KFE | Imagens, health checks e contrato de configuração |
+| `kerosene-core` | Auth, políticas da borda pública e gateway público do KFE | Imagem do Server, health checks e contrato de configuração |
+| `kerosene-kfe` | Motor financeiro, carteiras, rails e reconciliação | Imagem do KFE, health checks e contrato de configuração |
 | `kerosene-clients` | Aplicação Flutter/web | Imagem web publicada |
 | `kerosene-vault` | Custódia, DKG, FROST e assinatura | Imagem do Vault e contrato de execução documentado |
 | `kerosene-node` | Identidade, descoberta e membership | Imagem do Node e contrato de execução documentado |
@@ -28,5 +29,8 @@ devem compilar os serviços a partir do checkout do Deploy.
 - Manifests, conexão de containers, observabilidade e gates de rollout: este repositório.
 - Secrets: ambiente operacional; aqui ficam somente nomes e contratos de montagem.
 
-A implementação de mTLS e CometBFT está deliberadamente fora desta onda. No
-futuro, o Deploy deverá apenas configurar contratos publicados pelos serviços.
+O mTLS SPIFFE entre Auth e KFE está implementado nas branches dos serviços e é
+ativado somente pelo overlay explícito `staging-spiffe`. Evidência em cluster
+ainda é gate de promoção. A migração de identidade de Vault/Node e o CometBFT
+continuam pertencendo aos serviços; o Deploy apenas os conectará após a
+publicação dos contratos correspondentes.

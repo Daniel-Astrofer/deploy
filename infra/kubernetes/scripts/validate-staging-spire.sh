@@ -40,6 +40,15 @@ require() {
   grep -Eq "$pattern" "$file" || fail "$message"
 }
 
+reject() {
+  local file="$1"
+  local pattern="$2"
+  local message="$3"
+  if grep -Eq "$pattern" "$file"; then
+    fail "$message"
+  fi
+}
+
 require_count() {
   local file="$1"
   local pattern="$2"
@@ -60,6 +69,10 @@ render "$K8S_ROOT/components/spire/agent" "$TMP_DIR/agent.yaml"
 render "$K8S_ROOT/components/spire/registration" "$TMP_DIR/registration.yaml"
 render "$K8S_ROOT/overlays/staging-spiffe" "$TMP_DIR/staging-spiffe.yaml"
 render "$K8S_ROOT/overlays/staging-vault-spiffe" "$TMP_DIR/staging-vault-spiffe.yaml"
+
+require "$K8S_ROOT/../runtime/web/nginx.k8s.conf" 'location ~ \^/\(kfe\|api/public/kfe\|api/admin/kfe\)' "web gateway does not own every public KFE namespace"
+require "$K8S_ROOT/../runtime/web/nginx.k8s.conf" 'proxy_pass http://kerosene_core;' "web gateway does not route KFE APIs through Auth"
+reject "$K8S_ROOT/../runtime/web/nginx.k8s.conf" 'kerosene_kfe|kfe-service:8080' "web gateway still routes directly to KFE"
 
 require "$TMP_DIR/bootstrap.yaml" '^  name: spire-server$' "restricted SPIRE server namespace is missing"
 require "$TMP_DIR/bootstrap.yaml" '^  name: spire-system$' "privileged SPIRE agent namespace is missing"
@@ -109,6 +122,50 @@ require_count "$TMP_DIR/staging-spiffe.yaml" 'driver: csi.spiffe.io' 3 "Core wor
 require "$TMP_DIR/staging-spiffe.yaml" 'kerosene.io/spiffe-role: auth' "Auth workload label is missing"
 require "$TMP_DIR/staging-spiffe.yaml" 'kerosene.io/spiffe-role: kfe' "KFE workload label is missing"
 require "$TMP_DIR/staging-spiffe.yaml" 'kerosene.io/discovery-plane: bank' "Bank Node plane label is missing"
+require_count "$TMP_DIR/staging-spiffe.yaml" 'name: KEROSENE_WORKLOAD_IDENTITY_ENABLED' 2 "Auth and KFE do not both enable workload identity"
+require_count "$TMP_DIR/staging-spiffe.yaml" 'spiffe://staging.kerosene.internal/service/auth' 2 "Auth SPIFFE identity is not configured symmetrically"
+require_count "$TMP_DIR/staging-spiffe.yaml" 'spiffe://staging.kerosene.internal/service/kfe' 2 "KFE SPIFFE identity is not configured symmetrically"
+require "$TMP_DIR/staging-spiffe.yaml" 'value: https://kfe-service:8443' "Auth does not target the KFE mTLS connector"
+require "$TMP_DIR/staging-spiffe.yaml" 'value: https://server:8443' "KFE does not target the Auth mTLS connector"
+require_count "$TMP_DIR/staging-spiffe.yaml" 'name: internal-mtls' 4 "Auth/KFE Deployments and Services do not all expose the mTLS port"
+require_count "$TMP_DIR/staging-spiffe.yaml" 'containerPort: 8443' 2 "Auth/KFE internal connectors do not both listen on 8443"
+require_count "$TMP_DIR/staging-spiffe.yaml" 'port: 8443' 6 "Auth/KFE Service or NetworkPolicy mTLS port count drifted"
+require "$TMP_DIR/staging-spiffe.yaml" 'name: kfe-service-secrets' "dedicated KFE secrets are not wired"
+require "$TMP_DIR/staging-spiffe.yaml" 'key: fee-quote-signing-secret' "dedicated fee quote signing key is not wired"
+reject "$TMP_DIR/staging-spiffe.yaml" 'KFE_INTERNAL_SHARED_SECRET|kfe-internal-shared-secret' "legacy Auth/KFE transport secret is still mounted"
+reject "$TMP_DIR/staging-spiffe.yaml" 'http://(server|kfe-service):8080' "legacy Auth/KFE HTTP route is still configured"
+
+server_network_policy="$(awk '
+  BEGIN { RS = "---" }
+  /(^|\n)kind: NetworkPolicy\n/ && /\n  name: server-network\n/ { print }
+' "$TMP_DIR/staging-spiffe.yaml")"
+kfe_network_policy="$(awk '
+  BEGIN { RS = "---" }
+  /(^|\n)kind: NetworkPolicy\n/ && /\n  name: kfe-service-network\n/ { print }
+' "$TMP_DIR/staging-spiffe.yaml")"
+web_network_policy="$(awk '
+  BEGIN { RS = "---" }
+  /(^|\n)kind: NetworkPolicy\n/ && /\n  name: web-page-network\n/ { print }
+' "$TMP_DIR/staging-spiffe.yaml")"
+[[ -n "$server_network_policy" && -n "$kfe_network_policy" && -n "$web_network_policy" ]] \
+  || fail "Auth/KFE/Web NetworkPolicies are missing"
+grep -A5 'app.kubernetes.io/name: kfe-service' <<<"$server_network_policy" \
+  | grep -q 'port: 8443' \
+  || fail "Auth NetworkPolicy does not isolate KFE traffic on 8443"
+grep -A5 'app.kubernetes.io/name: server' <<<"$kfe_network_policy" \
+  | grep -q 'port: 8443' \
+  || fail "KFE NetworkPolicy does not isolate Auth traffic on 8443"
+if grep -A5 'app.kubernetes.io/name: kfe-service' <<<"$server_network_policy" \
+  | grep -q 'port: 8080'; then
+  fail "Auth NetworkPolicy still permits KFE on the public connector"
+fi
+if grep -A5 'app.kubernetes.io/name: server' <<<"$kfe_network_policy" \
+  | grep -q 'port: 8080'; then
+  fail "KFE NetworkPolicy still permits Auth on the public connector"
+fi
+if grep -q 'app.kubernetes.io/name: kfe-service' <<<"$web_network_policy"; then
+  fail "Web NetworkPolicy still permits direct KFE egress"
+fi
 core_node_service_account="$(awk '
   BEGIN { RS = "---" }
   /(^|\n)kind: ServiceAccount\n/ && /\n  name: kerosene-node\n/ { print }

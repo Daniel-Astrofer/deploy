@@ -168,7 +168,12 @@ if [[ "$PROFILE" == "staging-core" ]]; then
 
   require_secret_keys server-secrets \
     jwt-secret password-pepper aes-secret kfe-column-crypto-key \
-    shard-attestation-secret kfe-internal-shared-secret
+    shard-attestation-secret
+  if [[ "$SPIFFE_SCOPE" == "core" ]]; then
+    require_secret_keys kfe-service-secrets fee-quote-signing-secret
+  else
+    require_secret_keys server-secrets kfe-internal-shared-secret
+  fi
   require_secret_keys kerosene-db-secrets \
     jdbc-url application-user application-password
   require_secret_keys kerosene-redis-secrets redis-password

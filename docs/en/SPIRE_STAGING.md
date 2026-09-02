@@ -2,10 +2,22 @@
 
 ## Status
 
-Staging foundation only. SPIRE issues short-lived X.509-SVIDs to Auth, KFE,
-Vault and Kerosene Node through the CSI-mounted Workload API socket. Services do
-not consume those SVIDs for mTLS yet; existing static certificates remain the
-active transport identity.
+The explicit `staging-spiffe` profile activates SPIFFE mTLS for Auth-to-KFE and
+KFE-to-Auth calls. Both processes consume rotating X.509-SVIDs directly from
+the CSI-mounted Workload API socket, require the exact peer SPIFFE ID and use a
+dedicated TLS 1.3 connector on port `8443`. Their former shared transport secret
+is not mounted in this profile and NetworkPolicies remove the cross-service
+path on public port `8080`.
+
+All browser-facing KFE namespaces (`/kfe`, `/api/public/kfe` and
+`/api/admin/kfe`) enter through the Auth gateway. The web workload has no direct
+KFE egress; Auth preserves the route and forwards only an allowlisted set of
+headers through the authenticated internal connector.
+
+This activation requires images built from the matching Shared, Auth and KFE
+workload-identity changes. It has passed source and manifest tests, but has not
+yet produced cluster end-to-end or rotation evidence. Vault and Kerosene Node
+receive SVIDs but do not consume them as their active transport identity yet.
 
 ## Layout
 
@@ -13,7 +25,10 @@ active transport identity.
 - `components/spire/server`: restricted single-server staging control plane.
 - `components/spire/agent`: isolated privileged agent and CSI DaemonSet.
 - `components/spire/registration`: exact service/container registrations.
-- `overlays/*-spiffe`: additive socket mounts and workload labels.
+- `overlays/staging-spiffe`: socket mounts, strict Auth/KFE identities, mTLS
+  endpoints and transport-isolating NetworkPolicies.
+- `overlays/staging-vault-spiffe`: additive Vault/Node socket mounts and labels;
+  no Vault transport migration yet.
 
 Trust domain: `staging.kerosene.internal`.
 
@@ -36,11 +51,15 @@ bash infra/kubernetes/scripts/preflight-staging-spire.sh vault
 
 Then deploy `staging-spiffe` and `staging-vault-spiffe` through
 `infra/kubernetes/scripts/deploy.sh` with the same immutable image variables
-required by their non-SPIFFE staging profiles.
+required by their non-SPIFFE staging profiles. Before `staging-spiffe`, provision
+`kfe-service-secrets/fee-quote-signing-secret` independently; it is application
+signing material and must not reuse the retired transport credential.
 
 ## Rollback
 
-Redeploy `staging`/`staging-vault` first to remove workload CSI mounts. Delete
+Redeploy `staging`/`staging-vault` first to restore the previous transport and
+remove workload CSI mounts. The non-SPIFFE profile still requires the legacy
+`server-secrets/kfe-internal-shared-secret` during this rollback window. Delete
 registrations, then agent, then server. Preserve the server PVC for diagnosis.
 Remove RBAC/CRD only after all `ClusterSPIFFEID` objects are gone.
 
@@ -48,7 +67,9 @@ Remove RBAC/CRD only after all `ClusterSPIFFEID` objects are gone.
 
 - HA SPIRE Server datastore and recovery rehearsal.
 - Cluster-specific API server and kubelet CIDRs.
-- Service-side SVID rotation, peer-ID authorization and fail-closed mTLS.
+- Cluster evidence for Auth/KFE fail-closed handshakes, SVID rotation and
+  negative peer-ID tests.
+- Vault/Node migration from static certificate files to workload identities.
 - Admission policy restricting trusted ServiceAccounts/labels to GitOps.
 - Controller admission webhook or equivalent semantic CR validation.
 - Independent-host node attestation and multi-cluster federation policy.

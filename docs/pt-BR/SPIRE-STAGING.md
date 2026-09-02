@@ -2,15 +2,25 @@
 
 ## O que esta etapa entrega
 
-Esta etapa cria a base de identidade dos processos. Cada workload recebe um
-certificado X.509 de curta duração, renovado pelo SPIRE, por meio de um socket
-Unix montado pelo CSI. O socket não contém um secret estático no manifest e não
-é exposto pela rede.
+Cada workload recebe um certificado X.509 de curta duração, renovado pelo
+SPIRE, por meio de um socket Unix montado pelo CSI. O socket não contém um
+secret estático no manifesto e não é exposto pela rede.
 
-Ela ainda não muda o protocolo entre os serviços. Auth, KFE, Vault e Kerosene
-Node continuam usando os certificados estáticos atuais até que seus clientes e
-servidores passem a consumir a Workload API e validar a SPIFFE ID do par. Isso
-evita uma migração implícita e permite rollback.
+O perfil explícito `staging-spiffe` agora muda o transporte entre Auth e KFE.
+Os dois processos consomem o SVID rotativo em memória, exigem a SPIFFE ID exata
+do par e usam TLS 1.3 na porta interna `8443`. O segredo estático de transporte
+não é montado nesse perfil. As NetworkPolicies também removem o acesso cruzado
+pela porta pública `8080`.
+
+Todas as rotas do KFE visíveis ao cliente (`/kfe`, `/api/public/kfe` e
+`/api/admin/kfe`) entram pelo gateway do Auth. O workload web não possui saída
+direta para o KFE; o Auth preserva a rota e encaminha somente headers permitidos
+pelo conector interno autenticado.
+
+Essa ativação depende de imagens construídas com as mudanças correspondentes
+em Shared, Auth e KFE. Os testes de código e manifesto passam, mas ainda falta
+evidência end-to-end e de rotação em cluster. Vault e Kerosene Node recebem
+SVIDs, porém ainda não os usam como identidade ativa de transporte.
 
 ## Separação de responsabilidades
 
@@ -20,7 +30,8 @@ evita uma migração implícita e permite rollback.
 | `server` | Emite identidades no trust domain de staging |
 | `agent` | Atesta processos no nó e oferece a Workload API |
 | `registration` | Define qual container pode receber qual identidade |
-| overlays `*-spiffe` | Montam o socket apenas nos containers Kerosene autorizados |
+| `staging-spiffe` | Ativa socket, identidades estritas, endpoints mTLS Auth/KFE e isolamento de rede |
+| `staging-vault-spiffe` | Monta socket/labels de Vault e Node sem migrar seu transporte ainda |
 
 O servidor fica no namespace `spire-server`, com Pod Security `restricted`. O
 agente e o CSI ficam sozinhos em `spire-system`, porque `hostPID`, `hostPath` e
@@ -74,6 +85,11 @@ imutáveis. Para o Core use `staging-spiffe`; para o Vault independente use
 `staging-vault-spiffe`. As mesmas variáveis `..._IMAGE` exigidas pelos perfis de
 staging comuns continuam obrigatórias.
 
+Antes de usar `staging-spiffe`, provisione o Secret
+`kfe-service-secrets` com a chave `fee-quote-signing-secret`. Esse material
+assina cotações da aplicação e não pode reutilizar o segredo de transporte
+removido.
+
 Não aplique o overlay de workload antes de o DaemonSet estar pronto: o kubelet
 não conseguirá montar o volume CSI e os pods ficarão pendentes.
 
@@ -84,8 +100,10 @@ os objetos conhecidos, mas produção precisa habilitar validação semântica.
 
 ## Rollback seguro
 
-1. Reimplante `staging` e `staging-vault`, com os mesmos digests, para remover os
-   mounts CSI sem trocar as imagens.
+1. Reimplante `staging` e `staging-vault`, com os mesmos digests, para restaurar
+   o transporte anterior e remover os mounts CSI sem trocar as imagens. Durante
+   essa janela, o perfil sem SPIFFE ainda exige
+   `server-secrets/kfe-internal-shared-secret`.
 2. Confirme a saúde dos serviços e dos certificados estáticos.
 3. Remova `components/spire/registration`.
 4. Remova `components/spire/agent` e depois `components/spire/server`.
@@ -98,8 +116,10 @@ os objetos conhecidos, mas produção precisa habilitar validação semântica.
 - há um servidor SPIRE com SQLite, sem alta disponibilidade;
 - as regras de saída para API Kubernetes e kubelet usam `0.0.0.0/0` limitado às
   portas 443 e 10250 para portabilidade de staging;
-- os serviços ainda não carregam e renovam SVIDs no TLS;
-- ainda não existe política de autorização de peer por SPIFFE ID no código;
+- ainda falta comprovar em cluster os handshakes Auth/KFE, a rotação de SVID e
+  os testes negativos de SPIFFE ID incorreta;
+- Vault e Node ainda precisam migrar dos arquivos de certificado estático para
+  identidades de workload;
 - ainda falta uma política de admissão que impeça editores do namespace de
   reutilizar ServiceAccounts e labels reservadas fora do fluxo GitOps;
 - o webhook semântico dos recursos SPIRE não faz parte deste staging mínimo;

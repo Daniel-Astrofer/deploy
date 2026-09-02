@@ -5,7 +5,8 @@ code or domain ownership.
 
 | Repository | Owns | Deploy consumes |
 |---|---|---|
-| `kerosene-core` | Auth and KFE behavior | Server and KFE images, health and configuration contracts |
+| `kerosene-core` | Auth, user-facing policy and the public KFE gateway | Server image, health and configuration contract |
+| `kerosene-kfe` | Financial engine, wallets, rails and reconciliation | KFE image, health and configuration contract |
 | `kerosene-clients` | Flutter/web application | Published web image |
 | `kerosene-vault` | Custody, DKG, FROST and signing | Vault image and documented runtime contract |
 | `kerosene-node` | Identity, discovery and membership | Node image and documented runtime contract |
@@ -30,6 +31,7 @@ compile service source from the Deploy checkout.
 - Secrets are provisioned by the environment; only names and mounting contracts
   are versioned here.
 
-mTLS and CometBFT implementation are intentionally outside this organization
-wave. Future Deploy changes may wire released configuration only after their
-service contracts are defined.
+Auth/KFE SPIFFE mTLS is implemented in the service branches and activated only
+by the explicit `staging-spiffe` overlay. Cluster evidence remains a promotion
+gate. Vault/Node workload-identity migration and CometBFT remain service-owned
+work; Deploy will wire them only after their contracts are released.

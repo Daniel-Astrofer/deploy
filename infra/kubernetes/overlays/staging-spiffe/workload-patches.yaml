@@ -10,9 +10,27 @@ spec:
     spec:
       containers:
         - name: server
+          ports:
+            - name: internal-mtls
+              containerPort: 8443
+              protocol: TCP
           env:
             - name: SPIFFE_ENDPOINT_SOCKET
               value: unix:///run/spire/sockets/spire-agent.sock
+            - name: KEROSENE_WORKLOAD_IDENTITY_ENABLED
+              value: "true"
+            - name: KEROSENE_OWN_SPIFFE_ID
+              value: spiffe://staging.kerosene.internal/service/auth
+            - name: KEROSENE_PEER_SPIFFE_ID
+              value: spiffe://staging.kerosene.internal/service/kfe
+            - name: KEROSENE_INTERNAL_MTLS_PORT
+              value: "8443"
+            - name: KFE_INTERNAL_BASE_URL
+              value: https://kfe-service:8443
+            - name: KFE_REMOTE_BASE_URL
+              value: https://kfe-service:8443
+            - name: KFE_INTERNAL_SHARED_SECRET
+              $patch: delete
           volumeMounts:
             - name: spiffe-workload-api
               mountPath: /run/spire/sockets
@@ -35,9 +53,30 @@ spec:
     spec:
       containers:
         - name: kfe-service
+          ports:
+            - name: internal-mtls
+              containerPort: 8443
+              protocol: TCP
           env:
             - name: SPIFFE_ENDPOINT_SOCKET
               value: unix:///run/spire/sockets/spire-agent.sock
+            - name: KEROSENE_WORKLOAD_IDENTITY_ENABLED
+              value: "true"
+            - name: KEROSENE_OWN_SPIFFE_ID
+              value: spiffe://staging.kerosene.internal/service/kfe
+            - name: KEROSENE_PEER_SPIFFE_ID
+              value: spiffe://staging.kerosene.internal/service/auth
+            - name: KEROSENE_INTERNAL_MTLS_PORT
+              value: "8443"
+            - name: AUTH_REMOTE_BASE_URL
+              value: https://server:8443
+            - name: KFE_FEE_QUOTE_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: kfe-service-secrets
+                  key: fee-quote-signing-secret
+            - name: KFE_INTERNAL_SHARED_SECRET
+              $patch: delete
           volumeMounts:
             - name: spiffe-workload-api
               mountPath: /run/spire/sockets
@@ -47,6 +86,43 @@ spec:
           csi:
             driver: csi.spiffe.io
             readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server
+spec:
+  ports:
+    - name: internal-mtls
+      port: 8443
+      targetPort: internal-mtls
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kfe-service
+spec:
+  ports:
+    - name: internal-mtls
+      port: 8443
+      targetPort: internal-mtls
+      protocol: TCP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-config
+data:
+  KFE_INTERNAL_BASE_URL: https://kfe-service:8443
+  KFE_REMOTE_BASE_URL: https://kfe-service:8443
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kfe-service-config
+data:
+  AUTH_REMOTE_BASE_URL: https://server:8443
 ---
 apiVersion: apps/v1
 kind: StatefulSet
