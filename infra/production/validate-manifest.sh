@@ -7,8 +7,13 @@ MANIFEST="${1:?rendered manifest path is required}"
   exit 2
 }
 
-if grep -Eiq 'dealer_lab|static_token|attestation_mode:[[:space:]]*(sim|software)|testnet|regtest|kerosene-staging' "$MANIFEST"; then
-  echo "Production manifest contains a lab, simulated or non-mainnet setting." >&2
+if grep -Eiq 'dealer_lab|static_token|x-vault-token|attestation_mode:[[:space:]]*(sim|software)|mainnet|regtest|signet|kerosene-staging|localhost|127\.0\.0\.1|http://' "$MANIFEST"; then
+  echo "Production manifest contains a prohibited legacy, simulated or insecure setting." >&2
+  exit 3
+fi
+
+if ! grep -Eiq '(bitcoin[_.-]network|BITCOIN_NETWORK)[^[:alnum:]]*[:=][[:space:]\"]*testnet3' "$MANIFEST"; then
+  echo "Production manifest must explicitly pin Bitcoin to testnet3." >&2
   exit 3
 fi
 

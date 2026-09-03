@@ -22,6 +22,10 @@ USAGE
   exit 0
 fi
 
+if [[ "$IMAGE_KEY" == "server" || "$IMAGE_KEY" == "web-page" ]]; then
+  bash "$ROOT/infra/kubernetes/scripts/build-web-admin-backend.sh" --no-jar
+fi
+
 python3 - \
   "$CONTRACT" \
   "$IMAGE_KEY" \
@@ -85,12 +89,6 @@ repository_roots = {
     "shared": Path(shared),
 }
 context_repository = item["context_repository"]
-if context_repository == "generated":
-    print(
-        f"Image {key} requires its dedicated orchestration builder.",
-        file=sys.stderr,
-    )
-    sys.exit(3)
 if context_repository not in repository_roots:
     print(
         f"Image {key} has an unknown context repository: {context_repository}",
@@ -115,6 +113,8 @@ elif context_repository == "kfe":
     cmd.extend(["--build-context", f"contracts={contracts}"])
     cmd.extend(["--build-context", f"deploy={root}"])
     cmd.extend(["--build-context", f"shared={shared}"])
+elif context_repository == "clients":
+    cmd.extend(["--build-context", f"deploy={root}"])
 cmd.extend(["-t", image, "-f", str(dockerfile), str(context)])
 print(" ".join(cmd))
 subprocess.check_call(cmd)

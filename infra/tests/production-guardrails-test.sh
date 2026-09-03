@@ -17,6 +17,9 @@ spec:
       containers:
         - name: core
           image: registry.invalid/core@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          env:
+            - name: BITCOIN_NETWORK
+              value: testnet3
 YAML
 bash "$ROOT/infra/production/validate-manifest.sh" "$TMP_DIR/good.yaml"
 
@@ -25,6 +28,8 @@ apiVersion: v1
 kind: Service
 metadata:
   name: forbidden
+  annotations:
+    bitcoin.network: testnet3
 spec:
   type: NodePort
 YAML

@@ -1,37 +1,26 @@
-# Kubernetes Quorum Helpers
+<!--
+Kerosene documentation metadata
+status: active
+audience: restricted
+owner: deploy
+source_of_truth: deploy
+last_reviewed: 2026-09-03
+-->
 
-Esta pasta contém helpers internos do quorum Kubernetes local.
+# Kubernetes operational helpers
 
-Use a interface pública:
+These scripts are explicit operator tools, not rollout entrypoints:
 
-```bash
-bash infra/start.sh
-bash infra/stop.sh
-bash infra/recreate.sh
-bash infra/status.sh
-bash infra/logs.sh
-bash infra/test.sh
-```
+| Script | Purpose |
+|---|---|
+| `check-cluster-prereqs.sh` | Read-only cluster capability inspection |
+| `collect-diagnostics.sh` | Redacted production diagnostics bundle |
+| `debug-pod.sh` | Targeted logs, describe, debug or port-forward |
+| `cleanup-stale-pods.sh` | Dry-run-first cleanup of stale failed Pods |
+| `reset-instance.sh` | Explicit component restart/recreation |
+| `rollback.sh` | Kubernetes Deployment revision rollback |
+| `verify-kfe-only.sh` | Cross-repository ownership guardrail |
+| `build-web-admin-backend.sh` | Controlled frontend/backend packaging helper |
 
-Helpers principais:
-
-```text
-apply.sh              Aplica o local-full e opcionalmente aguarda readiness.
-wait.sh               Aguarda workloads do quorum.
-status.sh             Mostra recursos, serviços e URLs.
-logs.sh               Mostra logs por serviço.
-validate-local-full.sh Renderiza e valida o overlay local-full.
-```
-
-`bash infra/logs.sh --follow` acompanha o quorum completo em tempo real,
-gravando arquivos separados em `infra/runtime/logs/kubernetes/<timestamp>/`.
-
-Scripts antigos nesta pasta são compatibilidade temporária ou diagnósticos
-especializados. Novos scripts públicos não devem ser adicionados aqui.
-
-O inventário e a classificação canônica estão em
-`docs/pt-BR/INDICE-DEPLOY.md` e `docs/en/DEPLOYMENT_INDEX.md`.
-
-O profile local `KEROSENE_VAULT_MESH_PROFILE=staging` ainda possui fallback
-legado para a mesh lab quando a geração de certificados falha. Esse fallback é
-exclusivamente local e não serve como evidência de staging ou produção.
+Commands that mutate a cluster require explicit arguments or an apply mode.
+Production rollout itself is allowed only through `infra/production/preflight.sh`.

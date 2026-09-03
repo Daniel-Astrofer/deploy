@@ -5,13 +5,10 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 deployment="${repo_root}/infra/kubernetes/base/server/deployment.yaml"
 configmap="${repo_root}/infra/kubernetes/base/server/configmap.yaml"
 images="${repo_root}/infra/docker/images.yaml"
-vault_compose="${repo_root}/infra/docker/compose/vault-mesh-lab.compose.yaml"
-vault_composes=("${repo_root}"/infra/docker/compose/vault-mesh-*.compose.yaml)
 
 test -f "${deployment}"
 test -f "${configmap}"
 test -f "${images}"
-test -f "${vault_compose}"
 
 grep -q 'SPRING_PROFILES_ACTIVE: "prod"' "${configmap}" "${deployment}"
 grep -q 'name: SPRING_DATASOURCE_URL' "${configmap}" "${deployment}"
@@ -28,20 +25,10 @@ if grep -Eq 'SPRING_PROFILES_ACTIVE: "production"|VAULT_RAFT_URL|MPC_SIDECAR_HOS
   exit 1
 fi
 
-if grep -Eq 'mpc-sidecar:|backend/mpc-sidecar' "${images}" "${vault_compose}"; then
+if grep -Eq 'mpc-sidecar:|backend/mpc-sidecar' "${images}"; then
   echo "Deployment contains a removed mpc-sidecar reference."
   exit 1
 fi
-
-grep -Eq 'kerosene-vault|vault-1' "${vault_compose}"
-
-for compose in "${vault_composes[@]}"; do
-  if grep -q 'dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile' "${compose}"; then
-    echo "Vault Compose still resolves its Dockerfile through the removed monorepo layout: ${compose}"
-    exit 1
-  fi
-done
-grep -q 'KEROSENE_DEPLOY_DIR' "${vault_compose}"
 
 if grep -RInE \
   --exclude-dir=.git \

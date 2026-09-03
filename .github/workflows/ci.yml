@@ -21,12 +21,24 @@ jobs:
       - uses: actions/checkout@v7
       - run: bash infra/scripts/check_architecture_guardrails.sh
 
-  smoke:
+  production-source-policy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Run progressive chain readiness smoke tests
-        run: bash infra/tests/progressive-chain-readiness-test.sh
+      - run: bash infra/production/check-source-policy.sh
+
+  production-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate runtime boundaries
+        run: bash infra/scripts/validate-runtime-boundaries.sh
+      - name: Test production manifest guardrails
+        run: bash infra/tests/production-guardrails-test.sh
+      - name: Test signed production evidence
+        run: bash infra/tests/production-evidence-test.sh
+      - name: Test MCP compatibility and read-only enforcement
+        run: bash infra/tests/mcp-compat-wrapper-test.sh
 
   security:
     uses: Daniel-Astrofer/.github/.github/workflows/security-scan.yml@2552ff2125c2d72accebe93804b8e139a52ded13

@@ -24,10 +24,12 @@ RUN mkdir -p /var/run/tor/socks /var/lib/tor/kerosene_service/authorized_clients
     chmod 700 /var/lib/tor/kerosene_service && \
     chmod 755 /var/run/tor/socks
 
-# The entrypoint.sh and torrc are mounted as read-only volumes at runtime
-# by docker-compose so we don't COPY them here — they can be edited without rebuild.
+COPY entrypoint.sh /usr/local/bin/kerosene-tor-entrypoint
+COPY torrc /etc/tor/torrc
+RUN chmod 0755 /usr/local/bin/kerosene-tor-entrypoint && \
+    sha256sum /usr/bin/tor | awk '{print $1}' > /usr/local/share/tor.sha256
 
 # Must run as root initially so Tor can drop privs to kerosene user internally
 USER root
 
-ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/kerosene-tor-entrypoint"]

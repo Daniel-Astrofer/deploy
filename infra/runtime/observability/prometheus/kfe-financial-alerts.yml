@@ -28,7 +28,7 @@ groups:
         annotations:
           summary: "Funds LOCKED > 30min without progress"
           description: "At least one transaction has remained in LOCKED status for over 30 minutes."
-          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/operations/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeExecutingNoTxid
         expr: kfe_transactions_stuck_total{status="EXECUTING"} > 0 and (time() - kfe_transactions_stuck_since_seconds{status="EXECUTING"}) > 300
@@ -39,7 +39,7 @@ groups:
         annotations:
           summary: "Transaction EXECUTING without txid > 5min"
           description: "A transaction entered EXECUTING but no blockchain txid was recorded within 5 minutes."
-          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/operations/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeTxidDisappeared
         expr: increase(kfe_network_not_found_total[15m]) > 3
@@ -50,7 +50,7 @@ groups:
         annotations:
           summary: "Transaction not found by Bitcoin Core > 3 occurrences in 15min"
           description: "Multiple transactions have been reported as NOT_FOUND by Bitcoin Core node."
-          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/operations/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeLightningPaymentUnknown
         expr: kfe_lightning_inflight_sats > 0
@@ -61,7 +61,7 @@ groups:
         annotations:
           summary: "Lightning payment UNKNOWN > 15min"
           description: "At least one Lightning payment has been in-flight without resolution for over 15 minutes."
-          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/operations/runbooks/RUNBOOK_KFE_LIGHTNING_E2E_TESTNET.md"
 
       - alert: KfeNotificationDeadLetter
         expr: increase(kfe_notification_dead_letter_total[10m]) > 0
@@ -72,7 +72,7 @@ groups:
         annotations:
           summary: "Dead-letter notifications present"
           description: "Notification outbox entries have reached dead-letter after exhausting retries."
-          runbook: "docs/backend/TROUBLESHOOTING.md"
+          runbook: "docs/operations/TROUBLESHOOTING.md"
 
       - alert: KfeBalanceDivergence
         expr: abs(kfe_balance_divergence_sats) > 10000
@@ -83,7 +83,7 @@ groups:
         annotations:
           summary: "Ledger vs chain divergence > 10000 sats"
           description: "Absolute difference between internal ledger and chain-observed balance exceeds 10000 sats."
-          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/operations/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeNoopNotificationPort
         expr: kfe_financial_notification_port_active{provider="noop"} == 1
@@ -94,7 +94,7 @@ groups:
         annotations:
           summary: "Noop notification port active"
           description: "Financial notification port is set to noop — real-time push notifications are disabled."
-          runbook: "docs/backend/TROUBLESHOOTING.md"
+          runbook: "docs/operations/TROUBLESHOOTING.md"
 
       - alert: KfeAuthDisabled
         expr: kfe_adapter_auth_enabled == 0
@@ -105,7 +105,7 @@ groups:
         annotations:
           summary: "KFE adapter auth disabled"
           description: "KFE service adapter authentication is currently disabled."
-          runbook: "docs/backend/TROUBLESHOOTING.md"
+          runbook: "docs/operations/TROUBLESHOOTING.md"
 
       - alert: KfeNetworkMismatch
         expr: kfe_configured_network != kfe_running_network
@@ -116,7 +116,7 @@ groups:
         annotations:
           summary: "Configured network != running network"
           description: "Bitcoin network mismatch detected between configuration and running node."
-          runbook: "docs/backend/TROUBLESHOOTING.md"
+          runbook: "docs/operations/TROUBLESHOOTING.md"
 
       - alert: KfeConflictedSpike
         expr: increase(kfe_conflicted_total[10m]) > 5
@@ -137,7 +137,7 @@ groups:
         annotations:
           summary: "Blockchain reorg event detected"
           description: "At least one reorg event has been detected by the confirmation monitor."
-          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/reference/runbooks/RUNBOOK_KFE_BALANCE.md"
+          runbook: "https://github.com/Daniel-Astrofer/kerosene-kfe/blob/main/docs/operations/runbooks/RUNBOOK_KFE_BALANCE.md"
 
       - alert: KfeIdempotencyConflictSpike
         expr: increase(kfe_idempotency_conflict_total[5m]) > 10

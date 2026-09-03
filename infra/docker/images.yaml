@@ -31,8 +31,8 @@ images:
     context: .
     owner: vault-mesh
     notes: >-
-      Vault mesh node (Rust). Lab uses ATTESTATION_MODE=sim; production builds
-      must refuse sim (KEROSENE_VAULT_REFUSE_SIM / feature production).
+      Vault mesh node (Rust). Production builds must refuse simulated
+      attestation (KEROSENE_VAULT_REFUSE_SIM / feature production).
 
   kerosene-node:
     image: kerosene/node
@@ -76,9 +76,9 @@ images:
     image: kerosene/web-page
     local_tag: local
     dockerfile: infra/docker/images/web-page/Dockerfile
-    context_repository: generated
-    context: .
+    context_repository: clients
+    context: build/web
     owner: frontend
     notes: >-
-      The web-page Kubernetes image now has a canonical Dockerfile. Legacy
-      scripts may still keep fallback behavior during the migration window.
+      build-image.sh first creates the Flutter web bundle, then packages that
+      generated directory with Deploy's production Nginx configuration.

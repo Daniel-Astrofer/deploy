@@ -1,29 +1,29 @@
 #!/bin/sh
 # Kerosene Tor Entrypoint
-# Installs Tor on the debian:bookworm-slim base image, sets correct
-# permissions on the hidden service directory, and starts the daemon.
+# Verifies the packaged Tor binary, prepares strict runtime permissions and
+# starts the daemon.
 
 set -e
 
 TOR_LOG_FILE="/tmp/tor.log"
 TOR_READY_FILE="/tmp/tor-ready"
 
-# Install Tor if not present
-if ! command -v tor > /dev/null 2>&1; then
-    apt-get update -qq
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::="--force-confold" --no-install-recommends tor
-    rm -rf /var/lib/apt/lists/*
-fi
+command -v tor >/dev/null 2>&1 || {
+    echo "Tor is missing from the immutable runtime image." >&2
+    exit 1
+}
 
 echo "==> Auditing Tor binary integrity (Anti Tor-Inside Attacker)..."
 TOR_BIN="/usr/bin/tor"
 ACTUAL_HASH=$(sha256sum "$TOR_BIN" | awk '{print $1}')
 
-if [ -n "$EXPECTED_TOR_HASH" ]; then
-    if [ "$ACTUAL_HASH" != "$EXPECTED_TOR_HASH" ]; then
+PACKAGED_TOR_HASH="$(cat /usr/local/share/tor.sha256 2>/dev/null || true)"
+REQUIRED_TOR_HASH="${EXPECTED_TOR_HASH:-$PACKAGED_TOR_HASH}"
+if [ -n "$REQUIRED_TOR_HASH" ]; then
+    if [ "$ACTUAL_HASH" != "$REQUIRED_TOR_HASH" ]; then
         echo "=========================================================="
         echo "CRITICAL SECURITY ALERT: Tor binary hash mismatch!"
-        echo "Expected: $EXPECTED_TOR_HASH"
+        echo "Expected: $REQUIRED_TOR_HASH"
         echo "Actual  : $ACTUAL_HASH"
         echo "=========================================================="
         echo "The binary may be compromised. Halting container execution to protect keys."
@@ -32,9 +32,8 @@ if [ -n "$EXPECTED_TOR_HASH" ]; then
         echo "==> Tor binary integrity verified successfully."
     fi
 else
-    echo "WARNING: EXPECTED_TOR_HASH environment variable not set. Skipping strict hash enforcement."
-    echo "Actual Tor SHA256: $ACTUAL_HASH"
-    echo "Please set EXPECTED_TOR_HASH in .env for production environments."
+    echo "The packaged Tor integrity reference is missing." >&2
+    exit 1
 fi
 
 # Tor 0.4.7 requires a NAMED user in /etc/passwd for the "User" directive.
@@ -63,7 +62,7 @@ chmod 755 /var/run/tor/socks 2>/dev/null || true
 chmod 750 /var/run/tor/control 2>/dev/null || true
 
 # Authorized clients (stealth) — optional gate
-if [[ "${VAULT_TOR_AUTH_CLIENTS:-false}" == "true" ]]; then
+if [ "${VAULT_TOR_AUTH_CLIENTS:-false}" = "true" ]; then
   echo "==> Tor stealth auth enabled (VAULT_TOR_AUTH_CLIENTS=true)"
   if ls /var/lib/tor/kerosene_service/authorized_clients/*.auth >/dev/null 2>&1; then
     echo "==> Found .auth files:"
