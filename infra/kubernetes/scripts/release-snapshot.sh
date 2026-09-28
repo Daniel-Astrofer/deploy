@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # DEVELOPMENT SNAPSHOT ONLY. This helper creates a local signing key and its
-# output is not a release-authority record for a Kerosene Cell. Production
-# release selection must use the immutable release lock consumed by
-# infra/kerosene-stack, with TUF/BFT verification added before apply is enabled.
+# output is not a release-authority record for a Kerosene Cell. Production and
+# staging release selection must use the immutable release lock consumed by
+# infra/kerosene-stack, including its TUF/BFT/Bank and snapshot-provider gates.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
