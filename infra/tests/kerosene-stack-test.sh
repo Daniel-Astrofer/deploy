@@ -35,12 +35,12 @@ for name, char in (
 
 services = {}
 for name, repository, rollout, char in (
-    ("admin", "admin", "admin", "1"),
+    ("admin", "admin", "operator", "1"),
     ("core", "core", "application", "2"),
     ("kfe", "kfe", "application", "3"),
     ("node", "node", "quorum", "4"),
     ("vault", "vault", "quorum", "5"),
-    ("rails", "rails", "application", "6"),
+    ("web-page", "clients", "application", "6"),
     ("postgres", "deploy", "stateful", "7"),
     ("redis", "deploy", "stateful", "8"),
     ("bitcoin", "deploy", "network", "9"),
@@ -116,7 +116,7 @@ import sys
 
 result = json.load(open(sys.argv[1], encoding="utf-8"))
 assert result["structuralValidation"] == "passed"
-assert result["cryptographicAuthorization"] == "not-implemented"
+assert result["cryptographicAuthorization"] == "not-checked"
 assert "admin" in result["requiredComponents"]
 assert "node" in result["requiredComponents"]
 PY
@@ -132,7 +132,8 @@ assert on_disk == printed
 assert on_disk["mode"] == "plan-only"
 assert on_disk["applyEnabled"] is False
 phases = {phase["id"]: phase for phase in on_disk["phases"]}
-assert "admin" in phases["rollout-applications"]["components"]
+assert "admin" in phases["operator-release"]["components"]
+assert "web-page" in phases["rollout-applications"]["components"]
 assert "node" in phases["rollout-node"]["components"]
 assert "vault" in phases["rollout-vault"]["components"]
 PY

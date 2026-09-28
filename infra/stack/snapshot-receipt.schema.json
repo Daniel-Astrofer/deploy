@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kerosene:snapshot-receipt:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "releaseId", "environment", "status", "snapshotId", "provider", "snapshotDigest", "createdAt", "expiresAt"],
+  "properties": {
+    "schema": { "const": "kerosene.snapshot-receipt/v1" },
+    "releaseId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "environment": { "const": "staging-cell" },
+    "status": { "const": "verified" },
+    "snapshotId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "snapshotDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  }
+}

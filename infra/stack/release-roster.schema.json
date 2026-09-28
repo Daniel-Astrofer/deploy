@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kerosene:release-roster:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "networkId", "members"],
+  "properties": {
+    "schema": { "const": "kerosene.release-roster/v1" },
+    "networkId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "members": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    }
+  }
+}

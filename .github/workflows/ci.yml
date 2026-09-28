@@ -34,7 +34,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Validate safe Cell release planning
-        run: bash infra/tests/kerosene-stack-test.sh
+        run: |
+          bash infra/tests/kerosene-stack-test.sh
+          bash infra/tests/kerosene-stack-evidence-test.sh
 
   spiffe-admission:
     name: SPIFFE admission impersonation tests

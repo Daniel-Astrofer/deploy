@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kerosene:tuf-target-proof:v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "targetPath", "metadataVersion", "targetDigest", "expiresAt", "signatureBase64"],
+  "properties": {
+    "schema": { "const": "kerosene.tuf-target-proof/v1" },
+    "targetPath": { "type": "string", "pattern": "^releases/[a-z0-9][a-z0-9._-]{2,127}\\.json$" },
+    "metadataVersion": { "type": "integer", "minimum": 1 },
+    "targetDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "signatureBase64": { "type": "string", "minLength": 1 }
+  }
+}

@@ -40,9 +40,11 @@ Atalhos antigos como `infra/deploy.sh` e scripts dentro de
 internos. Eles não são a API normal para humanos ou agentes.
 
 `kerosene-stack` é o controlador de release da Cell completa em implantação.
-Nesta primeira etapa, ele valida um lock imutável que inclui Admin, Core, KFE,
-Node, Vault, Rails, PostgreSQL, Redis, Bitcoin, LND e Tor, e gera apenas um
-plano seguro; não executa rollout nem ativa signers Vault. Veja
+Ele valida um lock imutável que inclui Admin, Core, KFE, Node, Vault, web-page,
+PostgreSQL, Redis, Bitcoin, LND e Tor. Com provas TUF/BFT/Bank, recibo de
+snapshot e confirmação explícita, `update --apply` executa os overlays
+`staging-vault` e `staging`; sem essas provas permanece somente em plano. Não
+ativa signers Vault. Veja
 [`docs/ops/KEROSENE_STACK.md`](../docs/ops/KEROSENE_STACK.md).
 
 ## Layout

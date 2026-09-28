@@ -10,11 +10,15 @@ TUF and BFT cryptographic verifiers are connected.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import datetime as dt
 import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -23,7 +27,13 @@ from typing import Any, Iterable
 
 RELEASE_SCHEMA = "kerosene.release-lock/v1"
 STACK_PLAN_SCHEMA = "kerosene.stack.update-plan/v1"
+RELEASE_RECEIPT_SCHEMA = "kerosene.release-receipt/v1"
+ROSTER_SCHEMA = "kerosene.release-roster/v1"
+OBSERVER_REPORT_SCHEMA = "kerosene.bank-observer-report/v1"
+SNAPSHOT_RECEIPT_SCHEMA = "kerosene.snapshot-receipt/v1"
+TUF_PROOF_SCHEMA = "kerosene.tuf-target-proof/v1"
 MAX_RELEASE_BYTES = 1024 * 1024
+MAX_EVIDENCE_BYTES = 256 * 1024
 EXIT_VALIDATION = 65
 EXIT_CANNOT_APPLY = 78
 
@@ -59,7 +69,7 @@ SERVICE_REPOSITORY = {
     "kfe": "kfe",
     "node": "node",
     "vault": "vault",
-    "rails": "rails",
+    "web-page": "clients",
     "postgres": "deploy",
     "redis": "deploy",
     "bitcoin": "deploy",
@@ -68,12 +78,12 @@ SERVICE_REPOSITORY = {
 }
 
 SERVICE_ROLLOUT = {
-    "admin": "admin",
+    "admin": "operator",
     "core": "application",
     "kfe": "application",
     "node": "quorum",
     "vault": "quorum",
-    "rails": "application",
+    "web-page": "application",
     "postgres": "stateful",
     "redis": "stateful",
     "bitcoin": "network",
@@ -81,9 +91,26 @@ SERVICE_ROLLOUT = {
     "tor": "network",
 }
 
+DEPLOY_IMAGE_ENV = {
+    "core": "SERVER_IMAGE",
+    "kfe": "KFE_SERVICE_IMAGE",
+    "web-page": "WEB_PAGE_IMAGE",
+    "vault": "VAULT_IMAGE",
+    "node": "NODE_IMAGE",
+    "tor": "TOR_IMAGE",
+    "postgres": "POSTGRES_IMAGE",
+    "redis": "REDIS_IMAGE",
+    "bitcoin": "BITCOIN_IMAGE",
+    "lnd": "LND_IMAGE",
+}
+
 
 class ReleaseValidationError(ValueError):
     """The supplied release lock cannot be used even for a dry-run plan."""
+
+
+class ApplyBlockedError(ReleaseValidationError):
+    """Evidence or operator controls are missing for a state-changing apply."""
 
 
 def fail(path: str, message: str) -> None:
@@ -166,7 +193,7 @@ def require_image(value: Any, path: str, *, require_oci_scheme: bool = False) ->
     return text
 
 
-def parse_timestamp(value: Any, path: str) -> str:
+def parse_rfc3339(value: Any, path: str) -> dt.datetime:
     text = require_string(value, path)
     try:
         parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
@@ -174,6 +201,12 @@ def parse_timestamp(value: Any, path: str) -> str:
         fail(path, "must be an RFC 3339 timestamp")
     if parsed.tzinfo is None:
         fail(path, "must include a timezone")
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def parse_timestamp(value: Any, path: str) -> str:
+    text = require_string(value, path)
+    parsed = parse_rfc3339(text, path)
     if parsed.astimezone(dt.timezone.utc) <= dt.datetime.now(dt.timezone.utc):
         fail(path, "is expired")
     return text
@@ -392,8 +425,290 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
 
 
 def canonical_digest(value: dict[str, Any]) -> str:
-    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(serialized).hexdigest()
+    return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+
+def canonical_bytes(value: dict[str, Any]) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def read_json_document(path_text: str, label: str, maximum_bytes: int = MAX_EVIDENCE_BYTES) -> dict[str, Any]:
+    path = Path(path_text)
+    try:
+        if path.stat().st_size > maximum_bytes:
+            fail(label, f"document exceeds {maximum_bytes} bytes")
+        with path.open(encoding="utf-8") as handle:
+            def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+                result: dict[str, Any] = {}
+                for key, value in pairs:
+                    if key in result:
+                        fail(label, f"duplicate JSON field: {key}")
+                    result[key] = value
+                return result
+
+            return require_object(json.load(handle, object_pairs_hook=unique_object), label)
+    except ReleaseValidationError:
+        raise
+    except (OSError, json.JSONDecodeError) as error:
+        fail(label, f"invalid JSON document: {error}")
+
+
+def decode_base64(value: Any, path: str) -> bytes:
+    text = require_string(value, path)
+    try:
+        return base64.b64decode(text, validate=True)
+    except (ValueError, binascii.Error) as error:
+        fail(path, f"invalid base64: {error}")
+
+
+def verify_ed25519(payload: bytes, signature: bytes, public_key_der: bytes, path: str) -> None:
+    if shutil.which("openssl") is None:
+        fail(path, "openssl is required to verify release signatures")
+    with tempfile.TemporaryDirectory(prefix="kerosene-stack-verify-") as directory:
+        root = Path(directory)
+        payload_path = root / "payload"
+        signature_path = root / "signature"
+        public_key_path = root / "public.der"
+        payload_path.write_bytes(payload)
+        signature_path.write_bytes(signature)
+        public_key_path.write_bytes(public_key_der)
+        result = subprocess.run(
+            [
+                "openssl",
+                "pkeyutl",
+                "-verify",
+                "-rawin",
+                "-pubin",
+                "-inkey",
+                str(public_key_path),
+                "-keyform",
+                "DER",
+                "-sigfile",
+                str(signature_path),
+                "-in",
+                str(payload_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    if result.returncode != 0:
+        fail(path, "Ed25519 signature verification failed")
+
+
+def validate_roster(path_text: str, summary: dict[str, Any]) -> dict[str, bytes]:
+    roster = read_json_document(path_text, "validator roster")
+    root = require_keys(roster, "$.roster", ("schema", "networkId", "members"))
+    if root["schema"] != ROSTER_SCHEMA:
+        fail("$.roster.schema", f"must equal {ROSTER_SCHEMA!r}")
+    if root["networkId"] != summary["bft"]["networkId"]:
+        fail("$.roster.networkId", "does not match the release BFT network")
+    members = require_object(root["members"], "$.roster.members")
+    if len(members) != summary["bft"]["members"]:
+        fail("$.roster.members", "member count does not match the release BFT membership")
+    decoded: dict[str, bytes] = {}
+    for member_id, public_key in members.items():
+        require_identifier(member_id, "$.roster.members.<member>")
+        decoded[member_id] = decode_base64(public_key, f"$.roster.members.{member_id}")
+    return decoded
+
+
+def verify_signature_set(
+    payload: bytes,
+    signatures: Any,
+    roster: dict[str, bytes],
+    threshold: int,
+    path: str,
+    allowed_members: set[str] | None = None,
+) -> int:
+    if type(signatures) is not list:
+        fail(path, "signatures must be an array")
+    seen: set[str] = set()
+    for index, value in enumerate(signatures):
+        signature = require_keys(
+            value,
+            f"{path}[{index}]",
+            ("memberId", "publicKeyDerBase64", "signatureBase64"),
+        )
+        member_id = require_identifier(signature["memberId"], f"{path}[{index}].memberId")
+        if member_id in seen:
+            fail(f"{path}[{index}].memberId", "duplicate signer")
+        if member_id not in roster:
+            fail(f"{path}[{index}].memberId", "signer is not in the trusted roster")
+        if allowed_members is not None and member_id not in allowed_members:
+            fail(f"{path}[{index}].memberId", "signer is not an accepted Bank observer")
+        seen.add(member_id)
+        public_key = decode_base64(signature["publicKeyDerBase64"], f"{path}[{index}].publicKeyDerBase64")
+        if public_key != roster[member_id]:
+            fail(f"{path}[{index}].publicKeyDerBase64", "does not match the trusted roster")
+        signature_bytes = decode_base64(signature["signatureBase64"], f"{path}[{index}].signatureBase64")
+        verify_ed25519(payload, signature_bytes, public_key, f"{path}[{index}]")
+    if len(seen) < threshold:
+        fail(path, f"requires {threshold} distinct valid signatures; received {len(seen)}")
+    return len(seen)
+
+
+def verify_bft_receipt(
+    release: dict[str, Any],
+    summary: dict[str, Any],
+    receipt_path: str,
+    roster_path: str,
+) -> dict[str, Any]:
+    receipt = read_json_document(receipt_path, "BFT release receipt")
+    root = require_keys(
+        receipt,
+        "$.receipt",
+        ("schema", "releaseLockCanonicalDigest", "networkId", "height", "threshold", "members", "signatures"),
+    )
+    if root["schema"] != RELEASE_RECEIPT_SCHEMA:
+        fail("$.receipt.schema", f"must equal {RELEASE_RECEIPT_SCHEMA!r}")
+    if root["releaseLockCanonicalDigest"] != canonical_digest(release):
+        fail("$.receipt.releaseLockCanonicalDigest", "does not identify the supplied release lock")
+    for field in ("networkId", "height", "threshold", "members"):
+        if root[field] != summary["bft"][field]:
+            fail(f"$.receipt.{field}", "does not match the release lock")
+    payload = dict(receipt)
+    signatures = payload.pop("signatures")
+    roster = validate_roster(roster_path, summary)
+    count = verify_signature_set(
+        canonical_bytes(payload),
+        signatures,
+        roster,
+        summary["bft"]["threshold"],
+        "$.receipt.signatures",
+    )
+    return {"schema": RELEASE_RECEIPT_SCHEMA, "signaturesVerified": count}
+
+
+def verify_tuf_proof(
+    release: dict[str, Any],
+    summary: dict[str, Any],
+    proof_path: str,
+    root_key_path: str,
+) -> dict[str, Any]:
+    proof = read_json_document(proof_path, "TUF target proof")
+    root = require_keys(
+        proof,
+        "$.tufProof",
+        ("schema", "targetPath", "metadataVersion", "targetDigest", "expiresAt", "signatureBase64"),
+    )
+    if root["schema"] != TUF_PROOF_SCHEMA:
+        fail("$.tufProof.schema", f"must equal {TUF_PROOF_SCHEMA!r}")
+    for field in ("targetPath", "metadataVersion", "targetDigest"):
+        if root[field] != summary["tuf"][field]:
+            fail(f"$.tufProof.{field}", "does not match the release TUF target")
+    parse_timestamp(root["expiresAt"], "$.tufProof.expiresAt")
+    try:
+        root_key_b64 = Path(root_key_path).read_text(encoding="utf-8").strip()
+    except OSError as error:
+        fail("TUF root key", f"cannot read: {error}")
+    public_key = decode_base64(root_key_b64, "TUF root key")
+    signature = decode_base64(root["signatureBase64"], "$.tufProof.signatureBase64")
+    payload = dict(proof)
+    payload.pop("signatureBase64")
+    verify_ed25519(canonical_bytes(payload), signature, public_key, "$.tufProof.signatureBase64")
+    return {"schema": TUF_PROOF_SCHEMA, "signatureVerified": True}
+
+
+def verify_bank_observer_report(
+    release: dict[str, Any],
+    summary: dict[str, Any],
+    report_path: str,
+    roster_path: str,
+) -> dict[str, Any]:
+    report = read_json_document(report_path, "Bank observer report")
+    root = require_keys(
+        report,
+        "$.observerReport",
+        (
+            "schema",
+            "releaseId",
+            "networkId",
+            "targetSequence",
+            "releaseLockCanonicalDigest",
+            "observations",
+            "signatures",
+        ),
+    )
+    if root["schema"] != OBSERVER_REPORT_SCHEMA:
+        fail("$.observerReport.schema", f"must equal {OBSERVER_REPORT_SCHEMA!r}")
+    if root["releaseId"] != summary["releaseId"]:
+        fail("$.observerReport.releaseId", "does not match the release lock")
+    if root["networkId"] != summary["networkId"]:
+        fail("$.observerReport.networkId", "does not match the release network")
+    if root["targetSequence"] != summary["sequence"]:
+        fail("$.observerReport.targetSequence", "does not match the release sequence")
+    if root["releaseLockCanonicalDigest"] != canonical_digest(release):
+        fail("$.observerReport.releaseLockCanonicalDigest", "does not identify the supplied release lock")
+    observations = root["observations"]
+    if type(observations) is not list:
+        fail("$.observerReport.observations", "must be an array")
+    compatible_ids: set[str] = set()
+    for index, value in enumerate(observations):
+        observation = require_keys(
+            value,
+            f"$.observerReport.observations[{index}]",
+            ("observerId", "status", "observedSequence", "releaseDigest"),
+        )
+        observer_id = require_identifier(observation["observerId"], f"$.observerReport.observations[{index}].observerId")
+        if observer_id in compatible_ids:
+            fail(f"$.observerReport.observations[{index}].observerId", "duplicate observer")
+        if observation["status"] != "compatible":
+            continue
+        if observation["observedSequence"] != summary["sequence"]:
+            fail(f"$.observerReport.observations[{index}].observedSequence", "does not match the target sequence")
+        if observation["releaseDigest"] != canonical_digest(release):
+            fail(f"$.observerReport.observations[{index}].releaseDigest", "does not identify the release lock")
+        compatible_ids.add(observer_id)
+    minimum = summary["policy"]["minimumBankObservers"]
+    if len(compatible_ids) < minimum:
+        fail("$.observerReport.observations", f"requires {minimum} compatible observers; received {len(compatible_ids)}")
+    payload = dict(report)
+    signatures = payload.pop("signatures")
+    roster = validate_roster(roster_path, summary)
+    count = verify_signature_set(
+        canonical_bytes(payload),
+        signatures,
+        roster,
+        minimum,
+        "$.observerReport.signatures",
+        allowed_members=compatible_ids,
+    )
+    return {"schema": OBSERVER_REPORT_SCHEMA, "compatibleObservers": len(compatible_ids), "signaturesVerified": count}
+
+
+def validate_snapshot_receipt(
+    summary: dict[str, Any],
+    receipt_path: str,
+    environment: str,
+) -> dict[str, Any]:
+    receipt = read_json_document(receipt_path, "snapshot receipt")
+    root = require_keys(
+        receipt,
+        "$.snapshot",
+        ("schema", "releaseId", "environment", "status", "snapshotId", "provider", "snapshotDigest", "createdAt", "expiresAt"),
+    )
+    if root["schema"] != SNAPSHOT_RECEIPT_SCHEMA:
+        fail("$.snapshot.schema", f"must equal {SNAPSHOT_RECEIPT_SCHEMA!r}")
+    if root["releaseId"] != summary["releaseId"]:
+        fail("$.snapshot.releaseId", "does not match the release lock")
+    if root["environment"] != environment:
+        fail("$.snapshot.environment", "does not match the selected environment")
+    if root["status"] != "verified":
+        fail("$.snapshot.status", "must equal 'verified'")
+    require_identifier(root["snapshotId"], "$.snapshot.snapshotId")
+    require_identifier(root["provider"], "$.snapshot.provider")
+    require_digest(root["snapshotDigest"], "$.snapshot.snapshotDigest")
+    created_at = parse_rfc3339(root["createdAt"], "$.snapshot.createdAt")
+    expires_at = parse_rfc3339(root["expiresAt"], "$.snapshot.expiresAt")
+    now = dt.datetime.now(dt.timezone.utc)
+    if created_at > now + dt.timedelta(minutes=5):
+        fail("$.snapshot.createdAt", "cannot be in the future")
+    if expires_at <= now:
+        fail("$.snapshot.expiresAt", "is expired")
+    if expires_at <= created_at:
+        fail("$.snapshot.expiresAt", "must be after createdAt")
+    return {"snapshotId": root["snapshotId"], "provider": root["provider"], "snapshotDigest": root["snapshotDigest"]}
 
 
 def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
@@ -407,8 +722,8 @@ def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, An
         "mode": "plan-only",
         "applyEnabled": False,
         "applyBlockedBy": [
-            "The TUF target and BFT commit receipt are not cryptographically verified by this revision.",
-            "No authenticated Bank-observer feed or deployment adapter is implemented by this revision.",
+            "Apply requires a verified BFT release receipt, Bank-observer report, and snapshot receipt.",
+            "The operator must explicitly select staging-cell and confirm the exact release ID.",
         ],
         "guardrails": [
             "Never build from source during update.",
@@ -416,6 +731,7 @@ def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, An
             "Never activate a Vault signer from deployment automation.",
             "Require a snapshot before any stateful migration.",
             f"Require at least {summary['policy']['minimumBankObservers']} compatible Bank observers before operator approval.",
+            "Keep the Admin CLI as an operator artifact; never mount its credentials into workloads.",
         ],
         "phases": [
             {
@@ -446,7 +762,7 @@ def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, An
             {
                 "id": "drain",
                 "changesRuntime": True,
-                "components": ["admin", "core", "kfe", "rails"],
+                "components": ["core", "kfe", "web-page"],
                 "actions": [
                     "Drain write paths with an operator-visible maintenance window.",
                 ],
@@ -472,8 +788,14 @@ def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, An
             {
                 "id": "rollout-applications",
                 "changesRuntime": True,
-                "components": ["core", "kfe", "rails", "admin"],
+                "components": ["core", "kfe", "web-page"],
                 "strategy": "dependency-ordered rolling rollout with health and financial smoke gates",
+            },
+            {
+                "id": "operator-release",
+                "changesRuntime": False,
+                "components": ["admin"],
+                "strategy": "verify the Admin CLI artifact on the operator workstation; no workload mutation",
             },
             {
                 "id": "validate-and-commit",
@@ -514,7 +836,7 @@ def atomic_write_json(path_text: str, value: dict[str, Any]) -> None:
             Path(temporary_name).unlink(missing_ok=True)
 
 
-def emit_verification(summary: dict[str, Any], as_json: bool) -> None:
+def emit_verification(summary: dict[str, Any], as_json: bool, authorization: dict[str, Any] | None = None) -> None:
     result = {
         "schema": "kerosene.stack.release-structure-check/v1",
         "releaseId": summary["releaseId"],
@@ -522,14 +844,16 @@ def emit_verification(summary: dict[str, Any], as_json: bool) -> None:
         "sequence": summary["sequence"],
         "requiredComponents": list(SERVICE_REPOSITORY),
         "structuralValidation": "passed",
-        "cryptographicAuthorization": "not-implemented",
+        "cryptographicAuthorization": "verified" if authorization else "not-checked",
         "productionRolloutAuthorized": False,
     }
+    if authorization:
+        result["authorization"] = authorization
     if as_json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return
     print(f"Release lock structurally valid: {summary['releaseId']} (sequence {summary['sequence']}).")
-    print("Cryptographic authorization is not implemented; this result cannot authorize a production rollout.")
+    print("Cryptographic authorization was not requested; this result cannot authorize a production rollout.")
 
 
 def emit_plan(plan: dict[str, Any], as_json: bool) -> None:
@@ -537,8 +861,135 @@ def emit_plan(plan: dict[str, Any], as_json: bool) -> None:
         print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
         return
     print(f"Safe update plan generated for {plan['releaseId']} (sequence {plan['sequence']}).")
-    print("Apply remains blocked until TUF/BFT verification, Bank observation, and rollout adapters are implemented.")
+    print("Apply requires verified BFT/Bank evidence, a snapshot receipt, and explicit operator confirmation.")
     print("Phases: " + ", ".join(phase["id"] for phase in plan["phases"]))
+
+
+def write_update_state(state_dir_text: str, state: dict[str, Any]) -> str:
+    state_dir = Path(state_dir_text)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(state_dir, 0o700)
+    state_file = state_dir / "update-state.json"
+    atomic_write_json(str(state_file), state)
+    return str(state_file)
+
+
+def run_staging_cell_deploy(summary: dict[str, Any], args: argparse.Namespace) -> None:
+    if args.environment != "staging-cell":
+        raise ApplyBlockedError(
+            "only --environment staging-cell is implemented; production requires the private ops adapter"
+        )
+    repo_root = Path(__file__).resolve().parents[1]
+    deploy_script = repo_root / "infra/kubernetes/scripts/deploy.sh"
+    if not deploy_script.is_file():
+        raise ApplyBlockedError(f"missing deploy adapter: {deploy_script}")
+    environment = os.environ.copy()
+    for component, variable in DEPLOY_IMAGE_ENV.items():
+        environment[variable] = summary["services"][component]["image"]
+    targets = ("staging-vault", "staging")
+    for target in targets:
+        command = ["bash", str(deploy_script), target]
+        if args.dry_run:
+            command.append("--dry-run")
+        print(f"[*] Applying release {summary['releaseId']} to {target}...", file=sys.stderr)
+        result = subprocess.run(command, env=environment, check=False, stdout=sys.stderr)
+        if result.returncode != 0:
+            raise ApplyBlockedError(f"deploy adapter failed for {target} with exit code {result.returncode}")
+
+
+def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argparse.Namespace) -> int:
+    if args.confirm_release != summary["releaseId"]:
+        print("update blocked: --confirm-release must exactly match the release ID", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+    if args.environment != "staging-cell":
+        print("update blocked: only --environment staging-cell is implemented in the public adapter", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+    if not args.state_dir:
+        print("update blocked: --state-dir is required for an applied update", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+    required_paths = {
+        "--tuf-proof": args.tuf_proof,
+        "--tuf-root-key": args.tuf_root_key,
+        "--bft-receipt": args.bft_receipt,
+        "--validator-roster": args.validator_roster,
+        "--bank-observer-report": args.bank_observer_report,
+        "--snapshot-receipt": args.snapshot_receipt,
+    }
+    missing = [name for name, path in required_paths.items() if not path]
+    if missing:
+        print(f"update blocked: missing required evidence: {', '.join(missing)}", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+
+    try:
+        tuf_result = verify_tuf_proof(release, summary, args.tuf_proof, args.tuf_root_key)
+        receipt_result = verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster)
+        observer_result = verify_bank_observer_report(
+            release,
+            summary,
+            args.bank_observer_report,
+            args.validator_roster,
+        )
+        snapshot_result = validate_snapshot_receipt(summary, args.snapshot_receipt, args.environment)
+    except ReleaseValidationError as error:
+        print(f"update blocked: {error}", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+
+    update_id = canonical_digest(release)
+    state: dict[str, Any] = {
+        "schema": "kerosene.stack.update-state/v1",
+        "updateId": update_id,
+        "releaseId": summary["releaseId"],
+        "sequence": summary["sequence"],
+        "environment": args.environment,
+        "status": "verified",
+        "phase": "verified",
+        "evidence": {
+            "tuf": tuf_result,
+            "bft": receipt_result,
+            "bankObservers": observer_result,
+            "snapshot": snapshot_result,
+        },
+        "startedAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    state_file = write_update_state(args.state_dir, state)
+
+    try:
+        state["phase"] = "snapshot-accepted"
+        write_update_state(args.state_dir, state)
+        state["phase"] = "rollout-started"
+        write_update_state(args.state_dir, state)
+        run_staging_cell_deploy(summary, args)
+        state["phase"] = "validate-and-commit"
+        state["status"] = "committed" if not args.dry_run else "dry-run-passed"
+        state["completedAt"] = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+        write_update_state(args.state_dir, state)
+    except (ApplyBlockedError, OSError) as error:
+        state["phase"] = "failed"
+        state["status"] = "failed"
+        state["failure"] = str(error)
+        state["manualRecoveryRequired"] = True
+        write_update_state(args.state_dir, state)
+        print(f"update failed after state was recorded: {error}", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+
+    result = {
+        "schema": "kerosene.stack.update-result/v1",
+        "status": state["status"],
+        "releaseId": summary["releaseId"],
+        "environment": args.environment,
+        "updateId": update_id,
+        "stateFile": state_file,
+        "tufSignatureVerified": tuf_result["signatureVerified"],
+        "bftSignaturesVerified": receipt_result["signaturesVerified"],
+        "bankObserversVerified": observer_result["compatibleObservers"],
+        "snapshotId": snapshot_result["snapshotId"],
+    }
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        print(f"Kerosene Cell update {state['status']}: {summary['releaseId']} ({args.environment}).")
+        print(f"State recorded at {state_file}.")
+    return 0
 
 
 def load_and_validate(path: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -547,8 +998,29 @@ def load_and_validate(path: str) -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def command_verify(args: argparse.Namespace) -> int:
-    _, summary = load_and_validate(args.release)
-    emit_verification(summary, args.json)
+    release, summary = load_and_validate(args.release)
+    evidence_paths = (
+        args.tuf_proof,
+        args.tuf_root_key,
+        args.bft_receipt,
+        args.validator_roster,
+        args.bank_observer_report,
+    )
+    if any(evidence_paths) and not all(evidence_paths):
+        raise ReleaseValidationError("verify-release requires BFT receipt, validator roster, and Bank observer report together")
+    authorization = None
+    if all(evidence_paths):
+        authorization = {
+            "tuf": verify_tuf_proof(release, summary, args.tuf_proof, args.tuf_root_key),
+            "bft": verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster),
+            "bankObservers": verify_bank_observer_report(
+                release,
+                summary,
+                args.bank_observer_report,
+                args.validator_roster,
+            ),
+        }
+    emit_verification(summary, args.json, authorization)
     return 0
 
 
@@ -562,14 +1034,14 @@ def command_plan(args: argparse.Namespace) -> int:
 
 
 def command_update(args: argparse.Namespace) -> int:
-    if args.apply:
-        print(
-            "Refusing to apply: this revision has no TUF/BFT cryptographic verifier, authenticated "
-            "Bank-observer feed, or production rollout adapter.",
-            file=sys.stderr,
-        )
-        return EXIT_CANNOT_APPLY
-    return command_plan(args)
+    release, summary = load_and_validate(args.release)
+    if not args.apply:
+        plan = build_plan(release, summary)
+        if args.output:
+            atomic_write_json(args.output, plan)
+        emit_plan(plan, args.json)
+        return 0
+    return apply_release(release, summary, args)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -581,6 +1053,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = subcommands.add_parser("verify-release", help="validate structure and immutable release references")
     verify.add_argument("--release", required=True, help="path to a release-lock JSON document")
+    verify.add_argument("--tuf-proof", help="signed TUF target proof JSON")
+    verify.add_argument("--tuf-root-key", help="trusted TUF root Ed25519 public key in base64 DER form")
+    verify.add_argument("--bft-receipt", help="signed BFT release receipt JSON")
+    verify.add_argument("--validator-roster", help="trusted validator roster JSON")
+    verify.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
     verify.add_argument("--json", action="store_true", help="emit machine-readable output")
     verify.set_defaults(handler=command_verify)
 
@@ -590,15 +1067,30 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--json", action="store_true", help="emit machine-readable output")
     plan.set_defaults(handler=command_plan)
 
-    update = subcommands.add_parser("update", help="produce the safe plan; --apply is intentionally unavailable")
+    update = subcommands.add_parser("update", help="produce a plan or apply a verified staging-cell release")
     update.add_argument("--release", required=True, help="path to a release-lock JSON document")
     update.add_argument("--output", help="optional path for an atomically written JSON plan")
     update.add_argument("--json", action="store_true", help="emit machine-readable output")
-    update.add_argument("--apply", action="store_true", help="reserved for a future verified rollout adapter")
+    update.add_argument("--apply", action="store_true", help="execute the staging-cell rollout after all evidence gates pass")
+    update.add_argument(
+        "--environment",
+        choices=("staging-cell",),
+        default=os.environ.get("KEROSENE_STACK_ENVIRONMENT", "staging-cell"),
+        help="deployment target; the public adapter is the two-plane staging cell",
+    )
+    update.add_argument("--confirm-release", help="exact release ID confirmation required with --apply")
+    update.add_argument("--tuf-proof", help="signed TUF target proof JSON")
+    update.add_argument("--tuf-root-key", help="trusted TUF root Ed25519 public key in base64 DER form")
+    update.add_argument("--bft-receipt", help="signed BFT release receipt JSON")
+    update.add_argument("--validator-roster", help="trusted validator roster JSON")
+    update.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
+    update.add_argument("--snapshot-receipt", help="verified snapshot provider receipt JSON")
+    update.add_argument("--state-dir", help="directory for the atomic update state record")
+    update.add_argument("--dry-run", action="store_true", help="run both staging overlays with server-side dry-run")
     update.set_defaults(handler=command_update)
 
     version = subcommands.add_parser("version", help="print the controller revision")
-    version.set_defaults(handler=lambda _args: (print("kerosene-stack v0.1.0-preapply"), 0)[1])
+    version.set_defaults(handler=lambda _args: (print("kerosene-stack v0.2.0-staging-cell"), 0)[1])
     return parser
 
 

@@ -69,14 +69,14 @@
     "services": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["admin", "core", "kfe", "node", "vault", "rails", "postgres", "redis", "bitcoin", "lnd", "tor"],
+      "required": ["admin", "core", "kfe", "node", "vault", "web-page", "postgres", "redis", "bitcoin", "lnd", "tor"],
       "properties": {
         "admin": { "$ref": "#/$defs/service" },
         "core": { "$ref": "#/$defs/service" },
         "kfe": { "$ref": "#/$defs/service" },
         "node": { "$ref": "#/$defs/service" },
         "vault": { "$ref": "#/$defs/service" },
-        "rails": { "$ref": "#/$defs/service" },
+        "web-page": { "$ref": "#/$defs/service" },
         "postgres": { "$ref": "#/$defs/service" },
         "redis": { "$ref": "#/$defs/service" },
         "bitcoin": { "$ref": "#/$defs/service" },
@@ -178,7 +178,7 @@
         "image": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*@sha256:[0-9a-f]{64}$" },
         "configDigest": { "$ref": "#/$defs/digest" },
         "repository": { "$ref": "#/$defs/identifier" },
-        "rollout": { "enum": ["admin", "application", "network", "quorum", "stateful"] }
+        "rollout": { "enum": ["admin", "application", "network", "operator", "quorum", "stateful"] }
       }
     }
   }

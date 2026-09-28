@@ -2,16 +2,16 @@
 
 `kerosene-stack` é o ponto de partida do controlador operacional da **Kerosene
 Cell completa**, não de um contêiner isolado. O lock exige Admin, Core, KFE,
-Node, Vault, Rails, PostgreSQL, Redis, Bitcoin, LND e Tor; também prende os
+Node, Vault, web-page, PostgreSQL, Redis, Bitcoin, LND e Tor; também prende os
 commits dos repositórios `admin`, `clients`, `contracts`, `core`, `deploy`,
 `kfe`, `node`, `rails`, `shared` e `vault`.
 
-O corte atual é deliberadamente seguro por omissão: valida a estrutura do lock,
-os digests imutáveis e as regras que impedem build local e ativação de signers
-Vault. Ele produz o plano de rollout, mas **não executa atualização**. Ainda
-faltam o verificador criptográfico de metadados TUF/recibo BFT, a coleta
-autenticada de observações do plano Bank e os adaptadores de rollout para que
-`--apply` possa existir com segurança.
+O corte atual valida a estrutura do lock, os digests imutáveis, a prova TUF,
+o recibo BFT, o relatório assinado dos observadores Bank e o recibo de snapshot.
+Com essas provas e confirmação explícita do operador, `--apply` executa o
+adaptador real da célula de staging: primeiro `staging-vault`, depois `staging`,
+usando os overlays Kubernetes já existentes. Produção continua bloqueada no
+repositório público e deve usar o adaptador privado de operações.
 
 ## O que é fonte da verdade
 
@@ -23,11 +23,15 @@ liga três coisas diferentes, que não devem ser confundidas:
 2. Artefatos executáveis e configurações, todos fixados por `sha256`; nenhum
    serviço pode usar `latest` ou ser reconstruído no host durante a atualização.
 3. A decisão de distribuição: o alvo TUF, o recibo de commit BFT e a
-   compatibilidade do quorum Vault. Nesta etapa esses campos são validados como
-   referências estruturais; eles ainda não são prova criptográfica local.
+   compatibilidade do quorum Vault. A prova TUF e as assinaturas BFT/Bank são
+   verificadas localmente; a compatibilidade Vault continua sendo uma
+   declaração de entrada que não ordena releases.
 
 O schema público está em
 [`infra/stack/release-lock.schema.json`](../../infra/stack/release-lock.schema.json).
+Os contratos de prova estão em `infra/stack/*-receipt.schema.json`,
+`infra/stack/release-roster.schema.json` e
+`infra/stack/bank-observer-report.schema.json`.
 O exemplo é sintético e não é um release utilizável:
 [`infra/stack/examples/release-lock.example.json`](../../infra/stack/examples/release-lock.example.json).
 
@@ -51,13 +55,33 @@ snapshots, drenar aplicações, atualizar fundação, Vault um a um, Node um a u
 aplicações e, por último, validar/registrar o resultado. O Admin e o Node são
 passos obrigatórios, não apêndices opcionais.
 
+Para uma execução real, o operador precisa fornecer as provas produzidas pela
+governança, pelos servidores Bank e pelo provedor de snapshots:
+
 ```bash
-kerosene-stack update --release release-lock.json --apply
+kerosene-stack update \
+  --release release-lock.json \
+  --apply \
+  --environment staging-cell \
+  --confirm-release bank-mainnet-2026.09.28.1 \
+  --tuf-proof tuf-target-proof.json \
+  --tuf-root-key tuf-root-key.b64 \
+  --bft-receipt release-receipt.json \
+  --validator-roster release-roster.json \
+  --bank-observer-report bank-observer-report.json \
+  --snapshot-receipt snapshot-receipt.json \
+  --state-dir /var/lib/kerosene-stack
 ```
 
-Esse comando falha intencionalmente com código `78` nesta revisão. Não é
-seguro transformar um lock apenas estrutural em autoridade para `kubectl`,
-Compose, banco de dados ou Vault.
+O comando grava `update-state.json` com as fases `verified`,
+`snapshot-accepted`, `rollout-started` e `validate-and-commit`. Se o adaptador
+falhar, o estado fica como `failed` e exige recuperação manual; não há rollback
+automático de PostgreSQL, Bitcoin, LND ou Vault.
+
+Antes da mudança, use `--dry-run` com os mesmos documentos para renderizar e
+validar os dois overlays sem modificar recursos Kubernetes. Sem prova TUF,
+recibo BFT, relatório Bank, snapshot ou confirmação exata do release, `--apply`
+falha com código `78`.
 
 ## Invariantes já codificados
 
@@ -73,15 +97,15 @@ Compose, banco de dados ou Vault.
   campos desconhecidos silenciosamente.
 - `allowSourceBuild` e `vaultSignerActivation` devem ser `false`.
 
-## Próximos cortes para habilitar apply
+## Próximos cortes
 
 1. Formalizar este contrato no repositório `contracts` e gerar clientes para
    Core, Admin e Bank observers.
-2. Implementar verificação TUF, Cosign/SLSA e recibo BFT real, sobre
-   serialização canônica assinada.
-3. Fazer os servidores Bank publicarem observações assinadas de versão,
-   compatibilidade e urgência ao Admin.
-4. Implementar adaptadores idempotentes para Kubernetes/Compose, snapshots e
-   gates de saúde/reconciliação.
-5. Habilitar `--apply` somente após essas verificações e uma aprovação humana
-   explícita, registrando um recibo de atualização assinado.
+2. Substituir a prova TUF mínima por metadados TUF completos, com delegação de
+   root/targets, rotação de root e verificação de provenance Cosign/SLSA.
+3. Ligar o recibo de snapshot a um provedor real de VolumeSnapshot/restic e
+   exigir restauração verificada antes de aceitar `snapshot-accepted`.
+4. Fazer os servidores Bank publicarem as observações diretamente por mTLS,
+   em vez de depender apenas de arquivos transportados pelo operador.
+5. Adicionar smoke gates financeiros e recuperação automatizada por componente,
+   mantendo rollback manual para migrações irreversíveis.

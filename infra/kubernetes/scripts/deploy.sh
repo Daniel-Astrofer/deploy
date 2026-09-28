@@ -12,6 +12,10 @@ Optional:
   VAULT_IMAGE=registry/vault@sha256:...
   NODE_IMAGE=registry/node@sha256:...
   TOR_IMAGE=registry/tor@sha256:...
+  POSTGRES_IMAGE=registry/postgres@sha256:...
+  REDIS_IMAGE=registry/redis@sha256:...
+  BITCOIN_IMAGE=registry/bitcoin@sha256:...
+  LND_IMAGE=registry/lnd@sha256:...
 
   KUBECTL=kubectl
   KUSTOMIZE=kustomize
@@ -60,7 +64,7 @@ if ! command -v "$KUBECTL" >/dev/null 2>&1; then
   exit 127
 fi
 
-if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" || -n "${NODE_IMAGE:-}" || -n "${TOR_IMAGE:-}" ]]; then
+if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" || -n "${NODE_IMAGE:-}" || -n "${TOR_IMAGE:-}" || -n "${POSTGRES_IMAGE:-}" || -n "${REDIS_IMAGE:-}" || -n "${BITCOIN_IMAGE:-}" || -n "${LND_IMAGE:-}" ]]; then
   if ! command -v "$KUSTOMIZE_BIN" >/dev/null 2>&1; then
     echo "kustomize not found. It is required when setting images through environment variables." >&2
     echo "Install kustomize or edit the overlay image tags manually and run with no image env vars." >&2
@@ -74,7 +78,7 @@ if [[ ! -d "$OVERLAY" ]]; then
 fi
 
 if [[ "$PROFILE" == "staging-core" ]]; then
-  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE NODE_IMAGE TOR_IMAGE; do
+  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE NODE_IMAGE TOR_IMAGE POSTGRES_IMAGE REDIS_IMAGE BITCOIN_IMAGE LND_IMAGE; do
     image_ref="${!image_var:-}"
     if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
       echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
@@ -115,6 +119,18 @@ if [[ -n "${NODE_IMAGE:-}" ]]; then
 fi
 if [[ -n "${TOR_IMAGE:-}" ]]; then
   (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/tor=${TOR_IMAGE}")
+fi
+if [[ -n "${POSTGRES_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "postgres=${POSTGRES_IMAGE}")
+fi
+if [[ -n "${REDIS_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "redis=${REDIS_IMAGE}")
+fi
+if [[ -n "${BITCOIN_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "bitcoin/bitcoin=${BITCOIN_IMAGE}")
+fi
+if [[ -n "${LND_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "lightninglabs/lnd=${LND_IMAGE}")
 fi
 
 MANIFEST="$TMP_DIR/manifest.yaml"
