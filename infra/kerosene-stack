@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Safe-by-default release-lock validation and update planning for a Kerosene Cell.
+"""Safe-by-default release-lock validation and staged update execution.
 
-This first controller cut deliberately has no deploy adapter.  It can validate
-the shape and immutable references of a complete Cell release and produce the
-operator plan, but it cannot authorize or apply a production rollout until the
-TUF and BFT cryptographic verifiers are connected.
+The public adapter applies only the complete staging Cell. Production remains
+outside this repository and requires the private operations adapter.
 """
 
 from __future__ import annotations
@@ -597,6 +595,8 @@ def verify_tuf_proof(
     for field in ("targetPath", "metadataVersion", "targetDigest"):
         if root[field] != summary["tuf"][field]:
             fail(f"$.tufProof.{field}", "does not match the release TUF target")
+    if root["expiresAt"] != summary["tuf"]["expiresAt"]:
+        fail("$.tufProof.expiresAt", "does not match the release TUF authorization expiry")
     parse_timestamp(root["expiresAt"], "$.tufProof.expiresAt")
     try:
         root_key_b64 = Path(root_key_path).read_text(encoding="utf-8").strip()
@@ -651,7 +651,10 @@ def verify_bank_observer_report(
             ("observerId", "status", "observedSequence", "releaseDigest"),
         )
         observer_id = require_identifier(observation["observerId"], f"$.observerReport.observations[{index}].observerId")
-        if observer_id in compatible_ids:
+        if any(
+            type(existing) is dict and existing.get("observerId") == observer_id
+            for existing in observations[:index]
+        ):
             fail(f"$.observerReport.observations[{index}].observerId", "duplicate observer")
         if observation["status"] != "compatible":
             continue
@@ -874,6 +877,28 @@ def write_update_state(state_dir_text: str, state: dict[str, Any]) -> str:
     return str(state_file)
 
 
+def guard_previous_update_state(state_dir_text: str, summary: dict[str, Any], environment: str) -> None:
+    state_file = Path(state_dir_text) / "update-state.json"
+    if not state_file.exists():
+        return
+    previous = read_json_document(str(state_file), "existing update state")
+    if previous.get("schema") != "kerosene.stack.update-state/v1":
+        raise ApplyBlockedError("existing update-state.json has an unsupported schema")
+    previous_environment = require_string(previous.get("environment"), "$.environment")
+    if previous_environment != environment:
+        raise ApplyBlockedError("existing update-state.json belongs to another environment")
+    previous_sequence = require_integer(previous.get("sequence"), "$.sequence", 1)
+    previous_status = require_string(previous.get("status"), "$.status")
+    if previous.get("manualRecoveryRequired") is True or previous_status == "failed":
+        raise ApplyBlockedError("existing update-state.json requires manual recovery before another update")
+    if previous_status not in ("committed", "dry-run-passed"):
+        raise ApplyBlockedError("existing update-state.json records an incomplete update")
+    if previous_status == "committed" and previous_sequence >= summary["sequence"]:
+        raise ApplyBlockedError(
+            f"release sequence {summary['sequence']} is not newer than the committed sequence {previous_sequence}"
+        )
+
+
 def run_staging_cell_deploy(summary: dict[str, Any], args: argparse.Namespace) -> None:
     if args.environment != "staging-cell":
         raise ApplyBlockedError(
@@ -921,6 +946,7 @@ def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argpar
         return EXIT_CANNOT_APPLY
 
     try:
+        guard_previous_update_state(args.state_dir, summary, args.environment)
         tuf_result = verify_tuf_proof(release, summary, args.tuf_proof, args.tuf_root_key)
         receipt_result = verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster)
         observer_result = verify_bank_observer_report(

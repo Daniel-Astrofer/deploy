@@ -49,11 +49,10 @@ PATH="$PWD/infra:$PATH" kerosene-stack update \
   --output /tmp/kerosene-update-plan.json
 ```
 
-`update` é atualmente equivalente a gerar um plano de alteração zero. O plano
-impõe a sequência: observar o plano Bank, verificar autorização, capturar
-snapshots, drenar aplicações, atualizar fundação, Vault um a um, Node um a um,
-aplicações e, por último, validar/registrar o resultado. O Admin e o Node são
-passos obrigatórios, não apêndices opcionais.
+Sem `--apply`, `update` gera apenas um plano de alteração zero. O plano impõe a
+sequência: observar o plano Bank, verificar autorização, aceitar o snapshot,
+atualizar fundação, Vault, Node e aplicações e, por último, validar/registrar o
+resultado. O Admin e o Node são passos obrigatórios, não apêndices opcionais.
 
 Para uma execução real, o operador precisa fornecer as provas produzidas pela
 governança, pelos servidores Bank e pelo provedor de snapshots:
@@ -74,9 +73,11 @@ kerosene-stack update \
 ```
 
 O comando grava `update-state.json` com as fases `verified`,
-`snapshot-accepted`, `rollout-started` e `validate-and-commit`. Se o adaptador
-falhar, o estado fica como `failed` e exige recuperação manual; não há rollback
-automático de PostgreSQL, Bitcoin, LND ou Vault.
+`snapshot-accepted`, `rollout-started` e `validate-and-commit`. O adaptador
+renderiza os manifests, confirma que cada digest recebido chegou a um workload,
+aplica os dois overlays e aguarda os rollouts e smoke gates existentes. Se o
+adaptador falhar, o estado fica como `failed` e exige recuperação manual; não há
+rollback automático de PostgreSQL, Bitcoin, LND ou Vault.
 
 Antes da mudança, use `--dry-run` com os mesmos documentos para renderizar e
 validar os dois overlays sem modificar recursos Kubernetes. Sem prova TUF,

@@ -102,35 +102,29 @@ trap cleanup EXIT
 cp -R "$K8S_ROOT" "$TMP_DIR/k8s"
 WORK_OVERLAY="$TMP_DIR/k8s/overlays/$ENVIRONMENT"
 
-if [[ -n "${SERVER_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/server=${SERVER_IMAGE}")
-fi
-if [[ -n "${KFE_SERVICE_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/kfe-service=${KFE_SERVICE_IMAGE}")
-fi
-if [[ -n "${WEB_PAGE_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/web-page=${WEB_PAGE_IMAGE}")
-fi
-if [[ -n "${VAULT_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/vault=${VAULT_IMAGE}")
-fi
-if [[ -n "${NODE_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/node=${NODE_IMAGE}")
-fi
-if [[ -n "${TOR_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/tor=${TOR_IMAGE}")
-fi
-if [[ -n "${POSTGRES_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "postgres=${POSTGRES_IMAGE}")
-fi
-if [[ -n "${REDIS_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "redis=${REDIS_IMAGE}")
-fi
-if [[ -n "${BITCOIN_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "bitcoin/bitcoin=${BITCOIN_IMAGE}")
-fi
-if [[ -n "${LND_IMAGE:-}" ]]; then
-  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "lightninglabs/lnd=${LND_IMAGE}")
+set_image_override() {
+  local image_var="$1"
+  local image_name="$2"
+  local image_ref="${!image_var:-}"
+  if [[ -n "$image_ref" ]]; then
+    (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "${image_name}=${image_ref}")
+  fi
+}
+
+if [[ "$PROFILE" == "staging-core" ]]; then
+  set_image_override SERVER_IMAGE kerosene/server
+  set_image_override KFE_SERVICE_IMAGE kerosene/kfe-service
+  set_image_override WEB_PAGE_IMAGE kerosene/web-page
+  set_image_override NODE_IMAGE kerosene/node
+  set_image_override TOR_IMAGE kerosene/tor
+  set_image_override POSTGRES_IMAGE postgres
+  set_image_override REDIS_IMAGE redis
+  set_image_override BITCOIN_IMAGE bitcoin/bitcoin
+  set_image_override LND_IMAGE lightninglabs/lnd
+else
+  set_image_override VAULT_IMAGE kerosene/vault
+  set_image_override NODE_IMAGE kerosene/node
+  set_image_override TOR_IMAGE kerosene/tor
 fi
 
 MANIFEST="$TMP_DIR/manifest.yaml"
@@ -138,6 +132,26 @@ MANIFEST="$TMP_DIR/manifest.yaml"
 
 if [[ "$PROFILE" == "staging-core" ]]; then
   KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/validate-staging-runtime.sh" "$MANIFEST"
+fi
+
+require_rendered_image() {
+  local image_var="$1"
+  local image_ref="${!image_var:-}"
+  if [[ -n "$image_ref" ]] && ! grep -Fq -- "$image_ref" "$MANIFEST"; then
+    echo "[!] Rendered manifest does not contain the requested ${image_var} digest." >&2
+    echo "[!] Refusing to continue because the image override did not reach a workload." >&2
+    exit 2
+  fi
+}
+
+if [[ "$PROFILE" == "staging-core" ]]; then
+  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE NODE_IMAGE TOR_IMAGE POSTGRES_IMAGE REDIS_IMAGE BITCOIN_IMAGE LND_IMAGE; do
+    require_rendered_image "$image_var"
+  done
+else
+  for image_var in VAULT_IMAGE NODE_IMAGE TOR_IMAGE; do
+    require_rendered_image "$image_var"
+  done
 fi
 
 echo "[*] Validating rendered manifest for namespace $NAMESPACE..."

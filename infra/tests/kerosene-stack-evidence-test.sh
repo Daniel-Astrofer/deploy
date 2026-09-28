@@ -193,9 +193,6 @@ fake_kubectl.write_text(
     encoding="utf-8",
 )
 fake_kubectl.chmod(0o755)
-fake_kustomize = fake_bin / "kustomize"
-fake_kustomize.write_text("#!/usr/bin/env bash\nset -euo pipefail\n", encoding="utf-8")
-fake_kustomize.chmod(0o755)
 
 state_dir = root / "state"
 environment = dict(**__import__("os").environ)
@@ -224,6 +221,25 @@ assert apply_result["status"] == "dry-run-passed"
 state = json.load(open(state_dir / "update-state.json", encoding="utf-8"))
 assert state["phase"] == "validate-and-commit"
 assert state["status"] == "dry-run-passed"
+
+state["status"] = "committed"
+json.dump(state, open(state_dir / "update-state.json", "w", encoding="utf-8"))
+replay = subprocess.run(
+    [
+        stack, "update", "--release", release_path, "--apply", "--dry-run", "--json",
+        "--environment", "staging-cell", "--confirm-release", release["releaseId"],
+        "--tuf-proof", str(tuf_proof_path), "--tuf-root-key", str(tuf_root),
+        "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        "--bank-observer-report", str(report_path), "--snapshot-receipt", str(snapshot_path),
+        "--state-dir", str(state_dir),
+    ],
+    check=False,
+    capture_output=True,
+    text=True,
+    env=environment,
+)
+assert replay.returncode == 78
+assert "not newer than the committed sequence" in replay.stderr
 PY
 
 echo "Kerosene Stack signed evidence tests passed."
