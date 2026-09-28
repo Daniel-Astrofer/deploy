@@ -332,6 +332,38 @@ if [[ "$PROFILE" != "staging-vault" ]]; then
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/kfe-service --timeout=10m
   "$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
 fi
+
+verify_live_image() {
+  local resource="$1"
+  local image_var="$2"
+  local expected="${!image_var:-}"
+  local images
+  images="$("$KUBECTL" -n "$NAMESPACE" get "$resource" \
+    -o jsonpath='{range .spec.template.spec.initContainers[*]}{.image}{"\n"}{end}{range .spec.template.spec.containers[*]}{.image}{"\n"}{end}')"
+  if ! grep -Fxq -- "$expected" <<<"$images"; then
+    echo "[!] Live ${resource} does not expose the requested ${image_var} digest." >&2
+    echo "[!] Refusing to report a successful rollout with an unexpected image." >&2
+    echo "$images" >&2
+    exit 2
+  fi
+}
+
+if [[ "$PROFILE" == "staging-core" ]]; then
+  verify_live_image deployment/server SERVER_IMAGE
+  verify_live_image deployment/kfe-service KFE_SERVICE_IMAGE
+  verify_live_image deployment/web-page WEB_PAGE_IMAGE
+  verify_live_image statefulset/staging-postgres POSTGRES_IMAGE
+  verify_live_image statefulset/staging-redis REDIS_IMAGE
+  verify_live_image statefulset/staging-bitcoin BITCOIN_IMAGE
+  verify_live_image statefulset/staging-lnd LND_IMAGE
+  verify_live_image statefulset/staging-tor TOR_IMAGE
+  verify_live_image statefulset/staging-tor NODE_IMAGE
+elif [[ "$PROFILE" == "staging-vault" ]]; then
+  verify_live_image deployment/vault VAULT_IMAGE
+  verify_live_image statefulset/vault-tor TOR_IMAGE
+  verify_live_image statefulset/vault-tor NODE_IMAGE
+fi
+
 if [[ "$PROFILE" == "staging-core" ]]; then
   if [[ "${KEROSENE_SKIP_STAGING_SMOKES:-0}" == "1" ]]; then
     echo "[!] KEROSENE_SKIP_STAGING_SMOKES=1: post-deploy gates were explicitly skipped." >&2
