@@ -684,12 +684,25 @@ def validate_snapshot_receipt(
     summary: dict[str, Any],
     receipt_path: str,
     environment: str,
+    provider_key_path: str,
 ) -> dict[str, Any]:
     receipt = read_json_document(receipt_path, "snapshot receipt")
     root = require_keys(
         receipt,
         "$.snapshot",
-        ("schema", "releaseId", "environment", "status", "snapshotId", "provider", "snapshotDigest", "createdAt", "expiresAt"),
+        (
+            "schema",
+            "releaseId",
+            "environment",
+            "status",
+            "snapshotId",
+            "provider",
+            "snapshotDigest",
+            "createdAt",
+            "expiresAt",
+            "providerPublicKeyDerBase64",
+            "signatureBase64",
+        ),
     )
     if root["schema"] != SNAPSHOT_RECEIPT_SCHEMA:
         fail("$.snapshot.schema", f"must equal {SNAPSHOT_RECEIPT_SCHEMA!r}")
@@ -711,7 +724,27 @@ def validate_snapshot_receipt(
         fail("$.snapshot.expiresAt", "is expired")
     if expires_at <= created_at:
         fail("$.snapshot.expiresAt", "must be after createdAt")
-    return {"snapshotId": root["snapshotId"], "provider": root["provider"], "snapshotDigest": root["snapshotDigest"]}
+    try:
+        trusted_key_b64 = Path(provider_key_path).read_text(encoding="utf-8").strip()
+    except OSError as error:
+        fail("snapshot provider key", f"cannot read: {error}")
+    trusted_key = decode_base64(trusted_key_b64, "snapshot provider key")
+    provider_key = decode_base64(
+        root["providerPublicKeyDerBase64"],
+        "$.snapshot.providerPublicKeyDerBase64",
+    )
+    if provider_key != trusted_key:
+        fail("$.snapshot.providerPublicKeyDerBase64", "does not match the trusted snapshot provider key")
+    signature = decode_base64(root["signatureBase64"], "$.snapshot.signatureBase64")
+    payload = dict(receipt)
+    payload.pop("signatureBase64")
+    verify_ed25519(canonical_bytes(payload), signature, trusted_key, "$.snapshot.signatureBase64")
+    return {
+        "snapshotId": root["snapshotId"],
+        "provider": root["provider"],
+        "snapshotDigest": root["snapshotDigest"],
+        "signatureVerified": True,
+    }
 
 
 def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
@@ -945,6 +978,7 @@ def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argpar
         "--validator-roster": args.validator_roster,
         "--bank-observer-report": args.bank_observer_report,
         "--snapshot-receipt": args.snapshot_receipt,
+        "--snapshot-provider-key": args.snapshot_provider_key,
     }
     missing = [name for name, path in required_paths.items() if not path]
     if missing:
@@ -961,7 +995,12 @@ def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argpar
             args.bank_observer_report,
             args.validator_roster,
         )
-        snapshot_result = validate_snapshot_receipt(summary, args.snapshot_receipt, args.environment)
+        snapshot_result = validate_snapshot_receipt(
+            summary,
+            args.snapshot_receipt,
+            args.environment,
+            args.snapshot_provider_key,
+        )
     except ReleaseValidationError as error:
         print(f"update blocked: {error}", file=sys.stderr)
         return EXIT_CANNOT_APPLY
@@ -1197,6 +1236,10 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--validator-roster", help="trusted validator roster JSON")
     update.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
     update.add_argument("--snapshot-receipt", help="verified snapshot provider receipt JSON")
+    update.add_argument(
+        "--snapshot-provider-key",
+        help="trusted snapshot provider Ed25519 public key in base64 DER form",
+    )
     update.add_argument("--state-dir", help="directory for the atomic update state record")
     update.add_argument("--dry-run", action="store_true", help="run both staging overlays with server-side dry-run")
     update.set_defaults(handler=command_update)

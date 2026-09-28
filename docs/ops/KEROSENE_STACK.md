@@ -89,10 +89,13 @@ kerosene-stack update \
   --validator-roster release-roster.json \
   --bank-observer-report bank-observer-report.json \
   --snapshot-receipt snapshot-receipt.json \
+  --snapshot-provider-key snapshot-provider-key.b64 \
   --state-dir /var/lib/kerosene-stack
 ```
 
-O comando grava `update-state.json` com as fases `verified`,
+O recibo de snapshot também precisa ser assinado pelo provedor e sua chave
+pública confiável é fornecida separadamente; um JSON local não autoriza uma
+migração sozinho. O comando grava `update-state.json` com as fases `verified`,
 `snapshot-accepted`, `rollout-started` e `validate-and-commit`. O adaptador
 renderiza os manifests, confirma que cada digest recebido chegou a um workload,
 aplica os dois overlays e aguarda os rollouts e smoke gates existentes. Se o
@@ -116,6 +119,8 @@ falha com código `78`.
   ordenação global de releases.
 - A atualização exige snapshot; uma migração é `reversible` ou traz evidência
   de recuperação aprovada.
+- O recibo de snapshot deve ser assinado pelo provedor e corresponder à chave
+  pública confiável fornecida ao operador.
 - O lock rejeita campos que pareçam carregar material secreto, e não aceita
   campos desconhecidos silenciosamente.
 - `allowSourceBuild` e `vaultSignerActivation` devem ser `false`.

@@ -164,20 +164,31 @@ assert verification["authorization"]["bankObservers"]["compatibleObservers"] == 
 
 now = dt.datetime.now(dt.timezone.utc)
 snapshot_path = root / "snapshot.json"
-json.dump(
-    {
-        "schema": "kerosene.snapshot-receipt/v1",
-        "releaseId": release["releaseId"],
-        "environment": "staging-cell",
-        "status": "verified",
-        "snapshotId": "snapshot-8120",
-        "provider": "test-provider",
-        "snapshotDigest": "sha256:" + "f" * 64,
-        "createdAt": now.isoformat().replace("+00:00", "Z"),
-        "expiresAt": (now + dt.timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
-    },
-    open(snapshot_path, "w", encoding="utf-8"),
-)
+snapshot_key = root / "snapshot-provider.key"
+snapshot_pub = root / "snapshot-provider.pub"
+snapshot_provider_root = root / "snapshot-provider-key.b64"
+subprocess.run(["openssl", "genpkey", "-algorithm", "Ed25519", "-out", str(snapshot_key)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.run(["openssl", "pkey", "-in", str(snapshot_key), "-pubout", "-outform", "DER", "-out", str(snapshot_pub)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+snapshot_provider_root.write_text(base64.b64encode(snapshot_pub.read_bytes()).decode(), encoding="utf-8")
+snapshot = {
+    "schema": "kerosene.snapshot-receipt/v1",
+    "releaseId": release["releaseId"],
+    "environment": "staging-cell",
+    "status": "verified",
+    "snapshotId": "snapshot-8120",
+    "provider": "test-provider",
+    "snapshotDigest": "sha256:" + "f" * 64,
+    "createdAt": now.isoformat().replace("+00:00", "Z"),
+    "expiresAt": (now + dt.timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+    "providerPublicKeyDerBase64": base64.b64encode(snapshot_pub.read_bytes()).decode(),
+    "signatureBase64": "",
+}
+snapshot_payload = root / "snapshot.payload"
+snapshot_signature = root / "snapshot.sig"
+snapshot_payload.write_bytes(canonical({key: value for key, value in snapshot.items() if key != "signatureBase64"}))
+subprocess.run(["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(snapshot_key), "-in", str(snapshot_payload), "-out", str(snapshot_signature)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+snapshot["signatureBase64"] = base64.b64encode(snapshot_signature.read_bytes()).decode()
+json.dump(snapshot, open(snapshot_path, "w", encoding="utf-8"))
 
 fake_bin = root / "fake-bin"
 fake_bin.mkdir()
@@ -205,6 +216,7 @@ applied = subprocess.run(
         "--tuf-proof", str(tuf_proof_path), "--tuf-root-key", str(tuf_root),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
         "--bank-observer-report", str(report_path), "--snapshot-receipt", str(snapshot_path),
+        "--snapshot-provider-key", str(snapshot_provider_root),
         "--state-dir", str(state_dir),
     ],
     check=False,
@@ -264,6 +276,7 @@ replay = subprocess.run(
         "--tuf-proof", str(tuf_proof_path), "--tuf-root-key", str(tuf_root),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
         "--bank-observer-report", str(report_path), "--snapshot-receipt", str(snapshot_path),
+        "--snapshot-provider-key", str(snapshot_provider_root),
         "--state-dir", str(state_dir),
     ],
     check=False,
