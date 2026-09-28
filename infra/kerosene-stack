@@ -1,0 +1,619 @@
+#!/usr/bin/env python3
+"""Safe-by-default release-lock validation and update planning for a Kerosene Cell.
+
+This first controller cut deliberately has no deploy adapter.  It can validate
+the shape and immutable references of a complete Cell release and produce the
+operator plan, but it cannot authorize or apply a production rollout until the
+TUF and BFT cryptographic verifiers are connected.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Iterable
+
+
+RELEASE_SCHEMA = "kerosene.release-lock/v1"
+STACK_PLAN_SCHEMA = "kerosene.stack.update-plan/v1"
+MAX_RELEASE_BYTES = 1024 * 1024
+EXIT_VALIDATION = 65
+EXIT_CANNOT_APPLY = 78
+
+IDENTIFIER_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,127}$")
+GIT_COMMIT_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})$")
+SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}$")
+IMAGE_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:@-]*@sha256:[0-9a-f]{64}$")
+SENSITIVE_FIELD_MARKERS = (
+    "secret",
+    "password",
+    "token",
+    "private",
+    "mnemonic",
+    "macaroon",
+)
+
+REPOSITORIES = (
+    "admin",
+    "clients",
+    "contracts",
+    "core",
+    "deploy",
+    "kfe",
+    "node",
+    "rails",
+    "shared",
+    "vault",
+)
+
+SERVICE_REPOSITORY = {
+    "admin": "admin",
+    "core": "core",
+    "kfe": "kfe",
+    "node": "node",
+    "vault": "vault",
+    "rails": "rails",
+    "postgres": "deploy",
+    "redis": "deploy",
+    "bitcoin": "deploy",
+    "lnd": "deploy",
+    "tor": "deploy",
+}
+
+SERVICE_ROLLOUT = {
+    "admin": "admin",
+    "core": "application",
+    "kfe": "application",
+    "node": "quorum",
+    "vault": "quorum",
+    "rails": "application",
+    "postgres": "stateful",
+    "redis": "stateful",
+    "bitcoin": "network",
+    "lnd": "network",
+    "tor": "network",
+}
+
+
+class ReleaseValidationError(ValueError):
+    """The supplied release lock cannot be used even for a dry-run plan."""
+
+
+def fail(path: str, message: str) -> None:
+    raise ReleaseValidationError(f"{path}: {message}")
+
+
+def require_object(value: Any, path: str) -> dict[str, Any]:
+    if type(value) is not dict:
+        fail(path, "must be an object")
+    return value
+
+
+def require_keys(
+    value: Any,
+    path: str,
+    required: Iterable[str],
+    optional: Iterable[str] = (),
+) -> dict[str, Any]:
+    obj = require_object(value, path)
+    required_set = set(required)
+    allowed_set = required_set | set(optional)
+    missing = sorted(required_set - set(obj))
+    unexpected = sorted(set(obj) - allowed_set)
+    if missing:
+        fail(path, f"missing required field(s): {', '.join(missing)}")
+    if unexpected:
+        fail(path, f"unsupported field(s): {', '.join(unexpected)}")
+    return obj
+
+
+def require_string(value: Any, path: str) -> str:
+    if type(value) is not str or not value.strip():
+        fail(path, "must be a non-empty string")
+    return value
+
+
+def require_integer(value: Any, path: str, minimum: int = 0) -> int:
+    if type(value) is not int or value < minimum:
+        fail(path, f"must be an integer greater than or equal to {minimum}")
+    return value
+
+
+def require_boolean(value: Any, path: str) -> bool:
+    if type(value) is not bool:
+        fail(path, "must be a boolean")
+    return value
+
+
+def require_identifier(value: Any, path: str) -> str:
+    text = require_string(value, path)
+    if not IDENTIFIER_RE.fullmatch(text):
+        fail(path, "must use lowercase letters, digits, dots, underscores, or hyphens")
+    return text
+
+
+def require_digest(value: Any, path: str) -> str:
+    text = require_string(value, path)
+    if not SHA256_RE.fullmatch(text):
+        fail(path, "must be a lowercase sha256:<64-hex> digest")
+    return text
+
+
+def require_git_commit(value: Any, path: str) -> str:
+    text = require_string(value, path)
+    if not GIT_COMMIT_RE.fullmatch(text):
+        fail(path, "must be a 40- or 64-character lowercase Git object ID")
+    return text
+
+
+def require_image(value: Any, path: str, *, require_oci_scheme: bool = False) -> str:
+    text = require_string(value, path)
+    if not IMAGE_RE.fullmatch(text):
+        fail(path, "must be an image pinned by @sha256:<64-hex>; mutable tags are not accepted")
+    if require_oci_scheme and not text.startswith("oci://"):
+        fail(path, "must use an oci:// URI pinned by digest")
+    reference = text.removeprefix("oci://").rsplit("@", 1)[0]
+    last_segment = reference.rsplit("/", 1)[-1]
+    if ":" in last_segment:
+        fail(path, "must not carry a tag alongside the digest")
+    return text
+
+
+def parse_timestamp(value: Any, path: str) -> str:
+    text = require_string(value, path)
+    try:
+        parsed = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        fail(path, "must be an RFC 3339 timestamp")
+    if parsed.tzinfo is None:
+        fail(path, "must include a timezone")
+    if parsed.astimezone(dt.timezone.utc) <= dt.datetime.now(dt.timezone.utc):
+        fail(path, "is expired")
+    return text
+
+
+def reject_sensitive_field_names(value: Any, path: str = "$") -> None:
+    if type(value) is dict:
+        for key, child in value.items():
+            lower_key = key.lower()
+            if any(marker in lower_key for marker in SENSITIVE_FIELD_MARKERS):
+                fail(f"{path}.{key}", "release locks must not contain secret-bearing fields")
+            reject_sensitive_field_names(child, f"{path}.{key}")
+    elif type(value) is list:
+        for index, child in enumerate(value):
+            reject_sensitive_field_names(child, f"{path}[{index}]")
+
+
+def read_release(path_text: str) -> dict[str, Any]:
+    path = Path(path_text)
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise ReleaseValidationError(f"{path}: cannot read release lock: {error.strerror}") from error
+    if size > MAX_RELEASE_BYTES:
+        fail(str(path), f"release lock exceeds {MAX_RELEASE_BYTES} bytes")
+
+    def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ReleaseValidationError(f"{path}: duplicate JSON field: {key}")
+            result[key] = value
+        return result
+
+    try:
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle, object_pairs_hook=unique_object)
+    except (OSError, json.JSONDecodeError) as error:
+        raise ReleaseValidationError(f"{path}: invalid release lock JSON: {error}") from error
+    return require_object(data, "$")
+
+
+def validate_release(release: dict[str, Any]) -> dict[str, Any]:
+    reject_sensitive_field_names(release)
+    root = require_keys(
+        release,
+        "$",
+        (
+            "schema",
+            "schemaVersion",
+            "releaseId",
+            "sequence",
+            "network",
+            "authorization",
+            "source",
+            "services",
+            "policy",
+            "migration",
+        ),
+    )
+    if root["schema"] != RELEASE_SCHEMA:
+        fail("$.schema", f"must equal {RELEASE_SCHEMA!r}")
+    if root["schemaVersion"] != 1:
+        fail("$.schemaVersion", "must equal 1")
+    release_id = require_identifier(root["releaseId"], "$.releaseId")
+    sequence = require_integer(root["sequence"], "$.sequence", 1)
+
+    network = require_keys(root["network"], "$.network", ("id", "plane"))
+    network_id = require_identifier(network["id"], "$.network.id")
+    if network["plane"] != "bank":
+        fail("$.network.plane", "must equal 'bank' for this Cell rollout controller")
+
+    authorization = require_keys(
+        root["authorization"],
+        "$.authorization",
+        ("tuf", "bft", "vaultCompatibility"),
+    )
+    tuf = require_keys(
+        authorization["tuf"],
+        "$.authorization.tuf",
+        ("targetPath", "metadataVersion", "targetDigest", "expiresAt"),
+    )
+    target_path = require_string(tuf["targetPath"], "$.authorization.tuf.targetPath")
+    if target_path.startswith("/") or ".." in Path(target_path).parts:
+        fail("$.authorization.tuf.targetPath", "must be a relative, traversal-free path")
+    if target_path != f"releases/{release_id}.json":
+        fail("$.authorization.tuf.targetPath", "must identify this exact release under releases/")
+    tuf_version = require_integer(tuf["metadataVersion"], "$.authorization.tuf.metadataVersion", 1)
+    tuf_digest = require_digest(tuf["targetDigest"], "$.authorization.tuf.targetDigest")
+    tuf_expiry = parse_timestamp(tuf["expiresAt"], "$.authorization.tuf.expiresAt")
+
+    bft = require_keys(
+        authorization["bft"],
+        "$.authorization.bft",
+        ("networkId", "height", "commitDigest", "threshold", "members"),
+    )
+    bft_network_id = require_identifier(bft["networkId"], "$.authorization.bft.networkId")
+    bft_height = require_integer(bft["height"], "$.authorization.bft.height", 1)
+    bft_commit = require_digest(bft["commitDigest"], "$.authorization.bft.commitDigest")
+    bft_threshold = require_integer(bft["threshold"], "$.authorization.bft.threshold", 1)
+    bft_members = require_integer(bft["members"], "$.authorization.bft.members", 4)
+    minimum_bft_threshold = (2 * bft_members) // 3 + 1
+    if bft_threshold < minimum_bft_threshold or bft_threshold > bft_members:
+        fail(
+            "$.authorization.bft.threshold",
+            f"must be between {minimum_bft_threshold} and {bft_members} for the declared BFT membership",
+        )
+
+    vault = require_keys(
+        authorization["vaultCompatibility"],
+        "$.authorization.vaultCompatibility",
+        ("threshold", "members", "attestationDigest"),
+    )
+    vault_threshold = require_integer(vault["threshold"], "$.authorization.vaultCompatibility.threshold", 2)
+    vault_members = require_integer(vault["members"], "$.authorization.vaultCompatibility.members", 3)
+    vault_attestation = require_digest(
+        vault["attestationDigest"],
+        "$.authorization.vaultCompatibility.attestationDigest",
+    )
+    if vault_threshold > vault_members:
+        fail("$.authorization.vaultCompatibility.threshold", "cannot exceed Vault membership")
+
+    source = require_keys(root["source"], "$.source", ("bundle", "repositories"))
+    bundle = require_keys(source["bundle"], "$.source.bundle", ("uri", "digest"))
+    bundle_uri = require_image(bundle["uri"], "$.source.bundle.uri", require_oci_scheme=True)
+    bundle_digest = require_digest(bundle["digest"], "$.source.bundle.digest")
+    if not bundle_uri.endswith(f"@{bundle_digest}"):
+        fail("$.source.bundle.uri", "must end with the declared source.bundle.digest")
+
+    repositories = require_keys(source["repositories"], "$.source.repositories", REPOSITORIES)
+    repository_summary: dict[str, str] = {}
+    for name in REPOSITORIES:
+        repository = require_keys(
+            repositories[name],
+            f"$.source.repositories.{name}",
+            ("commit", "bundleDigest"),
+        )
+        repository_summary[name] = require_git_commit(
+            repository["commit"], f"$.source.repositories.{name}.commit"
+        )
+        require_digest(repository["bundleDigest"], f"$.source.repositories.{name}.bundleDigest")
+
+    services = require_keys(root["services"], "$.services", SERVICE_REPOSITORY)
+    service_summary: dict[str, dict[str, str]] = {}
+    for name, expected_repository in SERVICE_REPOSITORY.items():
+        service = require_keys(
+            services[name],
+            f"$.services.{name}",
+            ("image", "configDigest", "repository", "rollout"),
+        )
+        image = require_image(service["image"], f"$.services.{name}.image")
+        config_digest = require_digest(service["configDigest"], f"$.services.{name}.configDigest")
+        if service["repository"] != expected_repository:
+            fail(f"$.services.{name}.repository", f"must equal {expected_repository!r}")
+        if service["rollout"] != SERVICE_ROLLOUT[name]:
+            fail(f"$.services.{name}.rollout", f"must equal {SERVICE_ROLLOUT[name]!r}")
+        service_summary[name] = {"image": image, "configDigest": config_digest}
+
+    policy = require_keys(
+        root["policy"],
+        "$.policy",
+        ("allowSourceBuild", "vaultSignerActivation", "minimumBankObservers"),
+    )
+    if require_boolean(policy["allowSourceBuild"], "$.policy.allowSourceBuild"):
+        fail("$.policy.allowSourceBuild", "must be false; releases must use pre-built immutable artifacts")
+    if require_boolean(policy["vaultSignerActivation"], "$.policy.vaultSignerActivation"):
+        fail("$.policy.vaultSignerActivation", "must be false; deploy automation may not activate Vault signers")
+    bank_observers = require_integer(policy["minimumBankObservers"], "$.policy.minimumBankObservers", bft_threshold)
+    if bank_observers > bft_members:
+        fail("$.policy.minimumBankObservers", "cannot exceed the declared BFT membership")
+
+    migration = require_keys(
+        root["migration"],
+        "$.migration",
+        ("id", "classification", "snapshotRequired", "recoveryEvidenceDigest"),
+    )
+    migration_id = require_identifier(migration["id"], "$.migration.id")
+    if migration["classification"] not in ("reversible", "approved-recovery"):
+        fail("$.migration.classification", "must be 'reversible' or 'approved-recovery'")
+    if not require_boolean(migration["snapshotRequired"], "$.migration.snapshotRequired"):
+        fail("$.migration.snapshotRequired", "must be true for a Cell update")
+    recovery_digest = require_digest(migration["recoveryEvidenceDigest"], "$.migration.recoveryEvidenceDigest")
+
+    return {
+        "releaseId": release_id,
+        "sequence": sequence,
+        "networkId": network_id,
+        "tuf": {
+            "targetPath": target_path,
+            "metadataVersion": tuf_version,
+            "targetDigest": tuf_digest,
+            "expiresAt": tuf_expiry,
+        },
+        "bft": {
+            "networkId": bft_network_id,
+            "height": bft_height,
+            "commitDigest": bft_commit,
+            "threshold": bft_threshold,
+            "members": bft_members,
+        },
+        "vaultCompatibility": {
+            "threshold": vault_threshold,
+            "members": vault_members,
+            "attestationDigest": vault_attestation,
+        },
+        "sourceBundle": {"uri": bundle_uri, "digest": bundle_digest},
+        "repositories": repository_summary,
+        "services": service_summary,
+        "policy": {"minimumBankObservers": bank_observers},
+        "migration": {
+            "id": migration_id,
+            "classification": migration["classification"],
+            "recoveryEvidenceDigest": recovery_digest,
+        },
+    }
+
+
+def canonical_digest(value: dict[str, Any]) -> str:
+    serialized = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(serialized).hexdigest()
+
+
+def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "schema": STACK_PLAN_SCHEMA,
+        "releaseId": summary["releaseId"],
+        "sequence": summary["sequence"],
+        "networkId": summary["networkId"],
+        "releaseLockCanonicalDigest": canonical_digest(release),
+        "sourceBundle": summary["sourceBundle"],
+        "mode": "plan-only",
+        "applyEnabled": False,
+        "applyBlockedBy": [
+            "The TUF target and BFT commit receipt are not cryptographically verified by this revision.",
+            "No authenticated Bank-observer feed or deployment adapter is implemented by this revision.",
+        ],
+        "guardrails": [
+            "Never build from source during update.",
+            "Never use a mutable image tag.",
+            "Never activate a Vault signer from deployment automation.",
+            "Require a snapshot before any stateful migration.",
+            f"Require at least {summary['policy']['minimumBankObservers']} compatible Bank observers before operator approval.",
+        ],
+        "phases": [
+            {
+                "id": "observe",
+                "changesRuntime": False,
+                "actions": [
+                    "Collect current/target compatibility from Bank observers.",
+                    "Surface blockers to the Admin operator; do not auto-update.",
+                ],
+            },
+            {
+                "id": "verify",
+                "changesRuntime": False,
+                "actions": [
+                    "Verify TUF metadata freshness, target delegation, and target digest.",
+                    "Verify the BFT commit receipt and Vault compatibility attestations.",
+                    "Verify source-bundle and OCI artifact provenance against the release lock.",
+                ],
+            },
+            {
+                "id": "snapshot",
+                "changesRuntime": False,
+                "components": ["postgres", "redis", "bitcoin", "lnd", "vault", "node"],
+                "actions": [
+                    "Create and verify encrypted, restore-tested snapshots before migration.",
+                ],
+            },
+            {
+                "id": "drain",
+                "changesRuntime": True,
+                "components": ["admin", "core", "kfe", "rails"],
+                "actions": [
+                    "Drain write paths with an operator-visible maintenance window.",
+                ],
+            },
+            {
+                "id": "rollout-foundation",
+                "changesRuntime": True,
+                "components": ["postgres", "redis", "bitcoin", "lnd", "tor"],
+                "strategy": "one-stateful-component-at-a-time",
+            },
+            {
+                "id": "rollout-vault",
+                "changesRuntime": True,
+                "components": ["vault"],
+                "strategy": "one-replica-at-a-time; preserve 2-of-3 service availability; signer activation remains false",
+            },
+            {
+                "id": "rollout-node",
+                "changesRuntime": True,
+                "components": ["node"],
+                "strategy": "one-replica-at-a-time; preserve the configured Node quorum",
+            },
+            {
+                "id": "rollout-applications",
+                "changesRuntime": True,
+                "components": ["core", "kfe", "rails", "admin"],
+                "strategy": "dependency-ordered rolling rollout with health and financial smoke gates",
+            },
+            {
+                "id": "validate-and-commit",
+                "changesRuntime": False,
+                "actions": [
+                    "Run Core, KFE, Lightning, Admin, Node, Vault, and recovery smoke checks.",
+                    "Record the signed outcome and clear maintenance only after operator approval.",
+                ],
+            },
+        ],
+    }
+
+
+def atomic_write_json(path_text: str, value: dict[str, Any]) -> None:
+    destination = Path(path_text)
+    parent = destination.parent
+    if not parent.is_dir():
+        raise ReleaseValidationError(f"{destination}: output directory does not exist")
+    temporary_name: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=parent,
+            prefix=f".{destination.name}.",
+            delete=False,
+        ) as handle:
+            temporary_name = handle.name
+            os.fchmod(handle.fileno(), 0o644)
+            json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, destination)
+        temporary_name = None
+    finally:
+        if temporary_name:
+            Path(temporary_name).unlink(missing_ok=True)
+
+
+def emit_verification(summary: dict[str, Any], as_json: bool) -> None:
+    result = {
+        "schema": "kerosene.stack.release-structure-check/v1",
+        "releaseId": summary["releaseId"],
+        "networkId": summary["networkId"],
+        "sequence": summary["sequence"],
+        "requiredComponents": list(SERVICE_REPOSITORY),
+        "structuralValidation": "passed",
+        "cryptographicAuthorization": "not-implemented",
+        "productionRolloutAuthorized": False,
+    }
+    if as_json:
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    print(f"Release lock structurally valid: {summary['releaseId']} (sequence {summary['sequence']}).")
+    print("Cryptographic authorization is not implemented; this result cannot authorize a production rollout.")
+
+
+def emit_plan(plan: dict[str, Any], as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
+        return
+    print(f"Safe update plan generated for {plan['releaseId']} (sequence {plan['sequence']}).")
+    print("Apply remains blocked until TUF/BFT verification, Bank observation, and rollout adapters are implemented.")
+    print("Phases: " + ", ".join(phase["id"] for phase in plan["phases"]))
+
+
+def load_and_validate(path: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    release = read_release(path)
+    return release, validate_release(release)
+
+
+def command_verify(args: argparse.Namespace) -> int:
+    _, summary = load_and_validate(args.release)
+    emit_verification(summary, args.json)
+    return 0
+
+
+def command_plan(args: argparse.Namespace) -> int:
+    release, summary = load_and_validate(args.release)
+    plan = build_plan(release, summary)
+    if args.output:
+        atomic_write_json(args.output, plan)
+    emit_plan(plan, args.json)
+    return 0
+
+
+def command_update(args: argparse.Namespace) -> int:
+    if args.apply:
+        print(
+            "Refusing to apply: this revision has no TUF/BFT cryptographic verifier, authenticated "
+            "Bank-observer feed, or production rollout adapter.",
+            file=sys.stderr,
+        )
+        return EXIT_CANNOT_APPLY
+    return command_plan(args)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="kerosene-stack",
+        description="Validate a complete Kerosene Cell release lock and create a safe update plan.",
+    )
+    subcommands = parser.add_subparsers(dest="command", required=True)
+
+    verify = subcommands.add_parser("verify-release", help="validate structure and immutable release references")
+    verify.add_argument("--release", required=True, help="path to a release-lock JSON document")
+    verify.add_argument("--json", action="store_true", help="emit machine-readable output")
+    verify.set_defaults(handler=command_verify)
+
+    plan = subcommands.add_parser("plan", help="produce a no-change Cell update plan")
+    plan.add_argument("--release", required=True, help="path to a release-lock JSON document")
+    plan.add_argument("--output", help="optional path for an atomically written JSON plan")
+    plan.add_argument("--json", action="store_true", help="emit machine-readable output")
+    plan.set_defaults(handler=command_plan)
+
+    update = subcommands.add_parser("update", help="produce the safe plan; --apply is intentionally unavailable")
+    update.add_argument("--release", required=True, help="path to a release-lock JSON document")
+    update.add_argument("--output", help="optional path for an atomically written JSON plan")
+    update.add_argument("--json", action="store_true", help="emit machine-readable output")
+    update.add_argument("--apply", action="store_true", help="reserved for a future verified rollout adapter")
+    update.set_defaults(handler=command_update)
+
+    version = subcommands.add_parser("version", help="print the controller revision")
+    version.set_defaults(handler=lambda _args: (print("kerosene-stack v0.1.0-preapply"), 0)[1])
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.handler(args)
+    except ReleaseValidationError as error:
+        print(f"release lock rejected: {error}", file=sys.stderr)
+        return EXIT_VALIDATION
+    except OSError as error:
+        print(f"kerosene-stack I/O error: {error}", file=sys.stderr)
+        return 74
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

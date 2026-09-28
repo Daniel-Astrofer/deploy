@@ -28,6 +28,14 @@ jobs:
       - name: Run progressive chain readiness smoke tests
         run: bash infra/tests/progressive-chain-readiness-test.sh
 
+  kerosene-stack:
+    name: Kerosene Stack release-lock contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Validate safe Cell release planning
+        run: bash infra/tests/kerosene-stack-test.sh
+
   spiffe-admission:
     name: SPIFFE admission impersonation tests
     runs-on: ubuntu-latest

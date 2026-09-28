@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# DEVELOPMENT SNAPSHOT ONLY. This helper creates a local signing key and its
+# output is not a release-authority record for a Kerosene Cell. Production
+# release selection must use the immutable release lock consumed by
+# infra/kerosene-stack, with TUF/BFT verification added before apply is enabled.
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RELEASE_DIR="${RELEASE_DIR:-$REPO_ROOT/release}"
@@ -13,8 +18,8 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release-snapshot.sh generate|validate
 
-generate  Build a signed release manifest with git SHA, source hash, allowed config hash, SBOM path when available, and service image metadata.
-validate  Verify manifest signature and recompute source/config hashes against the current checkout.
+generate  Build a local developer snapshot with git SHA, source hash, allowed config hash, SBOM path when available, and service image metadata.
+validate  Verify the local snapshot signature and recompute source/config hashes against the current checkout.
 EOF
 }
 

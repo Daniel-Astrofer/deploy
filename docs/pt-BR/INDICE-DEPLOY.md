@@ -17,6 +17,7 @@ Responsabilidades detalhadas: [Limites dos serviços](LIMITES-DOS-SERVICOS.md).
 | `bash infra/stop.sh` | Para workloads e preserva dados | Entrada local canônica |
 | `bash infra/recreate.sh` | Recria o ambiente local | Entrada local canônica |
 | `bash infra/status.sh` | Mostra recursos e endpoints | Entrada local canônica |
+| `PATH="$PWD/infra:$PATH" kerosene-stack update --release release-lock.json` | Valida a Cell completa e gera plano de atualização sem mutação | Controlador de release em implantação |
 | `bash infra/logs.sh` | Coleta e mostra logs | Entrada local canônica |
 | `bash infra/test.sh` | Valida scripts e manifests | Entrada de validação canônica |
 | `bash infra/kubernetes/scripts/deploy.sh <ambiente>` | Executor por ambiente | Interno/CI; uso explícito |

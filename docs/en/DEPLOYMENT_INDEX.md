@@ -17,6 +17,7 @@ Detailed ownership: [Service boundaries](SERVICE_BOUNDARIES.md).
 | `bash infra/stop.sh` | Stop local workloads, preserve data | Canonical local entrypoint |
 | `bash infra/recreate.sh` | Recreate local runtime | Canonical local entrypoint |
 | `bash infra/status.sh` | Show local resources and endpoints | Canonical local entrypoint |
+| `PATH="$PWD/infra:$PATH" kerosene-stack update --release release-lock.json` | Validate the complete Cell and create a no-change update plan | Release controller in progress |
 | `bash infra/logs.sh` | Collect/show local logs | Canonical local entrypoint |
 | `bash infra/test.sh` | Validate scripts and manifests | Canonical validation entrypoint |
 | `bash infra/kubernetes/scripts/deploy.sh <environment>` | Environment executor | Internal/CI; use explicitly |

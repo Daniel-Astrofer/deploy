@@ -18,6 +18,7 @@ bash infra/recreate.sh
 bash infra/status.sh
 bash infra/logs.sh
 bash infra/test.sh
+PATH="$PWD/infra:$PATH" kerosene-stack update --release release-lock.json
 ```
 
 `infra/start.sh` é o caminho principal do quorum local. Ele usa Kubernetes
@@ -37,6 +38,12 @@ KEROSENE_AUTO_START_HOST_SERVICES=0 bash infra/start.sh
 Atalhos antigos como `infra/deploy.sh` e scripts dentro de
 `infra/kubernetes/scripts/` ficam apenas como compatibilidade ou helpers
 internos. Eles não são a API normal para humanos ou agentes.
+
+`kerosene-stack` é o controlador de release da Cell completa em implantação.
+Nesta primeira etapa, ele valida um lock imutável que inclui Admin, Core, KFE,
+Node, Vault, Rails, PostgreSQL, Redis, Bitcoin, LND e Tor, e gera apenas um
+plano seguro; não executa rollout nem ativa signers Vault. Veja
+[`docs/ops/KEROSENE_STACK.md`](../docs/ops/KEROSENE_STACK.md).
 
 ## Layout
 
