@@ -19,6 +19,7 @@ bash infra/status.sh
 bash infra/logs.sh
 bash infra/test.sh
 PATH="$PWD/infra:$PATH" kerosene-stack update --release release-lock.json
+PATH="$PWD/infra:$PATH" kerosene-stack check-update --release release-lock.json ...
 ```
 
 `infra/start.sh` é o caminho principal do quorum local. Ele usa Kubernetes

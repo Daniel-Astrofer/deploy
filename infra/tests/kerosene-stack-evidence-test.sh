@@ -222,8 +222,41 @@ state = json.load(open(state_dir / "update-state.json", encoding="utf-8"))
 assert state["phase"] == "validate-and-commit"
 assert state["status"] == "dry-run-passed"
 
+check_before_apply = subprocess.run(
+    [
+        stack, "check-update", "--release", release_path, "--json",
+        "--tuf-proof", str(tuf_proof_path), "--tuf-root-key", str(tuf_root),
+        "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        "--bank-observer-report", str(report_path), "--state-dir", str(state_dir),
+    ],
+    check=True,
+    capture_output=True,
+    text=True,
+    env=environment,
+)
+check_result = json.loads(check_before_apply.stdout)
+assert check_result["updateRequired"] is True
+assert check_result["currentSequence"] is None
+assert check_result["bankObserversVerified"] == 3
+
 state["status"] = "committed"
 json.dump(state, open(state_dir / "update-state.json", "w", encoding="utf-8"))
+check_after_apply = subprocess.run(
+    [
+        stack, "check-update", "--release", release_path, "--json",
+        "--tuf-proof", str(tuf_proof_path), "--tuf-root-key", str(tuf_root),
+        "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        "--bank-observer-report", str(report_path), "--state-dir", str(state_dir),
+    ],
+    check=True,
+    capture_output=True,
+    text=True,
+    env=environment,
+)
+check_result = json.loads(check_after_apply.stdout)
+assert check_result["updateRequired"] is False
+assert check_result["currentSequence"] == release["sequence"]
+
 replay = subprocess.run(
     [
         stack, "update", "--release", release_path, "--apply", "--dry-run", "--json",

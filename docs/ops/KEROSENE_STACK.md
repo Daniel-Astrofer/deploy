@@ -49,6 +49,26 @@ PATH="$PWD/infra:$PATH" kerosene-stack update \
   --output /tmp/kerosene-update-plan.json
 ```
 
+Para o Admin consultar a decisão do quorum sem alterar nada, use
+`check-update` com o relatório assinado dos observadores Bank:
+
+```bash
+kerosene-stack check-update \
+  --release release-lock.json \
+  --tuf-proof tuf-target-proof.json \
+  --tuf-root-key tuf-root-key.b64 \
+  --bft-receipt release-receipt.json \
+  --validator-roster release-roster.json \
+  --bank-observer-report bank-observer-report.json \
+  --state-dir /var/lib/kerosene-stack \
+  --json
+```
+
+O resultado informa `updateRequired`, a sequência atual aplicada, a sequência
+observada pelo Bank, a quantidade de observadores compatíveis e se existe
+`manualRecoveryRequired`. O comando é somente leitura; ele não substitui a
+confirmação explícita exigida por `update --apply`.
+
 Sem `--apply`, `update` gera apenas um plano de alteração zero. O plano impõe a
 sequência: observar o plano Bank, verificar autorização, aceitar o snapshot,
 atualizar fundação, Vault, Node e aplicações e, por último, validar/registrar o
