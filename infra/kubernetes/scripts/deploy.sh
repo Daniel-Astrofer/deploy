@@ -154,6 +154,16 @@ else
   done
 fi
 
+if [[ "$PROFILE" == "staging-core" || "$PROFILE" == "staging-vault" ]]; then
+  mutable_images="$(grep -E '^ *image: ' "$MANIFEST" | grep -vE '@sha256:[0-9a-f]{64}$' || true)"
+  if [[ -n "$mutable_images" ]]; then
+    echo "[!] Rendered ${ENVIRONMENT} manifest contains mutable image references:" >&2
+    echo "$mutable_images" >&2
+    echo "[!] Every runtime and init-container image must be pinned by digest." >&2
+    exit 2
+  fi
+fi
+
 echo "[*] Validating rendered manifest for namespace $NAMESPACE..."
 "$KUBECTL" apply --dry-run=client -f "$MANIFEST" >/dev/null
 

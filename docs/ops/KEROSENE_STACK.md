@@ -107,6 +107,8 @@ falha com código `78`.
 ## Invariantes já codificados
 
 - Todas as imagens e o bundle de fonte são endereçados por digest.
+- O manifesto renderizado também rejeita tags mutáveis em init containers e
+  imagens auxiliares, não somente nos serviços listados no lock.
 - Um release não pode omitir Admin, Node ou qualquer outro componente da Cell.
 - O Bank exige pelo menos um quorum BFT de `3/4` (ou maior para memberships
   maiores) e o mínimo de observadores não pode ficar abaixo desse limiar.
