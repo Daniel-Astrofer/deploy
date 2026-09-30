@@ -1,10 +1,16 @@
 # Kerosene Stack: Cell release lock e atualização segura
 
 `kerosene-stack` é o ponto de partida do controlador operacional da **Kerosene
-Cell completa**, não de um contêiner isolado. O lock exige Admin, Core, KFE,
-Node, Vault, web-page, PostgreSQL, Redis, Bitcoin, LND e Tor; também prende os
-commits dos repositórios `admin`, `clients`, `contracts`, `core`, `deploy`,
-`kfe`, `node`, `rails`, `shared` e `vault`.
+Cell completa**, não de um contêiner isolado. O lock descreve o artefato Admin
+do operador e exige Core, KFE, Node, Vault, web-page, PostgreSQL, Redis, Bitcoin,
+LND e Tor; também prende os commits dos repositórios `admin`, `clients`,
+`contracts`, `core`, `deploy`, `kfe`, `node`, `rails`, `shared` e `vault`.
+
+O Admin é um artefato CLI efêmero. A entrada `admin` no lock não autoriza nem
+cria um Deployment, StatefulSet, DaemonSet ou Service Kubernetes e não deve ser
+embutida nas imagens de Core, Node ou Vault. O operador executa a versão
+imutável em uma estação/bastion endurecido ou em um contêiner administrativo de
+vida curta e remove o artefato e as credenciais temporárias ao terminar.
 
 O corte atual valida a estrutura do lock, os digests imutáveis, a prova TUF,
 o recibo BFT, o relatório assinado dos observadores Bank e o recibo de snapshot.
@@ -49,12 +55,16 @@ PATH="$PWD/infra:$PATH" kerosene-stack update \
   --output /tmp/kerosene-update-plan.json
 ```
 
-Para o Admin consultar a decisão do quorum sem alterar nada, use
-`check-update` com o relatório assinado dos observadores Bank:
+### 1. Consultar a decisão assinada do Bank
+
+Para o operador consultar a decisão do quorum sem alterar nada, use
+`check-update` com a prova TUF, o recibo BFT, o roster confiável e o relatório
+assinado dos observadores Bank:
 
 ```bash
 kerosene-stack check-update \
   --release release-lock.json \
+  --environment staging-cell \
   --tuf-proof tuf-target-proof.json \
   --tuf-root-key tuf-root-key.b64 \
   --bft-receipt release-receipt.json \
@@ -64,18 +74,43 @@ kerosene-stack check-update \
   --json
 ```
 
-O resultado informa `updateRequired`, a sequência atual aplicada, a sequência
-observada pelo Bank, a quantidade de observadores compatíveis e se existe
-`manualRecoveryRequired`. O comando é somente leitura; ele não substitui a
-confirmação explícita exigida por `update --apply`.
+O comando verifica localmente a assinatura e a validade temporal da prova TUF,
+o threshold BFT contra o roster e a compatibilidade/threshold dos observadores
+Bank. Ele também lê o `update-state.json` anterior quando `--state-dir` é
+informado. Não consulta Kubernetes, não altera a Cell e não valida o snapshot;
+o snapshot é uma barreira adicional do `update --apply`.
+
+Só prossiga se a saída indicar `updateRequired: true`,
+`manualRecoveryRequired: false` e `nextAction: "kerosene-stack update --apply"`.
+`tufSignatureVerified` deve ser `true`; `bftSignaturesVerified` e
+`bankObserversVerified` são contagens e devem atingir os thresholds declarados
+no lock. `false`, prova expirada, sequência não mais nova, threshold
+insuficiente ou qualquer exigência de recuperação é condição de parada. O
+relatório Bank é uma observação assinada fornecida ao comando; o adaptador
+público atual não substitui essa evidência por uma consulta live não
+autenticada.
 
 Sem `--apply`, `update` gera apenas um plano de alteração zero. O plano impõe a
 sequência: observar o plano Bank, verificar autorização, aceitar o snapshot,
 atualizar fundação, Vault, Node e aplicações e, por último, validar/registrar o
-resultado. O Admin e o Node são passos obrigatórios, não apêndices opcionais.
+resultado. O Admin não é um workload durante essa sequência: ele é o processo
+temporário do operador que verifica e inicia a operação. O Node continua sendo
+um componente da Cell e deve estar presente no lock e no rollout.
+
+### 2. Aceitar somente o snapshot assinado
+
+Antes de qualquer `--apply`, o operador deve obter um recibo de snapshot ligado
+ao `releaseId`, à sequência e ao ambiente `staging-cell`. O recibo precisa ser
+assinado pelo provedor; a chave pública confiável do provedor é passada
+separadamente em `--snapshot-provider-key`. Um JSON criado ou alterado pelo
+operador não é prova de backup e não autoriza a atualização. O controlador
+também verifica status, digest, identificador e expiração do recibo.
+
+### 3. Fazer o dry-run com todas as provas
 
 Para uma execução real, o operador precisa fornecer as provas produzidas pela
-governança, pelos servidores Bank e pelo provedor de snapshots:
+governança, pelos servidores Bank e pelo provedor de snapshots. Substitua o
+valor de exemplo em `--confirm-release` pelo `releaseId` exato do lock:
 
 ```bash
 kerosene-stack update \
@@ -90,29 +125,43 @@ kerosene-stack update \
   --bank-observer-report bank-observer-report.json \
   --snapshot-receipt snapshot-receipt.json \
   --snapshot-provider-key snapshot-provider-key.b64 \
-  --state-dir /var/lib/kerosene-stack
+  --state-dir /var/lib/kerosene-stack \
+  --dry-run --json
 ```
 
-O recibo de snapshot também precisa ser assinado pelo provedor e sua chave
-pública confiável é fornecida separadamente; um JSON local não autoriza uma
-migração sozinho. O comando grava `update-state.json` com as fases `verified`,
-`snapshot-accepted`, `rollout-started` e `validate-and-commit`. O adaptador
-renderiza os manifests, confirma que cada digest recebido chegou a um workload,
-aplica os dois overlays e aguarda os rollouts e smoke gates existentes. Se o
-adaptador falhar, o estado fica como `failed` e exige recuperação manual; não há
-rollback automático de PostgreSQL, Bitcoin, LND ou Vault.
+O `--dry-run` executa todas as verificações de evidência e renderiza os dois
+overlays com `kubectl --dry-run=server`, mas não altera recursos Kubernetes. Ele
+grava o estado como `dry-run-passed`; isso não equivale a um commit de release.
+Revise o `releaseId`, a sequência, a quantidade de observadores e os digests
+renderizados antes de avançar.
 
-Antes da mudança, use `--dry-run` com os mesmos documentos para renderizar e
-validar os dois overlays sem modificar recursos Kubernetes. Sem prova TUF,
-recibo BFT, relatório Bank, snapshot ou confirmação exata do release, `--apply`
-falha com código `78`.
+### 4. Aplicar o mesmo release após a revisão
+
+Repita o comando acima com os mesmos arquivos, o mesmo `--confirm-release` e
+sem `--dry-run`. O `--apply` exige todos os documentos TUF/BFT/Bank, o recibo de
+snapshot assinado, a confirmação exata do `releaseId` e um `--state-dir`
+persistente e controlado pelo operador. Ele grava `update-state.json` nas fases
+`verified`, `snapshot-accepted`, `rollout-started` e `validate-and-commit`. O
+adaptador aplica primeiro `staging-vault` e depois `staging`, confirma que cada
+digest chegou ao workload esperado e aguarda os rollouts e smoke gates
+existentes. A produção continua bloqueada no repositório público.
+
+`committed` é o único resultado de sucesso. Se o adaptador falhar, o estado
+fica `failed` com `manualRecoveryRequired: true`; pare e siga o procedimento de
+recuperação. Não repita o comando nem faça rollback automático de PostgreSQL,
+Bitcoin, LND ou Vault.
+
+Sem prova TUF, recibo BFT, relatório Bank, snapshot, confirmação exata do
+release ou `--state-dir`, `--apply` falha com código `78`.
 
 ## Invariantes já codificados
 
 - Todas as imagens e o bundle de fonte são endereçados por digest.
 - O manifesto renderizado também rejeita tags mutáveis em init containers e
   imagens auxiliares, não somente nos serviços listados no lock.
-- Um release não pode omitir Admin, Node ou qualquer outro componente da Cell.
+- Um release não pode omitir o artefato Admin, Node ou qualquer outro componente
+  da Cell; o artefato Admin é verificado pelo operador e não é um workload
+  Kubernetes.
 - O Bank exige pelo menos um quorum BFT de `3/4` (ou maior para memberships
   maiores) e o mínimo de observadores não pode ficar abaixo desse limiar.
 - Compatibilidade Vault exige no mínimo `2/3`, mas não é usada como ledger de
@@ -120,7 +169,7 @@ falha com código `78`.
 - A atualização exige snapshot; uma migração é `reversible` ou traz evidência
   de recuperação aprovada.
 - O recibo de snapshot deve ser assinado pelo provedor e corresponder à chave
-  pública confiável fornecida ao operador.
+  pública confiável fornecida ao operador antes do `--apply`.
 - O lock rejeita campos que pareçam carregar material secreto, e não aceita
   campos desconhecidos silenciosamente.
 - `allowSourceBuild` e `vaultSignerActivation` devem ser `false`.
