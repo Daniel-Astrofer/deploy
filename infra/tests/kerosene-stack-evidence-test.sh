@@ -209,6 +209,62 @@ state_dir = root / "state"
 environment = dict(**__import__("os").environ)
 environment["KUBECTL"] = str(fake_kubectl)
 environment["KUSTOMIZE"] = kustomize_path
+
+tampered_signature = bytearray(snapshot_signature.read_bytes())
+assert tampered_signature
+tampered_signature[0] ^= 0x01
+tampered_snapshot = dict(snapshot)
+tampered_snapshot["signatureBase64"] = base64.b64encode(tampered_signature).decode()
+tampered_snapshot_path = root / "snapshot-tampered-signature.json"
+json.dump(tampered_snapshot, open(tampered_snapshot_path, "w", encoding="utf-8"))
+tampered_signature_state_dir = root / "tampered-signature-state"
+tampered_signature_apply = subprocess.run(
+    [
+        stack, "update", "--release", release_path, "--apply", "--dry-run", "--json",
+        "--environment", "staging-cell", "--confirm-release", release["releaseId"],
+        "--tuf-proof", str(tuf_proof_path), "--tuf-root-key", str(tuf_root),
+        "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        "--bank-observer-report", str(report_path), "--snapshot-receipt", str(tampered_snapshot_path),
+        "--snapshot-provider-key", str(snapshot_provider_root),
+        "--state-dir", str(tampered_signature_state_dir),
+    ],
+    check=False,
+    capture_output=True,
+    text=True,
+    env=environment,
+)
+assert tampered_signature_apply.returncode == 78
+assert "$.snapshot.signatureBase64: Ed25519 signature verification failed" in tampered_signature_apply.stderr
+assert not (tampered_signature_state_dir / "update-state.json").exists()
+
+other_snapshot_provider_key = root / "other-snapshot-provider.key"
+other_snapshot_provider_pub = root / "other-snapshot-provider.pub"
+subprocess.run(["openssl", "genpkey", "-algorithm", "Ed25519", "-out", str(other_snapshot_provider_key)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+subprocess.run(["openssl", "pkey", "-in", str(other_snapshot_provider_key), "-pubout", "-outform", "DER", "-out", str(other_snapshot_provider_pub)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+untrusted_provider_snapshot = dict(snapshot)
+untrusted_provider_snapshot["providerPublicKeyDerBase64"] = base64.b64encode(other_snapshot_provider_pub.read_bytes()).decode()
+untrusted_provider_snapshot_path = root / "snapshot-untrusted-provider.json"
+json.dump(untrusted_provider_snapshot, open(untrusted_provider_snapshot_path, "w", encoding="utf-8"))
+untrusted_provider_state_dir = root / "untrusted-provider-state"
+untrusted_provider_apply = subprocess.run(
+    [
+        stack, "update", "--release", release_path, "--apply", "--dry-run", "--json",
+        "--environment", "staging-cell", "--confirm-release", release["releaseId"],
+        "--tuf-proof", str(tuf_proof_path), "--tuf-root-key", str(tuf_root),
+        "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        "--bank-observer-report", str(report_path), "--snapshot-receipt", str(untrusted_provider_snapshot_path),
+        "--snapshot-provider-key", str(snapshot_provider_root),
+        "--state-dir", str(untrusted_provider_state_dir),
+    ],
+    check=False,
+    capture_output=True,
+    text=True,
+    env=environment,
+)
+assert untrusted_provider_apply.returncode == 78
+assert "$.snapshot.providerPublicKeyDerBase64: does not match the trusted snapshot provider key" in untrusted_provider_apply.stderr
+assert not (untrusted_provider_state_dir / "update-state.json").exists()
+
 applied = subprocess.run(
     [
         stack, "update", "--release", release_path, "--apply", "--dry-run", "--json",
