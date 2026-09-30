@@ -35,7 +35,8 @@ Usage:
 Lists VolumeSnapshots through kubectl and emits an UNSIGNED attestation
 request for the complete canonical Kerosene staging Cell storage set:
 
-  kerosene-staging:       data-staging-{postgres,redis,bitcoin,lnd,tor}-0
+  kerosene-staging:       data-staging-{postgres,redis,bitcoin,lnd,tor}-0,
+                           vault-{1,2,3}-data
   kerosene-staging-vault: vault-data, data-vault-tor-0
 
 Exactly one snapshot is required for every PVC.  Every returned snapshot must
@@ -113,8 +114,8 @@ parse_args() {
   done
 
   [[ -n "$RELEASE_ID" ]] || fail "--release-id is required"
-  [[ "$RELEASE_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || \
-    fail "--release-id must contain only letters, numbers, dot, underscore, or hyphen"
+  [[ "$RELEASE_ID" =~ ^[a-z0-9][a-z0-9._-]{2,127}$ ]] || \
+    fail "--release-id must use 3-128 lowercase letters, numbers, dot, underscore, or hyphen"
   [[ "$RELEASE_LOCK_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || \
     fail "--release-lock-digest must be sha256: followed by 64 lowercase hexadecimal characters"
 
@@ -177,6 +178,9 @@ EXPECTED_TARGETS = {
     (STAGING_NAMESPACE, "data-staging-bitcoin-0"),
     (STAGING_NAMESPACE, "data-staging-lnd-0"),
     (STAGING_NAMESPACE, "data-staging-tor-0"),
+    (STAGING_NAMESPACE, "vault-1-data"),
+    (STAGING_NAMESPACE, "vault-2-data"),
+    (STAGING_NAMESPACE, "vault-3-data"),
     (VAULT_NAMESPACE, "vault-data"),
     (VAULT_NAMESPACE, "data-vault-tor-0"),
 }
@@ -327,7 +331,7 @@ request = {
         "lockDigest": release_lock_digest,
     },
     "requestedAt": requested_at,
-    "schema": "kerosene.snapshot-attestation-request.v1",
+    "schema": "kerosene.snapshot-attestation-request/v1",
     "selection": {
         "labelSelector": selector if selector else None,
         "namespaces": [STAGING_NAMESPACE, VAULT_NAMESPACE],

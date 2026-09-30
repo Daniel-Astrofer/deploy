@@ -12,8 +12,11 @@ fail() {
 }
 
 python3 -m json.tool "$ROOT/infra/stack/release-lock.schema.json" >/dev/null
+python3 -m json.tool "$ROOT/infra/stack/release-lock-v2.schema.json" >/dev/null
 python3 -m json.tool "$ROOT/infra/stack/examples/release-lock.example.json" >/dev/null
+python3 -m json.tool "$ROOT/infra/stack/examples/release-lock-v2.example.json" >/dev/null
 "$STACK" verify-release --release "$ROOT/infra/stack/examples/release-lock.example.json" >/dev/null
+"$STACK" verify-release --release "$ROOT/infra/stack/examples/release-lock-v2.example.json" >/dev/null
 
 make_release() {
   local destination="$1"
@@ -121,6 +124,10 @@ assert "admin" in result["requiredComponents"]
 assert "node" in result["requiredComponents"]
 PY
 
+if "$STACK" verify-release --release "$VALID_RELEASE" --tuf-state-dir "$TMP_DIR/trust-only" >/dev/null 2>&1; then
+  fail "verify-release accepted TUF state without TUF authorization evidence"
+fi
+
 "$STACK" update --release "$VALID_RELEASE" --output "$PLAN" --json > "$TMP_DIR/plan.json"
 python3 - "$PLAN" "$TMP_DIR/plan.json" <<'PY'
 import json
@@ -189,7 +196,7 @@ EPHEMERAL_STATE_DIR="$TMP_DIR/ephemeral-update-state"
 set +e
 output="$("$STACK" update --release "$VALID_RELEASE" --apply \
   --environment staging-cell --confirm-release bank-mainnet-2026.09.28.1 \
-  --state-dir "$EPHEMERAL_STATE_DIR" 2>&1)"
+  --state-dir "$EPHEMERAL_STATE_DIR" --tuf-state-dir "$EPHEMERAL_STATE_DIR" 2>&1)"
 status=$?
 set -e
 [[ "$status" -eq 78 ]] || fail "unverified update returned $status instead of 78"
@@ -202,7 +209,7 @@ printf '%s\n' 'operator investigation required' > "$LOCKED_STATE_DIR/update.lock
 set +e
 output="$("$STACK" update --release "$VALID_RELEASE" --apply \
   --environment staging-cell --confirm-release bank-mainnet-2026.09.28.1 \
-  --state-dir "$LOCKED_STATE_DIR" 2>&1)"
+  --state-dir "$LOCKED_STATE_DIR" --tuf-state-dir "$LOCKED_STATE_DIR" 2>&1)"
 status=$?
 set -e
 [[ "$status" -eq 78 ]] || fail "locked update returned $status instead of 78"

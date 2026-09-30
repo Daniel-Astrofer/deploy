@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kerosene:snapshot-attestation-request:v1",
+  "title": "Kerosene Cell VolumeSnapshot Attestation Request v1",
+  "description": "Unsigned input to an independently trusted snapshot attester. It is never release authorization by itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "kind", "environment", "release", "requestedAt", "selection", "snapshotSetDigest", "snapshots", "attestation"],
+  "properties": {
+    "schema": { "const": "kerosene.snapshot-attestation-request/v1" },
+    "kind": { "const": "VolumeSnapshotAttestationRequest" },
+    "environment": { "const": "staging-cell" },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "lockDigest"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+        "lockDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "requestedAt": { "type": "string", "format": "date-time" },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["labelSelector", "namespaces"],
+      "properties": {
+        "labelSelector": { "type": ["string", "null"] },
+        "namespaces": {
+          "const": ["kerosene-staging", "kerosene-staging-vault"]
+        }
+      }
+    },
+    "snapshotSetDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "snapshots": {
+      "type": "array",
+      "minItems": 10,
+      "maxItems": 10,
+      "items": { "$ref": "#/$defs/snapshot" }
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["externalSignerRequired", "status"],
+      "properties": {
+        "externalSignerRequired": { "const": true },
+        "status": { "const": "unsigned-request" }
+      }
+    }
+  },
+  "$defs": {
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundVolumeSnapshotContentName", "creationTimestamp", "namespace", "persistentVolumeClaim", "readyToUse", "restoreSize", "volumeSnapshotClassName", "volumeSnapshotName", "volumeSnapshotUid"],
+      "properties": {
+        "boundVolumeSnapshotContentName": { "type": "string", "minLength": 1 },
+        "creationTimestamp": { "type": "string", "format": "date-time" },
+        "namespace": { "enum": ["kerosene-staging", "kerosene-staging-vault"] },
+        "persistentVolumeClaim": { "type": "string", "minLength": 1 },
+        "readyToUse": { "const": true },
+        "restoreSize": { "type": ["string", "null"] },
+        "volumeSnapshotClassName": { "type": ["string", "null"] },
+        "volumeSnapshotName": { "type": "string", "minLength": 1 },
+        "volumeSnapshotUid": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

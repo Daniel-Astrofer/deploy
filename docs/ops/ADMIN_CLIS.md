@@ -78,8 +78,9 @@ The operator workflow is deliberately gated:
    kerosene-stack check-update \
      --release release-lock.json \
      --environment staging-cell \
-     --tuf-proof tuf-target-proof.json \
-     --tuf-root-key tuf-root-key.b64 \
+     --tuf-metadata-dir /srv/kerosene/releases/tuf \
+     --tuf-trusted-root /etc/kerosene-stack/trusted-root.json \
+     --tuf-state-dir /var/lib/kerosene-stack \
      --bft-receipt release-receipt.json \
      --validator-roster release-roster.json \
      --bank-observer-report bank-observer-report.json \
@@ -91,21 +92,23 @@ The operator workflow is deliberately gated:
    `manualRecoveryRequired` is `false`, and `nextAction` is
    `kerosene-stack update --apply`. `tufSignatureVerified` must be `true`,
    while `bftSignaturesVerified` and `bankObserversVerified` are counts that
-   must meet the threshold declared by the lock. A false result, an expired
-   proof, a sequence that is not newer, or any recovery flag is a stop
-   condition. The Bank report is a signed observation supplied to the command;
+   must meet the threshold declared by the lock. A false result, expired TUF
+   metadata or Bank report, a sequence that is not newer, or any recovery flag is a stop
+   condition. The Bank report is a short-lived signed observation supplied to the command;
    the current public adapter does not silently replace it with an
    unauthenticated live query.
 
-2. Obtain a fresh snapshot receipt bound to the exact release and
-   `staging-cell` environment. `update --apply` verifies the provider
-   signature with the separately supplied public key, as well as the release,
-   status, digest and expiry. A locally authored JSON file is not a snapshot
+2. Collect an unsigned `VolumeSnapshot` attestation request for the ten
+   persistent Cell PVCs with
+   `collect-staging-volumesnapshot-attestation-request.sh`. An independent
+   attester must restore-test that exact set and issue the v2 receipt. `update
+   --apply` verifies both digests, the provider signature, expiry and
+   `restoreTested: true`. A locally authored JSON file is not a snapshot
    authorization.
 
 3. Run the complete evidence gate in server-side dry-run mode. Use the same
-   release, TUF proof, BFT receipt, validator roster, Bank report and snapshot
-   receipt that will be used for the real apply. Replace the example
+   release, complete offline TUF bundle, BFT receipt, validator roster, Bank
+   report, snapshot request and snapshot receipt that will be used for the real apply. Replace the example
    `--confirm-release` value with the exact `releaseId` from the lock:
 
    ```bash
@@ -114,11 +117,13 @@ The operator workflow is deliberately gated:
      --apply \
      --environment staging-cell \
      --confirm-release bank-mainnet-2026.09.28.1 \
-     --tuf-proof tuf-target-proof.json \
-     --tuf-root-key tuf-root-key.b64 \
+     --tuf-metadata-dir /srv/kerosene/releases/tuf \
+     --tuf-trusted-root /etc/kerosene-stack/trusted-root.json \
+     --tuf-state-dir /var/lib/kerosene-stack \
      --bft-receipt release-receipt.json \
      --validator-roster release-roster.json \
      --bank-observer-report bank-observer-report.json \
+     --snapshot-attestation-request snapshot-attestation-request.json \
      --snapshot-receipt snapshot-receipt.json \
      --snapshot-provider-key snapshot-provider-key.b64 \
      --state-dir /var/lib/kerosene-stack \
@@ -145,3 +150,6 @@ The operator workflow is deliberately gated:
    is still running and reconcile the Cell before an authorized operator clears
    anything. Never delete `update.lock` automatically or use a retry loop to
    bypass it.
+
+   `--tuf-state-dir` must resolve to the same protected directory as
+   `--state-dir`, so anti-rollback TUF state and the update lock are serialized.

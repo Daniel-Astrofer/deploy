@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kerosene:release-lock:v2",
+  "title": "Kerosene Cell Release Lock v2",
+  "description": "Non-secret immutable Cell descriptor. TUF target hash, metadata version and expiry intentionally live only in the signed TUF metadata, not in this target file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "releaseId", "sequence", "network", "authorization", "source", "services", "policy", "migration"],
+  "properties": {
+    "schema": { "const": "kerosene.release-lock/v2" },
+    "schemaVersion": { "const": 2 },
+    "releaseId": { "$ref": "#/$defs/identifier" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "plane"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "plane": { "const": "bank" }
+      }
+    },
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tuf", "bft", "vaultCompatibility"],
+      "properties": {
+        "tuf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targetPath"],
+          "properties": {
+            "targetPath": { "type": "string", "pattern": "^releases/[a-z0-9][a-z0-9._-]{2,127}\\.json$" }
+          }
+        },
+        "bft": { "$ref": "#/$defs/bftAuthorization" },
+        "vaultCompatibility": { "$ref": "#/$defs/vaultCompatibility" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bundle", "repositories"],
+      "properties": {
+        "bundle": { "$ref": "#/$defs/sourceBundle" },
+        "repositories": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["admin", "clients", "contracts", "core", "deploy", "kfe", "node", "rails", "shared", "vault"],
+          "properties": {
+            "admin": { "$ref": "#/$defs/sourceRepository" },
+            "clients": { "$ref": "#/$defs/sourceRepository" },
+            "contracts": { "$ref": "#/$defs/sourceRepository" },
+            "core": { "$ref": "#/$defs/sourceRepository" },
+            "deploy": { "$ref": "#/$defs/sourceRepository" },
+            "kfe": { "$ref": "#/$defs/sourceRepository" },
+            "node": { "$ref": "#/$defs/sourceRepository" },
+            "rails": { "$ref": "#/$defs/sourceRepository" },
+            "shared": { "$ref": "#/$defs/sourceRepository" },
+            "vault": { "$ref": "#/$defs/sourceRepository" }
+          }
+        }
+      }
+    },
+    "services": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admin", "core", "kfe", "node", "vault", "web-page", "postgres", "redis", "bitcoin", "lnd", "tor"],
+      "properties": {
+        "admin": { "$ref": "#/$defs/service" },
+        "core": { "$ref": "#/$defs/service" },
+        "kfe": { "$ref": "#/$defs/service" },
+        "node": { "$ref": "#/$defs/service" },
+        "vault": { "$ref": "#/$defs/service" },
+        "web-page": { "$ref": "#/$defs/service" },
+        "postgres": { "$ref": "#/$defs/service" },
+        "redis": { "$ref": "#/$defs/service" },
+        "bitcoin": { "$ref": "#/$defs/service" },
+        "lnd": { "$ref": "#/$defs/service" },
+        "tor": { "$ref": "#/$defs/service" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowSourceBuild", "vaultSignerActivation", "minimumBankObservers"],
+      "properties": {
+        "allowSourceBuild": { "const": false },
+        "vaultSignerActivation": { "const": false },
+        "minimumBankObservers": { "type": "integer", "minimum": 3 }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "classification", "snapshotRequired", "recoveryEvidenceDigest"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "classification": { "enum": ["reversible", "approved-recovery"] },
+        "snapshotRequired": { "const": true },
+        "recoveryEvidenceDigest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$" },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "commit": { "type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$" },
+    "bftAuthorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["networkId", "height", "commitDigest", "threshold", "members"],
+      "properties": {
+        "networkId": { "$ref": "#/$defs/identifier" },
+        "height": { "type": "integer", "minimum": 1 },
+        "commitDigest": { "$ref": "#/$defs/digest" },
+        "threshold": { "type": "integer", "minimum": 3 },
+        "members": { "type": "integer", "minimum": 4 }
+      }
+    },
+    "vaultCompatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["threshold", "members", "attestationDigest"],
+      "properties": {
+        "threshold": { "type": "integer", "minimum": 2 },
+        "members": { "type": "integer", "minimum": 3 },
+        "attestationDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "sourceBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "digest"],
+      "properties": {
+        "uri": { "type": "string", "pattern": "^oci://.+@sha256:[0-9a-f]{64}$" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "sourceRepository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "bundleDigest"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "bundleDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image", "configDigest", "repository", "rollout"],
+      "properties": {
+        "image": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:@-]*@sha256:[0-9a-f]{64}$" },
+        "configDigest": { "$ref": "#/$defs/digest" },
+        "repository": { "$ref": "#/$defs/identifier" },
+        "rollout": { "enum": ["admin", "application", "network", "operator", "quorum", "stateful"] }
+      }
+    }
+  }
+}

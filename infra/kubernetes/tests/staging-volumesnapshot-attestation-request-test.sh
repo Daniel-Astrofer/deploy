@@ -81,7 +81,10 @@ staging_records='[
   {"pvc":"data-staging-lnd-0","name":"snapshot-lnd","uid":"uid-lnd","restoreSize":"20Gi"},
   {"pvc":"data-staging-bitcoin-0","name":"snapshot-bitcoin","uid":"uid-bitcoin","restoreSize":"100Gi"},
   {"pvc":"data-staging-redis-0","name":"snapshot-redis","uid":"uid-redis","restoreSize":"5Gi"},
-  {"pvc":"data-staging-postgres-0","name":"snapshot-postgres","uid":"uid-postgres","restoreSize":"50Gi"}
+  {"pvc":"data-staging-postgres-0","name":"snapshot-postgres","uid":"uid-postgres","restoreSize":"50Gi"},
+  {"pvc":"vault-1-data","name":"snapshot-vault-1","uid":"uid-vault-1","restoreSize":"2Gi"},
+  {"pvc":"vault-2-data","name":"snapshot-vault-2","uid":"uid-vault-2","restoreSize":"2Gi"},
+  {"pvc":"vault-3-data","name":"snapshot-vault-3","uid":"uid-vault-3","restoreSize":"2Gi"}
 ]'
 vault_records='[
   {"pvc":"vault-data","name":"snapshot-vault","uid":"uid-vault","restoreSize":"2Gi"},
@@ -198,14 +201,14 @@ import sys
 
 payload_path, release_digest = sys.argv[1:]
 payload = json.load(open(payload_path, encoding="utf-8"))
-assert payload["schema"] == "kerosene.snapshot-attestation-request.v1"
+assert payload["schema"] == "kerosene.snapshot-attestation-request/v1"
 assert payload["kind"] == "VolumeSnapshotAttestationRequest"
 assert payload["environment"] == "staging-cell"
 assert payload["release"] == {"id": "staging-release-42", "lockDigest": release_digest}
 assert payload["attestation"] == {"externalSignerRequired": True, "status": "unsigned-request"}
 assert "signature" not in payload
 assert "receipt" not in payload
-assert len(payload["snapshots"]) == 7
+assert len(payload["snapshots"]) == 10
 assert [
     (item["namespace"], item["persistentVolumeClaim"])
     for item in payload["snapshots"]
@@ -216,6 +219,9 @@ assert [
         ("kerosene-staging", "data-staging-postgres-0"),
         ("kerosene-staging", "data-staging-redis-0"),
         ("kerosene-staging", "data-staging-tor-0"),
+        ("kerosene-staging", "vault-1-data"),
+        ("kerosene-staging", "vault-2-data"),
+        ("kerosene-staging", "vault-3-data"),
         ("kerosene-staging-vault", "data-vault-tor-0"),
         ("kerosene-staging-vault", "vault-data"),
     ]
@@ -272,5 +278,17 @@ if run_subject content-source "$TMP_DIR/content-source.json" "$TMP_DIR/content-s
 fi
 [[ ! -s "$TMP_DIR/content-source.json" ]] || fail "collector emitted a payload for a non-PVC source"
 assert_contains "$TMP_DIR/content-source.stderr" "must be sourced from a PersistentVolumeClaim"
+
+if KUBECTL="$FAKE_BIN/kubectl" \
+  FIXTURE_DIR="$FIXTURE_DIR" \
+  FIXTURE_VARIANT=normal \
+  KUBECTL_CALL_LOG="$TMP_DIR/kubectl-invalid-release.log" \
+  "$SUBJECT" \
+    --release-id Staging-Release-42 \
+    --release-lock-digest "$RELEASE_DIGEST" \
+    > "$TMP_DIR/invalid-release.stdout" 2> "$TMP_DIR/invalid-release.stderr"; then
+  fail "collector accepted a release ID the stack controller would reject"
+fi
+assert_contains "$TMP_DIR/invalid-release.stderr" "must use 3-128 lowercase"
 
 echo "[PASS] staging VolumeSnapshot attestation request collection"

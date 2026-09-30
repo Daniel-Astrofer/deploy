@@ -72,6 +72,7 @@ jobs:
         run: |
           bash infra/kubernetes/tests/staging-canonical-runtime-test.sh
           bash infra/kubernetes/tests/staging-live-image-digest-test.sh
+          bash infra/kubernetes/tests/staging-volumesnapshot-attestation-request-test.sh
           bash infra/kubernetes/tests/staging-spire-manifests-test.sh
           bash infra/kubernetes/tests/staging-spire-preflight-test.sh
 

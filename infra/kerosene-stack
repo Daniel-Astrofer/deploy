@@ -16,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import stat as stat_module
 import subprocess
 import sys
 import tempfile
@@ -23,18 +24,45 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-RELEASE_SCHEMA = "kerosene.release-lock/v1"
+RELEASE_SCHEMA_V1 = "kerosene.release-lock/v1"
+RELEASE_SCHEMA_V2 = "kerosene.release-lock/v2"
 STACK_PLAN_SCHEMA = "kerosene.stack.update-plan/v1"
 RELEASE_RECEIPT_SCHEMA = "kerosene.release-receipt/v1"
 ROSTER_SCHEMA = "kerosene.release-roster/v1"
-OBSERVER_REPORT_SCHEMA = "kerosene.bank-observer-report/v1"
-SNAPSHOT_RECEIPT_SCHEMA = "kerosene.snapshot-receipt/v1"
+OBSERVER_REPORT_SCHEMA = "kerosene.bank-observer-report/v2"
+SNAPSHOT_RECEIPT_SCHEMA = "kerosene.snapshot-receipt/v2"
+SNAPSHOT_ATTESTATION_REQUEST_SCHEMA = "kerosene.snapshot-attestation-request/v1"
 TUF_PROOF_SCHEMA = "kerosene.tuf-target-proof/v1"
 MAX_RELEASE_BYTES = 1024 * 1024
 MAX_EVIDENCE_BYTES = 256 * 1024
+MAX_TUF_METADATA_BYTES = 1024 * 1024
 EXIT_VALIDATION = 65
 EXIT_CANNOT_APPLY = 78
 UPDATE_LOCK_FILENAME = "update.lock"
+TUF_STATE_FILENAME = "trusted-tuf-state.json"
+TUF_ROOT_FILE_RE = re.compile(r"([1-9][0-9]*)\.root\.json$")
+TUF_KEYID_RE = re.compile(r"[0-9a-f]{64}$")
+TUF_ROLE_NAME_RE = re.compile(r"[a-z0-9][a-z0-9._-]{0,127}$")
+TUF_ED25519_SPKI_PREFIX = bytes.fromhex("302a300506032b6570032100")
+MAX_TUF_DELEGATION_DEPTH = 32
+MAX_BANK_REPORT_LIFETIME = dt.timedelta(hours=1)
+MAX_BANK_OBSERVATION_AGE = dt.timedelta(minutes=15)
+MAX_CLOCK_SKEW = dt.timedelta(minutes=5)
+
+# These are the persisted volumes rendered by the public staging Cell.  Node
+# state shares the Tor StatefulSet volumes; the Admin CLI has no Cell PVC.
+SNAPSHOT_PVC_TARGETS = (
+    ("kerosene-staging", "data-staging-bitcoin-0"),
+    ("kerosene-staging", "data-staging-lnd-0"),
+    ("kerosene-staging", "data-staging-postgres-0"),
+    ("kerosene-staging", "data-staging-redis-0"),
+    ("kerosene-staging", "data-staging-tor-0"),
+    ("kerosene-staging", "vault-1-data"),
+    ("kerosene-staging", "vault-2-data"),
+    ("kerosene-staging", "vault-3-data"),
+    ("kerosene-staging-vault", "data-vault-tor-0"),
+    ("kerosene-staging-vault", "vault-data"),
+)
 
 IDENTIFIER_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,127}$")
 GIT_COMMIT_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -223,14 +251,9 @@ def reject_sensitive_field_names(value: Any, path: str = "$") -> None:
             reject_sensitive_field_names(child, f"{path}[{index}]")
 
 
-def read_release(path_text: str) -> dict[str, Any]:
+def read_release(path_text: str) -> tuple[dict[str, Any], bytes]:
     path = Path(path_text)
-    try:
-        size = path.stat().st_size
-    except OSError as error:
-        raise ReleaseValidationError(f"{path}: cannot read release lock: {error.strerror}") from error
-    if size > MAX_RELEASE_BYTES:
-        fail(str(path), f"release lock exceeds {MAX_RELEASE_BYTES} bytes")
+    raw = read_regular_file_bytes(path, str(path), MAX_RELEASE_BYTES)
 
     def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -241,11 +264,14 @@ def read_release(path_text: str) -> dict[str, Any]:
         return result
 
     try:
-        with path.open(encoding="utf-8") as handle:
-            data = json.load(handle, object_pairs_hook=unique_object)
-    except (OSError, json.JSONDecodeError) as error:
+        data = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(f"non-finite JSON value: {value}")),
+        )
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
         raise ReleaseValidationError(f"{path}: invalid release lock JSON: {error}") from error
-    return require_object(data, "$")
+    return require_object(data, "$"), raw
 
 
 def validate_release(release: dict[str, Any]) -> dict[str, Any]:
@@ -266,10 +292,15 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
             "migration",
         ),
     )
-    if root["schema"] != RELEASE_SCHEMA:
-        fail("$.schema", f"must equal {RELEASE_SCHEMA!r}")
-    if root["schemaVersion"] != 1:
-        fail("$.schemaVersion", "must equal 1")
+    if root["schema"] == RELEASE_SCHEMA_V1 and root["schemaVersion"] == 1:
+        release_schema_version = 1
+    elif root["schema"] == RELEASE_SCHEMA_V2 and root["schemaVersion"] == 2:
+        release_schema_version = 2
+    else:
+        fail(
+            "$.schema",
+            f"must be {RELEASE_SCHEMA_V1!r} with schemaVersion 1 or {RELEASE_SCHEMA_V2!r} with schemaVersion 2",
+        )
     release_id = require_identifier(root["releaseId"], "$.releaseId")
     sequence = require_integer(root["sequence"], "$.sequence", 1)
 
@@ -283,19 +314,27 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
         "$.authorization",
         ("tuf", "bft", "vaultCompatibility"),
     )
-    tuf = require_keys(
-        authorization["tuf"],
-        "$.authorization.tuf",
-        ("targetPath", "metadataVersion", "targetDigest", "expiresAt"),
+    tuf_required = ("targetPath",) if release_schema_version == 2 else (
+        "targetPath",
+        "metadataVersion",
+        "targetDigest",
+        "expiresAt",
     )
+    tuf = require_keys(authorization["tuf"], "$.authorization.tuf", tuf_required)
     target_path = require_string(tuf["targetPath"], "$.authorization.tuf.targetPath")
     if target_path.startswith("/") or ".." in Path(target_path).parts:
         fail("$.authorization.tuf.targetPath", "must be a relative, traversal-free path")
     if target_path != f"releases/{release_id}.json":
         fail("$.authorization.tuf.targetPath", "must identify this exact release under releases/")
-    tuf_version = require_integer(tuf["metadataVersion"], "$.authorization.tuf.metadataVersion", 1)
-    tuf_digest = require_digest(tuf["targetDigest"], "$.authorization.tuf.targetDigest")
-    tuf_expiry = parse_timestamp(tuf["expiresAt"], "$.authorization.tuf.expiresAt")
+    tuf_summary: dict[str, Any] = {"targetPath": target_path}
+    if release_schema_version == 1:
+        tuf_summary.update(
+            {
+                "metadataVersion": require_integer(tuf["metadataVersion"], "$.authorization.tuf.metadataVersion", 1),
+                "targetDigest": require_digest(tuf["targetDigest"], "$.authorization.tuf.targetDigest"),
+                "expiresAt": parse_timestamp(tuf["expiresAt"], "$.authorization.tuf.expiresAt"),
+            }
+        )
 
     bft = require_keys(
         authorization["bft"],
@@ -390,15 +429,11 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
     recovery_digest = require_digest(migration["recoveryEvidenceDigest"], "$.migration.recoveryEvidenceDigest")
 
     return {
+        "releaseSchemaVersion": release_schema_version,
         "releaseId": release_id,
         "sequence": sequence,
         "networkId": network_id,
-        "tuf": {
-            "targetPath": target_path,
-            "metadataVersion": tuf_version,
-            "targetDigest": tuf_digest,
-            "expiresAt": tuf_expiry,
-        },
+        "tuf": tuf_summary,
         "bft": {
             "networkId": bft_network_id,
             "height": bft_height,
@@ -423,33 +458,670 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def canonical_digest(value: dict[str, Any]) -> str:
+def canonical_digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_bytes(value)).hexdigest()
 
 
-def canonical_bytes(value: dict[str, Any]) -> bytes:
+def canonical_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def read_regular_file_bytes(path: Path, label: str, maximum_bytes: int) -> bytes:
+    """Read a bounded regular file without following its final symlink.
+
+    Release locks, signed evidence, and trust state are security inputs. A
+    check followed by Path.read_bytes() is vulnerable to a replacement between
+    the check and the read, so keep one no-follow descriptor open throughout.
+    """
+    flags = os.O_RDONLY
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as error:
+        fail(label, f"must be a readable regular file: {error}")
+    try:
+        with os.fdopen(descriptor, "rb", closefd=True) as handle:
+            metadata = os.fstat(handle.fileno())
+            if not stat_module.S_ISREG(metadata.st_mode):
+                fail(label, "must be a regular file")
+            if metadata.st_size > maximum_bytes:
+                fail(label, f"document exceeds {maximum_bytes} bytes")
+            raw = handle.read(maximum_bytes + 1)
+    except ReleaseValidationError:
+        raise
+    except OSError as error:
+        fail(label, f"cannot read regular file: {error}")
+    if len(raw) > maximum_bytes:
+        fail(label, f"document exceeds {maximum_bytes} bytes")
+    return raw
 
 
 def read_json_document(path_text: str, label: str, maximum_bytes: int = MAX_EVIDENCE_BYTES) -> dict[str, Any]:
     path = Path(path_text)
     try:
-        if path.stat().st_size > maximum_bytes:
-            fail(label, f"document exceeds {maximum_bytes} bytes")
-        with path.open(encoding="utf-8") as handle:
-            def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-                result: dict[str, Any] = {}
-                for key, value in pairs:
-                    if key in result:
-                        fail(label, f"duplicate JSON field: {key}")
-                    result[key] = value
-                return result
+        raw = read_regular_file_bytes(path, label, maximum_bytes)
 
-            return require_object(json.load(handle, object_pairs_hook=unique_object), label)
+        def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    fail(label, f"duplicate JSON field: {key}")
+                result[key] = value
+            return result
+
+        def invalid_constant(value: str) -> None:
+            raise ValueError(f"non-finite JSON value: {value}")
+
+        document = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+        )
+        return require_object(document, label)
     except ReleaseValidationError:
         raise
-    except (OSError, json.JSONDecodeError) as error:
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
         fail(label, f"invalid JSON document: {error}")
+
+
+def read_tuf_metadata_file(metadata_dir: Path, filename: str) -> tuple[bytes, dict[str, Any]]:
+    """Read one local TUF metadata file without following a symlink.
+
+    The Cell controller consumes a complete, operator-provided metadata bundle
+    offline.  Metadata is security evidence: reject links, duplicate JSON keys
+    and oversized documents before looking at a signature.
+    """
+    if filename.startswith("/") or ".." in Path(filename).parts or "/" in filename:
+        fail("TUF metadata", f"unsafe metadata filename: {filename!r}")
+    path = metadata_dir / filename
+    try:
+        raw = read_regular_file_bytes(path, f"TUF metadata {filename}", MAX_TUF_METADATA_BYTES)
+        text = raw.decode("utf-8")
+
+        def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            result: dict[str, Any] = {}
+            for key, value in pairs:
+                if key in result:
+                    fail(f"TUF metadata {filename}", f"duplicate JSON field: {key}")
+                result[key] = value
+            return result
+
+        def invalid_constant(value: str) -> None:
+            raise ValueError(f"non-finite JSON value: {value}")
+
+        document = json.loads(
+            text,
+            object_pairs_hook=unique_object,
+            parse_constant=invalid_constant,
+        )
+    except ReleaseValidationError:
+        raise
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError) as error:
+        fail("TUF metadata", f"invalid {filename}: {error}")
+    return raw, require_object(document, f"TUF metadata {filename}")
+
+
+def require_tuf_keyid(value: Any, path: str) -> str:
+    keyid = require_string(value, path)
+    if not TUF_KEYID_RE.fullmatch(keyid):
+        fail(path, "must be a lowercase 64-character SHA-256 key ID")
+    return keyid
+
+
+def parse_tuf_key(value: Any, keyid: str, path: str) -> bytes:
+    """Validate an interoperable TUF Ed25519 key and return SPKI DER bytes."""
+    key = require_keys(value, path, ("keytype", "scheme", "keyval"))
+    if key["keytype"] != "ed25519" or key["scheme"] != "ed25519":
+        fail(path, "only standard TUF ed25519 keys are supported")
+    keyval = require_keys(key["keyval"], f"{path}.keyval", ("public",))
+    raw_hex = require_string(keyval["public"], f"{path}.keyval.public")
+    if not re.fullmatch(r"[0-9a-f]{64}", raw_hex):
+        fail(f"{path}.keyval.public", "must be a lowercase 32-byte Ed25519 public key in hex")
+    expected_keyid = hashlib.sha256(canonical_bytes(key)).hexdigest()
+    if keyid != expected_keyid:
+        fail(path, "key ID does not match the canonical TUF key object")
+    return TUF_ED25519_SPKI_PREFIX + bytes.fromhex(raw_hex)
+
+
+def parse_tuf_keys(value: Any, path: str) -> dict[str, bytes]:
+    keys = require_object(value, path)
+    if not keys:
+        fail(path, "must contain at least one trusted key")
+    parsed: dict[str, bytes] = {}
+    for keyid, key in keys.items():
+        parsed_keyid = require_tuf_keyid(keyid, f"{path}.<keyid>")
+        parsed[parsed_keyid] = parse_tuf_key(key, parsed_keyid, f"{path}.{parsed_keyid}")
+    return parsed
+
+
+def parse_tuf_role(value: Any, path: str, keys: dict[str, bytes]) -> tuple[tuple[str, ...], int]:
+    role = require_keys(value, path, ("keyids", "threshold"))
+    if type(role["keyids"]) is not list or not role["keyids"]:
+        fail(f"{path}.keyids", "must be a non-empty array")
+    keyids: list[str] = []
+    for index, value in enumerate(role["keyids"]):
+        keyid = require_tuf_keyid(value, f"{path}.keyids[{index}]")
+        if keyid in keyids:
+            fail(f"{path}.keyids[{index}]", "duplicate key ID")
+        if keyid not in keys:
+            fail(f"{path}.keyids[{index}]", "does not exist in the delegated key set")
+        keyids.append(keyid)
+    threshold = require_integer(role["threshold"], f"{path}.threshold", 1)
+    if threshold > len(keyids):
+        fail(f"{path}.threshold", "cannot exceed the number of role keys")
+    return tuple(keyids), threshold
+
+
+def parse_tuf_signed_document(document: dict[str, Any], path: str, expected_type: str) -> tuple[dict[str, Any], list[Any]]:
+    root = require_keys(document, path, ("signed", "signatures"))
+    signed = require_object(root["signed"], f"{path}.signed")
+    if signed.get("_type") != expected_type:
+        fail(f"{path}.signed._type", f"must equal {expected_type!r}")
+    spec_version = require_string(signed.get("spec_version"), f"{path}.signed.spec_version")
+    if not re.fullmatch(r"1\.[0-9]+\.[0-9]+", spec_version):
+        fail(f"{path}.signed.spec_version", "must be a supported TUF 1.x version")
+    require_integer(signed.get("version"), f"{path}.signed.version", 1)
+    parse_timestamp(signed.get("expires"), f"{path}.signed.expires")
+    if type(root["signatures"]) is not list:
+        fail(f"{path}.signatures", "must be an array")
+    return signed, root["signatures"]
+
+
+def valid_tuf_signature_keyids(
+    document: dict[str, Any],
+    role_keyids: Iterable[str],
+    keys: dict[str, bytes],
+    path: str,
+) -> set[str]:
+    """Return valid, distinct role signatures while tolerating irrelevant ones."""
+    if shutil.which("openssl") is None:
+        fail(path, "openssl is required to verify TUF signatures")
+    signatures = document.get("signatures")
+    if type(signatures) is not list:
+        fail(f"{path}.signatures", "must be an array")
+    allowed = set(role_keyids)
+    payload = canonical_bytes(document.get("signed"))
+    seen: set[str] = set()
+    valid: set[str] = set()
+    for index, value in enumerate(signatures):
+        signature = require_keys(value, f"{path}.signatures[{index}]", ("keyid", "sig"))
+        keyid = require_tuf_keyid(signature["keyid"], f"{path}.signatures[{index}].keyid")
+        if keyid in seen:
+            fail(f"{path}.signatures[{index}].keyid", "duplicate TUF signature key ID")
+        seen.add(keyid)
+        sig_hex = require_string(signature["sig"], f"{path}.signatures[{index}].sig")
+        if not re.fullmatch(r"[0-9a-f]{128}", sig_hex):
+            fail(f"{path}.signatures[{index}].sig", "must be a lowercase Ed25519 signature in hex")
+        if keyid not in allowed:
+            continue
+        try:
+            verify_ed25519(
+                payload,
+                bytes.fromhex(sig_hex),
+                keys[keyid],
+                f"{path}.signatures[{index}]",
+            )
+        except ReleaseValidationError as error:
+            if str(error).endswith("Ed25519 signature verification failed"):
+                continue
+            raise
+        valid.add(keyid)
+    return valid
+
+
+def verify_tuf_role(
+    document: dict[str, Any],
+    role_keyids: Iterable[str],
+    threshold: int,
+    keys: dict[str, bytes],
+    path: str,
+) -> set[str]:
+    valid = valid_tuf_signature_keyids(document, role_keyids, keys, path)
+    if len(valid) < threshold:
+        fail(path, f"requires {threshold} distinct valid TUF role signatures; received {len(valid)}")
+    return valid
+
+
+def parse_tuf_root(document: dict[str, Any], path: str) -> dict[str, Any]:
+    signed, _signatures = parse_tuf_signed_document(document, path, "root")
+    keys = parse_tuf_keys(signed.get("keys"), f"{path}.signed.keys")
+    roles = require_object(signed.get("roles"), f"{path}.signed.roles")
+    required_roles = ("root", "timestamp", "snapshot", "targets")
+    if set(roles) - set(required_roles) - {"mirrors"}:
+        fail(f"{path}.signed.roles", "contains an unsupported top-level role")
+    parsed_roles: dict[str, tuple[tuple[str, ...], int]] = {}
+    for role_name in required_roles:
+        if role_name not in roles:
+            fail(f"{path}.signed.roles", f"missing required role {role_name!r}")
+        parsed_roles[role_name] = parse_tuf_role(roles[role_name], f"{path}.signed.roles.{role_name}", keys)
+    if "mirrors" in roles:
+        parsed_roles["mirrors"] = parse_tuf_role(roles["mirrors"], f"{path}.signed.roles.mirrors", keys)
+    return {
+        "document": document,
+        "signed": signed,
+        "keys": keys,
+        "roles": parsed_roles,
+        "version": signed["version"],
+    }
+
+
+def load_tuf_root_chain(metadata_dir: Path, trusted_root_path: str) -> dict[str, Any]:
+    """Advance from an immutable trusted root through contiguous root updates.
+
+    A public key by itself cannot safely describe the root threshold or all
+    delegated roles.  The root anchor is therefore a protected, out-of-band
+    TUF root metadata file.  Each subsequent root requires both the previous
+    root threshold and the new root threshold, as required for safe rotation.
+    """
+    trusted_root_file = Path(trusted_root_path)
+    trusted_raw, trusted_document = read_tuf_metadata_file(trusted_root_file.parent, trusted_root_file.name)
+    trusted = parse_tuf_root(trusted_document, f"TUF trusted root {trusted_root_file.name}")
+    trusted_keyids, trusted_threshold = trusted["roles"]["root"]
+    verify_tuf_role(
+        trusted_document,
+        trusted_keyids,
+        trusted_threshold,
+        trusted["keys"],
+        f"TUF trusted root {trusted_root_file.name}",
+    )
+
+    numbered: list[tuple[int, str]] = []
+    try:
+        entries = list(metadata_dir.iterdir())
+    except OSError as error:
+        fail("TUF metadata", f"cannot enumerate root metadata: {error}")
+    for entry in entries:
+        match = TUF_ROOT_FILE_RE.fullmatch(entry.name)
+        if match:
+            numbered.append((int(match.group(1)), entry.name))
+    numbered.sort()
+    expected_version = trusted["version"] + 1
+    previous = trusted
+    current = trusted
+    for filename_version, filename in numbered:
+        raw, document = read_tuf_metadata_file(metadata_dir, filename)
+        if filename_version < trusted["version"]:
+            fail("TUF root metadata", f"contains a root older than the trusted anchor: {filename}")
+        if filename_version == trusted["version"]:
+            if raw != trusted_raw:
+                fail("TUF root metadata", f"{filename} conflicts with the trusted root version")
+            continue
+        if filename_version != expected_version:
+            fail("TUF root metadata", f"missing root version {expected_version} before {filename}")
+        root = parse_tuf_root(document, f"TUF {filename}")
+        if root["version"] != filename_version:
+            fail(f"TUF {filename}.signed.version", "must equal its consistent-snapshot filename version")
+        root_keyids, root_threshold = root["roles"]["root"]
+        verify_tuf_role(document, root_keyids, root_threshold, root["keys"], f"TUF {filename}")
+        previous_keyids, previous_threshold = previous["roles"]["root"]
+        verify_tuf_role(
+            document,
+            previous_keyids,
+            previous_threshold,
+            previous["keys"],
+            f"TUF {filename} previous-root authorization",
+        )
+        previous = root
+        current = root
+        expected_version += 1
+    return current
+
+
+def require_tuf_metadata_directory(path_text: str) -> Path:
+    path = Path(path_text)
+    if path.is_symlink() or not path.is_dir():
+        fail("TUF metadata", f"must be a real directory: {path}")
+    return path
+
+
+def read_tuf_state(state_dir_text: str | None) -> dict[str, int]:
+    """Read prior trusted metadata versions without creating or changing state."""
+    if not state_dir_text:
+        return {}
+    state_dir = Path(state_dir_text)
+    if not state_dir.exists():
+        return {}
+    if state_dir.is_symlink() or not state_dir.is_dir():
+        fail("TUF state", f"must be a real directory: {state_dir}")
+    state_file = state_dir / TUF_STATE_FILENAME
+    if not state_file.exists():
+        return {}
+    state = read_json_document(str(state_file), "trusted TUF state")
+    root = require_keys(state, "$.tufState", ("schema", "metadataVersions"))
+    if root["schema"] != "kerosene.tuf-trusted-state/v1":
+        fail("$.tufState.schema", "must equal 'kerosene.tuf-trusted-state/v1'")
+    versions = require_object(root["metadataVersions"], "$.tufState.metadataVersions")
+    parsed: dict[str, int] = {}
+    for role, version in versions.items():
+        if not TUF_ROLE_NAME_RE.fullmatch(role) and role not in {"root", "timestamp", "snapshot", "targets"}:
+            fail("$.tufState.metadataVersions", "contains an invalid role name")
+        parsed[role] = require_integer(version, f"$.tufState.metadataVersions.{role}", 1)
+    return parsed
+
+
+def guard_tuf_versions(versions: dict[str, int], trusted_versions: dict[str, int]) -> None:
+    for role, trusted_version in trusted_versions.items():
+        candidate = versions.get(role)
+        if candidate is not None and candidate < trusted_version:
+            fail(
+                f"TUF metadata {role}",
+                f"version {candidate} is older than persistently trusted version {trusted_version}",
+            )
+
+
+def persist_tuf_state(state_dir_text: str, tuf_result: dict[str, Any]) -> str:
+    """Persist only verified TUF versions before rollout; no keys or secrets."""
+    versions = tuf_result.get("metadataVersions")
+    if type(versions) is not dict:
+        raise ApplyBlockedError("verified TUF result does not contain metadata versions")
+    parsed_versions = {
+        require_string(role, "TUF metadata role"): require_integer(version, f"TUF metadata {role}", 1)
+        for role, version in versions.items()
+    }
+    state_dir = prepare_state_dir(state_dir_text)
+    guard_tuf_versions(parsed_versions, read_tuf_state(str(state_dir)))
+    destination = state_dir / TUF_STATE_FILENAME
+    atomic_write_json(
+        str(destination),
+        {
+            "schema": "kerosene.tuf-trusted-state/v1",
+            "metadataVersions": parsed_versions,
+        },
+        mode=0o600,
+    )
+    return str(destination)
+
+
+def parse_tuf_meta_reference(value: Any, path: str) -> dict[str, Any]:
+    reference = require_keys(value, path, ("version", "length", "hashes"))
+    version = require_integer(reference["version"], f"{path}.version", 1)
+    length = require_integer(reference["length"], f"{path}.length", 0)
+    hashes = require_object(reference["hashes"], f"{path}.hashes")
+    sha256 = require_string(hashes.get("sha256"), f"{path}.hashes.sha256")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        fail(f"{path}.hashes.sha256", "must be a lowercase SHA-256 hex digest")
+    return {"version": version, "length": length, "sha256": sha256}
+
+
+def verify_tuf_meta_reference(
+    parent_signed: dict[str, Any],
+    child_filename: str,
+    child_bytes: bytes,
+    child_signed: dict[str, Any],
+    path: str,
+) -> None:
+    meta = require_object(parent_signed.get("meta"), f"{path}.meta")
+    if child_filename not in meta:
+        fail(f"{path}.meta", f"does not authenticate {child_filename}")
+    reference = parse_tuf_meta_reference(meta[child_filename], f"{path}.meta.{child_filename}")
+    if len(child_bytes) != reference["length"]:
+        fail(f"{path}.meta.{child_filename}.length", "does not match the supplied metadata bytes")
+    if hashlib.sha256(child_bytes).hexdigest() != reference["sha256"]:
+        fail(f"{path}.meta.{child_filename}.hashes.sha256", "does not match the supplied metadata bytes")
+    if child_signed["version"] != reference["version"]:
+        fail(f"{path}.meta.{child_filename}.version", "does not match the supplied metadata version")
+
+
+def parse_tuf_targets(document: dict[str, Any], path: str) -> dict[str, Any]:
+    signed, _signatures = parse_tuf_signed_document(document, path, "targets")
+    targets = require_object(signed.get("targets"), f"{path}.signed.targets")
+    return {"document": document, "signed": signed, "targets": targets, "version": signed["version"]}
+
+
+def tuf_target_path_matches(pattern: str, target_path: str) -> bool:
+    """Apply TUF path globs without allowing '*' to cross a slash."""
+    pattern_parts = pattern.split("/")
+    target_parts = target_path.split("/")
+    if len(pattern_parts) != len(target_parts):
+        return False
+    for pattern_part, target_part in zip(pattern_parts, target_parts):
+        expression = ""
+        index = 0
+        while index < len(pattern_part):
+            character = pattern_part[index]
+            if character == "*":
+                expression += "[^/]*"
+            elif character == "?":
+                expression += "[^/]"
+            elif character == "[":
+                closing = pattern_part.find("]", index + 1)
+                if closing == -1:
+                    expression += re.escape(character)
+                else:
+                    expression += pattern_part[index : closing + 1]
+                    index = closing
+            else:
+                expression += re.escape(character)
+            index += 1
+        if not re.fullmatch(expression, target_part):
+            return False
+    return True
+
+
+def parse_tuf_delegations(signed: dict[str, Any], path: str) -> list[dict[str, Any]]:
+    if "delegations" not in signed:
+        return []
+    delegations = require_keys(signed["delegations"], f"{path}.delegations", ("keys", "roles"))
+    keys = parse_tuf_keys(delegations["keys"], f"{path}.delegations.keys")
+    roles = delegations["roles"]
+    if type(roles) is not list:
+        fail(f"{path}.delegations.roles", "must be an array")
+    parsed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, value in enumerate(roles):
+        role_path = f"{path}.delegations.roles[{index}]"
+        role = require_object(value, role_path)
+        required = {"name", "keyids", "threshold", "terminating"}
+        patterns = {"paths", "path_hash_prefixes"}
+        unsupported = set(role) - required - patterns
+        missing = required - set(role)
+        supplied_patterns = patterns & set(role)
+        if missing:
+            fail(role_path, f"missing required field(s): {', '.join(sorted(missing))}")
+        if unsupported:
+            fail(role_path, f"unsupported field(s): {', '.join(sorted(unsupported))}")
+        if len(supplied_patterns) != 1:
+            fail(role_path, "must declare exactly one of paths or path_hash_prefixes")
+        name = require_string(role["name"], f"{role_path}.name")
+        if not TUF_ROLE_NAME_RE.fullmatch(name):
+            fail(f"{role_path}.name", "must be a simple lowercase role filename")
+        if name in seen:
+            fail(f"{role_path}.name", "duplicate delegated role")
+        seen.add(name)
+        keyids, threshold = parse_tuf_role(
+            {"keyids": role["keyids"], "threshold": role["threshold"]},
+            role_path,
+            keys,
+        )
+        terminating = require_boolean(role["terminating"], f"{role_path}.terminating")
+        entry: dict[str, Any] = {
+            "name": name,
+            "keyids": keyids,
+            "threshold": threshold,
+            "keys": keys,
+            "terminating": terminating,
+        }
+        if "paths" in role:
+            if type(role["paths"]) is not list or not role["paths"]:
+                fail(f"{role_path}.paths", "must be a non-empty array")
+            entry["paths"] = [require_string(item, f"{role_path}.paths[{position}]") for position, item in enumerate(role["paths"])]
+        else:
+            if type(role["path_hash_prefixes"]) is not list or not role["path_hash_prefixes"]:
+                fail(f"{role_path}.path_hash_prefixes", "must be a non-empty array")
+            prefixes: list[str] = []
+            for position, item in enumerate(role["path_hash_prefixes"]):
+                prefix = require_string(item, f"{role_path}.path_hash_prefixes[{position}]")
+                if not re.fullmatch(r"[0-9a-f]{1,64}", prefix):
+                    fail(f"{role_path}.path_hash_prefixes[{position}]", "must be a lowercase SHA-256 prefix")
+                prefixes.append(prefix)
+            entry["path_hash_prefixes"] = prefixes
+        parsed.append(entry)
+    return parsed
+
+
+def delegation_matches_target(delegation: dict[str, Any], target_path: str) -> bool:
+    if "paths" in delegation:
+        return any(tuf_target_path_matches(pattern, target_path) for pattern in delegation["paths"])
+    target_hash = hashlib.sha256(target_path.encode("utf-8")).hexdigest()
+    return any(target_hash.startswith(prefix) for prefix in delegation["path_hash_prefixes"])
+
+
+def verify_tuf_target_binding(
+    target_info: Any,
+    target_path: str,
+    role: dict[str, Any],
+    release: dict[str, Any],
+    release_bytes: bytes,
+    summary: dict[str, Any],
+    path: str,
+) -> None:
+    target = require_keys(target_info, path, ("length", "hashes", "custom"))
+    target_length = require_integer(target["length"], f"{path}.length", 0)
+    hashes = require_object(target["hashes"], f"{path}.hashes")
+    sha256 = require_string(hashes.get("sha256"), f"{path}.hashes.sha256")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        fail(f"{path}.hashes.sha256", "must be a lowercase SHA-256 hex digest")
+    if len(release_bytes) != target_length:
+        fail(f"{path}.length", "does not match the supplied release-lock bytes")
+    if hashlib.sha256(release_bytes).hexdigest() != sha256:
+        fail(f"{path}.hashes.sha256", "does not match the supplied release-lock bytes")
+    custom = require_object(target["custom"], f"{path}.custom")
+    if custom.get("keroseneReleaseLockCanonicalDigest") != canonical_digest(release):
+        fail(
+            f"{path}.custom.keroseneReleaseLockCanonicalDigest",
+            "does not bind this TUF target to the supplied release lock",
+        )
+    if target_path != summary["tuf"]["targetPath"]:
+        fail(path, "does not match the release TUF target path")
+
+
+def resolve_tuf_target(
+    metadata_dir: Path,
+    snapshot_signed: dict[str, Any],
+    role: dict[str, Any],
+    role_keyids: Iterable[str],
+    role_threshold: int,
+    role_keys: dict[str, bytes],
+    target_path: str,
+    release: dict[str, Any],
+    release_bytes: bytes,
+    summary: dict[str, Any],
+    versions: dict[str, int],
+    visited: set[str],
+    depth: int = 0,
+) -> str | None:
+    if depth > MAX_TUF_DELEGATION_DEPTH:
+        fail("TUF delegations", f"exceed the maximum depth of {MAX_TUF_DELEGATION_DEPTH}")
+    verify_tuf_role(role["document"], role_keyids, role_threshold, role_keys, "TUF targets role")
+    if target_path in role["targets"]:
+        verify_tuf_target_binding(
+            role["targets"][target_path], target_path, role, release, release_bytes, summary, "TUF target"
+        )
+        return role["name"]
+    for delegation in parse_tuf_delegations(role["signed"], "TUF targets role.signed"):
+        if not delegation_matches_target(delegation, target_path):
+            continue
+        filename = f"{delegation['name']}.json"
+        if filename in visited:
+            fail("TUF delegations", f"cycle detected through {filename}")
+        child_raw, child_document = read_tuf_metadata_file(metadata_dir, filename)
+        child = parse_tuf_targets(child_document, f"TUF {filename}")
+        verify_tuf_meta_reference(snapshot_signed, filename, child_raw, child["signed"], "TUF snapshot")
+        child["name"] = delegation["name"]
+        versions[delegation["name"]] = child["version"]
+        found = resolve_tuf_target(
+            metadata_dir,
+            snapshot_signed,
+            child,
+            delegation["keyids"],
+            delegation["threshold"],
+            delegation["keys"],
+            target_path,
+            release,
+            release_bytes,
+            summary,
+            versions,
+            visited | {filename},
+            depth + 1,
+        )
+        if found is not None:
+            return found
+        if delegation["terminating"]:
+            return None
+    return None
+
+
+def verify_tuf_metadata_bundle(
+    release: dict[str, Any],
+    release_bytes: bytes,
+    summary: dict[str, Any],
+    metadata_dir_path: str,
+    trusted_root_path: str,
+    tuf_state_dir: str | None = None,
+) -> dict[str, Any]:
+    """Verify an offline TUF 1.x root → timestamp → snapshot → targets chain.
+
+    The bundle uses canonical JSON and standard TUF Ed25519 key/sig encodings.
+    TUF target custom metadata binds the detached target entry to the exact
+    release-lock canonical digest, avoiding an impossible self-hash inside the
+    release lock itself.
+    """
+    metadata_dir = require_tuf_metadata_directory(metadata_dir_path)
+    root = load_tuf_root_chain(metadata_dir, trusted_root_path)
+
+    timestamp_raw, timestamp_document = read_tuf_metadata_file(metadata_dir, "timestamp.json")
+    timestamp_signed, _timestamp_signatures = parse_tuf_signed_document(
+        timestamp_document, "TUF timestamp.json", "timestamp"
+    )
+    timestamp_keyids, timestamp_threshold = root["roles"]["timestamp"]
+    verify_tuf_role(timestamp_document, timestamp_keyids, timestamp_threshold, root["keys"], "TUF timestamp.json")
+
+    snapshot_raw, snapshot_document = read_tuf_metadata_file(metadata_dir, "snapshot.json")
+    snapshot_signed, _snapshot_signatures = parse_tuf_signed_document(
+        snapshot_document, "TUF snapshot.json", "snapshot"
+    )
+    verify_tuf_meta_reference(timestamp_signed, "snapshot.json", snapshot_raw, snapshot_signed, "TUF timestamp.json")
+    snapshot_keyids, snapshot_threshold = root["roles"]["snapshot"]
+    verify_tuf_role(snapshot_document, snapshot_keyids, snapshot_threshold, root["keys"], "TUF snapshot.json")
+
+    targets_raw, targets_document = read_tuf_metadata_file(metadata_dir, "targets.json")
+    targets = parse_tuf_targets(targets_document, "TUF targets.json")
+    verify_tuf_meta_reference(snapshot_signed, "targets.json", targets_raw, targets["signed"], "TUF snapshot.json")
+    targets["name"] = "targets"
+    targets_keyids, targets_threshold = root["roles"]["targets"]
+    versions = {
+        "root": root["version"],
+        "timestamp": timestamp_signed["version"],
+        "snapshot": snapshot_signed["version"],
+        "targets": targets["version"],
+    }
+    target_role = resolve_tuf_target(
+        metadata_dir,
+        snapshot_signed,
+        targets,
+        targets_keyids,
+        targets_threshold,
+        root["keys"],
+        summary["tuf"]["targetPath"],
+        release,
+        release_bytes,
+        summary,
+        versions,
+        {"targets.json"},
+    )
+    if target_role is None:
+        fail("TUF targets", f"does not authorize {summary['tuf']['targetPath']}")
+    guard_tuf_versions(versions, read_tuf_state(tuf_state_dir))
+    return {
+        "schema": "tuf-1.x-metadata-bundle",
+        "mode": "full",
+        "signatureVerified": True,
+        "targetRole": target_role,
+        "metadataVersions": versions,
+    }
 
 
 def decode_base64(value: Any, path: str) -> bytes:
@@ -608,7 +1280,70 @@ def verify_tuf_proof(
     payload = dict(proof)
     payload.pop("signatureBase64")
     verify_ed25519(canonical_bytes(payload), signature, public_key, "$.tufProof.signatureBase64")
-    return {"schema": TUF_PROOF_SCHEMA, "signatureVerified": True}
+    return {"schema": TUF_PROOF_SCHEMA, "mode": "legacy-proof", "signatureVerified": True}
+
+
+def verify_tuf_authorization(
+    release: dict[str, Any],
+    release_bytes: bytes,
+    summary: dict[str, Any],
+    args: argparse.Namespace,
+    *,
+    require_full: bool,
+) -> dict[str, Any]:
+    """Select one TUF evidence mode and make legacy proof non-authoritative.
+
+    A signed target proof was useful while the project did not ship an offline
+    TUF bundle, but it cannot protect a rollout against mix-and-match or root
+    rotation failures.  It remains available only for backwards-compatible
+    structural inspection.  All update decisions and applies require the full
+    root/timestamp/snapshot/targets chain.
+    """
+    full_requested = bool(args.tuf_metadata_dir)
+    legacy_requested = bool(args.tuf_proof)
+    if full_requested and legacy_requested:
+        fail("TUF authorization", "--tuf-metadata-dir and --tuf-proof are mutually exclusive")
+    if full_requested:
+        if summary["releaseSchemaVersion"] != 2:
+            fail(
+                "TUF authorization",
+                "full TUF metadata requires a kerosene.release-lock/v2 document; v1 has a circular target digest",
+            )
+        if args.tuf_root_key:
+            fail("TUF authorization", "--tuf-root-key is only valid with legacy --tuf-proof")
+        if not args.tuf_trusted_root:
+            fail("TUF authorization", "--tuf-trusted-root is required with --tuf-metadata-dir")
+        if require_full and not args.tuf_state_dir:
+            fail("TUF authorization", "--tuf-state-dir is required for rollback-safe update decisions")
+        return verify_tuf_metadata_bundle(
+            release,
+            release_bytes,
+            summary,
+            args.tuf_metadata_dir,
+            args.tuf_trusted_root,
+            args.tuf_state_dir,
+        )
+    if legacy_requested:
+        if summary["releaseSchemaVersion"] != 1:
+            fail("TUF authorization", "legacy --tuf-proof is supported only for kerosene.release-lock/v1")
+        if not args.tuf_root_key:
+            fail("TUF authorization", "--tuf-root-key is required with --tuf-proof")
+        if require_full:
+            fail(
+                "TUF authorization",
+                "a legacy --tuf-proof cannot authorize check-update or update --apply; supply --tuf-metadata-dir",
+            )
+        return verify_tuf_proof(release, summary, args.tuf_proof, args.tuf_root_key)
+    if require_full:
+        fail(
+            "TUF authorization",
+            "--tuf-metadata-dir, --tuf-trusted-root, and --tuf-state-dir are required",
+        )
+    if args.tuf_root_key:
+        fail("TUF authorization", "--tuf-root-key requires TUF metadata or a legacy proof")
+    if args.tuf_trusted_root:
+        fail("TUF authorization", "--tuf-trusted-root requires --tuf-metadata-dir")
+    fail("TUF authorization", "no TUF evidence was supplied")
 
 
 def verify_bank_observer_report(
@@ -627,6 +1362,8 @@ def verify_bank_observer_report(
             "networkId",
             "targetSequence",
             "releaseLockCanonicalDigest",
+            "issuedAt",
+            "expiresAt",
             "observations",
             "signatures",
         ),
@@ -637,10 +1374,21 @@ def verify_bank_observer_report(
         fail("$.observerReport.releaseId", "does not match the release lock")
     if root["networkId"] != summary["networkId"]:
         fail("$.observerReport.networkId", "does not match the release network")
-    if root["targetSequence"] != summary["sequence"]:
+    if require_integer(root["targetSequence"], "$.observerReport.targetSequence", 1) != summary["sequence"]:
         fail("$.observerReport.targetSequence", "does not match the release sequence")
     if root["releaseLockCanonicalDigest"] != canonical_digest(release):
         fail("$.observerReport.releaseLockCanonicalDigest", "does not identify the supplied release lock")
+    issued_at = parse_rfc3339(root["issuedAt"], "$.observerReport.issuedAt")
+    expires_at = parse_rfc3339(root["expiresAt"], "$.observerReport.expiresAt")
+    now = dt.datetime.now(dt.timezone.utc)
+    if issued_at > now + MAX_CLOCK_SKEW:
+        fail("$.observerReport.issuedAt", "cannot be more than five minutes in the future")
+    if expires_at <= now:
+        fail("$.observerReport.expiresAt", "is expired")
+    if expires_at <= issued_at:
+        fail("$.observerReport.expiresAt", "must be after issuedAt")
+    if expires_at - issued_at > MAX_BANK_REPORT_LIFETIME:
+        fail("$.observerReport.expiresAt", "may be at most one hour after issuedAt")
     observations = root["observations"]
     if type(observations) is not list:
         fail("$.observerReport.observations", "must be an array")
@@ -649,7 +1397,7 @@ def verify_bank_observer_report(
         observation = require_keys(
             value,
             f"$.observerReport.observations[{index}]",
-            ("observerId", "status", "observedSequence", "releaseDigest"),
+            ("observerId", "status", "observedSequence", "releaseDigest", "observedAt"),
         )
         observer_id = require_identifier(observation["observerId"], f"$.observerReport.observations[{index}].observerId")
         if any(
@@ -657,9 +1405,21 @@ def verify_bank_observer_report(
             for existing in observations[:index]
         ):
             fail(f"$.observerReport.observations[{index}].observerId", "duplicate observer")
+        observed_at = parse_rfc3339(observation["observedAt"], f"$.observerReport.observations[{index}].observedAt")
+        if observed_at > issued_at + MAX_CLOCK_SKEW:
+            fail(f"$.observerReport.observations[{index}].observedAt", "cannot be later than the report issue time")
+        if observed_at < issued_at - MAX_BANK_OBSERVATION_AGE:
+            fail(
+                f"$.observerReport.observations[{index}].observedAt",
+                "must be no more than fifteen minutes older than the report issue time",
+            )
         if observation["status"] != "compatible":
             continue
-        if observation["observedSequence"] != summary["sequence"]:
+        if require_integer(
+            observation["observedSequence"],
+            f"$.observerReport.observations[{index}].observedSequence",
+            0,
+        ) != summary["sequence"]:
             fail(f"$.observerReport.observations[{index}].observedSequence", "does not match the target sequence")
         if observation["releaseDigest"] != canonical_digest(release):
             fail(f"$.observerReport.observations[{index}].releaseDigest", "does not identify the release lock")
@@ -678,15 +1438,153 @@ def verify_bank_observer_report(
         "$.observerReport.signatures",
         allowed_members=compatible_ids,
     )
-    return {"schema": OBSERVER_REPORT_SCHEMA, "compatibleObservers": len(compatible_ids), "signaturesVerified": count}
+    return {
+        "schema": OBSERVER_REPORT_SCHEMA,
+        "compatibleObservers": len(compatible_ids),
+        "signaturesVerified": count,
+        "issuedAt": root["issuedAt"],
+        "expiresAt": root["expiresAt"],
+    }
+
+
+def validate_snapshot_attestation_request(
+    release: dict[str, Any],
+    summary: dict[str, Any],
+    request_path: str,
+    environment: str,
+) -> dict[str, Any]:
+    """Validate the unsigned Kubernetes collection before trusting its receipt.
+
+    The request itself carries no authority: it merely makes the full PVC
+    scope, VolumeSnapshot identities and deterministic set digest visible to
+    the independently trusted snapshot attester.  The attester's signature is
+    required separately and cryptographically binds this exact request.
+    """
+    request = read_json_document(request_path, "snapshot attestation request")
+    root = require_keys(
+        request,
+        "$.snapshotRequest",
+        (
+            "schema",
+            "kind",
+            "environment",
+            "release",
+            "requestedAt",
+            "selection",
+            "snapshotSetDigest",
+            "snapshots",
+            "attestation",
+        ),
+    )
+    if root["schema"] != SNAPSHOT_ATTESTATION_REQUEST_SCHEMA:
+        fail("$.snapshotRequest.schema", f"must equal {SNAPSHOT_ATTESTATION_REQUEST_SCHEMA!r}")
+    if root["kind"] != "VolumeSnapshotAttestationRequest":
+        fail("$.snapshotRequest.kind", "must equal 'VolumeSnapshotAttestationRequest'")
+    if root["environment"] != environment:
+        fail("$.snapshotRequest.environment", "does not match the selected environment")
+    release_ref = require_keys(root["release"], "$.snapshotRequest.release", ("id", "lockDigest"))
+    if release_ref["id"] != summary["releaseId"]:
+        fail("$.snapshotRequest.release.id", "does not match the release lock")
+    if release_ref["lockDigest"] != canonical_digest(release):
+        fail("$.snapshotRequest.release.lockDigest", "does not identify the supplied release lock")
+    requested_at = parse_rfc3339(root["requestedAt"], "$.snapshotRequest.requestedAt")
+    if requested_at > dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=5):
+        fail("$.snapshotRequest.requestedAt", "cannot be in the future")
+    selection = require_keys(root["selection"], "$.snapshotRequest.selection", ("labelSelector", "namespaces"))
+    if selection["labelSelector"] is not None:
+        require_string(selection["labelSelector"], "$.snapshotRequest.selection.labelSelector")
+    if selection["namespaces"] != ["kerosene-staging", "kerosene-staging-vault"]:
+        fail("$.snapshotRequest.selection.namespaces", "must cover the two canonical staging Cell namespaces")
+    attestation = require_keys(
+        root["attestation"],
+        "$.snapshotRequest.attestation",
+        ("externalSignerRequired", "status"),
+    )
+    if attestation["externalSignerRequired"] is not True or attestation["status"] != "unsigned-request":
+        fail("$.snapshotRequest.attestation", "must be an unsigned external-attester request")
+    snapshot_set_digest = require_digest(root["snapshotSetDigest"], "$.snapshotRequest.snapshotSetDigest")
+    snapshots = root["snapshots"]
+    if type(snapshots) is not list:
+        fail("$.snapshotRequest.snapshots", "must be an array")
+    if len(snapshots) != len(SNAPSHOT_PVC_TARGETS):
+        fail("$.snapshotRequest.snapshots", f"must contain exactly {len(SNAPSHOT_PVC_TARGETS)} Cell PVC snapshots")
+
+    seen_targets: set[tuple[str, str]] = set()
+    seen_uids: set[str] = set()
+    seen_contents: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for index, value in enumerate(snapshots):
+        path = f"$.snapshotRequest.snapshots[{index}]"
+        snapshot = require_keys(
+            value,
+            path,
+            (
+                "boundVolumeSnapshotContentName",
+                "creationTimestamp",
+                "namespace",
+                "persistentVolumeClaim",
+                "readyToUse",
+                "restoreSize",
+                "volumeSnapshotClassName",
+                "volumeSnapshotName",
+                "volumeSnapshotUid",
+            ),
+        )
+        namespace = require_string(snapshot["namespace"], f"{path}.namespace")
+        pvc = require_string(snapshot["persistentVolumeClaim"], f"{path}.persistentVolumeClaim")
+        target = (namespace, pvc)
+        if target not in SNAPSHOT_PVC_TARGETS:
+            fail(path, f"contains an unexpected PVC target {namespace}/{pvc}")
+        if target in seen_targets:
+            fail(path, f"duplicates the PVC target {namespace}/{pvc}")
+        seen_targets.add(target)
+        if snapshot["readyToUse"] is not True:
+            fail(f"{path}.readyToUse", "must be true")
+        content = require_string(snapshot["boundVolumeSnapshotContentName"], f"{path}.boundVolumeSnapshotContentName")
+        uid = require_string(snapshot["volumeSnapshotUid"], f"{path}.volumeSnapshotUid")
+        if uid in seen_uids:
+            fail(f"{path}.volumeSnapshotUid", "must be unique within the snapshot set")
+        if content in seen_contents:
+            fail(f"{path}.boundVolumeSnapshotContentName", "must be unique within the snapshot set")
+        seen_uids.add(uid)
+        seen_contents.add(content)
+        require_string(snapshot["volumeSnapshotName"], f"{path}.volumeSnapshotName")
+        parse_rfc3339(snapshot["creationTimestamp"], f"{path}.creationTimestamp")
+        for nullable_field in ("restoreSize", "volumeSnapshotClassName"):
+            if snapshot[nullable_field] is not None:
+                require_string(snapshot[nullable_field], f"{path}.{nullable_field}")
+        normalized.append(snapshot)
+    if seen_targets != set(SNAPSHOT_PVC_TARGETS):
+        missing = sorted(set(SNAPSHOT_PVC_TARGETS) - seen_targets)
+        fail("$.snapshotRequest.snapshots", f"is missing required PVC snapshot(s): {missing}")
+    normalized.sort(
+        key=lambda item: (
+            item["namespace"],
+            item["persistentVolumeClaim"],
+            item["volumeSnapshotName"],
+            item["volumeSnapshotUid"],
+        )
+    )
+    if snapshots != normalized:
+        fail("$.snapshotRequest.snapshots", "must be deterministically sorted")
+    if canonical_digest(normalized) != snapshot_set_digest:
+        fail("$.snapshotRequest.snapshotSetDigest", "does not match the canonical snapshot set")
+    return {
+        "attestationRequestDigest": canonical_digest(request),
+        "snapshotSetDigest": snapshot_set_digest,
+        "requestedAt": root["requestedAt"],
+    }
 
 
 def validate_snapshot_receipt(
+    release: dict[str, Any],
     summary: dict[str, Any],
     receipt_path: str,
+    request_path: str,
     environment: str,
     provider_key_path: str,
 ) -> dict[str, Any]:
+    request = validate_snapshot_attestation_request(release, summary, request_path, environment)
     receipt = read_json_document(receipt_path, "snapshot receipt")
     root = require_keys(
         receipt,
@@ -698,7 +1596,10 @@ def validate_snapshot_receipt(
             "status",
             "snapshotId",
             "provider",
-            "snapshotDigest",
+            "snapshotSetDigest",
+            "attestationRequestDigest",
+            "restoreTested",
+            "restoreVerifiedAt",
             "createdAt",
             "expiresAt",
             "providerPublicKeyDerBase64",
@@ -715,16 +1616,22 @@ def validate_snapshot_receipt(
         fail("$.snapshot.status", "must equal 'verified'")
     require_identifier(root["snapshotId"], "$.snapshot.snapshotId")
     require_identifier(root["provider"], "$.snapshot.provider")
-    require_digest(root["snapshotDigest"], "$.snapshot.snapshotDigest")
+    if root["snapshotSetDigest"] != request["snapshotSetDigest"]:
+        fail("$.snapshot.snapshotSetDigest", "does not match the collected VolumeSnapshot set")
+    if root["attestationRequestDigest"] != request["attestationRequestDigest"]:
+        fail("$.snapshot.attestationRequestDigest", "does not bind the supplied attestation request")
+    if root["restoreTested"] is not True:
+        fail("$.snapshot.restoreTested", "must be true after an independently verified restore test")
+    restore_verified_at = parse_rfc3339(root["restoreVerifiedAt"], "$.snapshot.restoreVerifiedAt")
     created_at = parse_rfc3339(root["createdAt"], "$.snapshot.createdAt")
     expires_at = parse_rfc3339(root["expiresAt"], "$.snapshot.expiresAt")
     now = dt.datetime.now(dt.timezone.utc)
-    if created_at > now + dt.timedelta(minutes=5):
-        fail("$.snapshot.createdAt", "cannot be in the future")
+    if created_at > now + dt.timedelta(minutes=5) or restore_verified_at > now + dt.timedelta(minutes=5):
+        fail("$.snapshot", "receipt timestamps cannot be in the future")
     if expires_at <= now:
         fail("$.snapshot.expiresAt", "is expired")
-    if expires_at <= created_at:
-        fail("$.snapshot.expiresAt", "must be after createdAt")
+    if expires_at <= created_at or expires_at <= restore_verified_at:
+        fail("$.snapshot.expiresAt", "must be after creation and restore verification")
     try:
         trusted_key_b64 = Path(provider_key_path).read_text(encoding="utf-8").strip()
     except OSError as error:
@@ -743,7 +1650,9 @@ def validate_snapshot_receipt(
     return {
         "snapshotId": root["snapshotId"],
         "provider": root["provider"],
-        "snapshotDigest": root["snapshotDigest"],
+        "snapshotSetDigest": root["snapshotSetDigest"],
+        "attestationRequestDigest": root["attestationRequestDigest"],
+        "restoreTested": True,
         "signatureVerified": True,
     }
 
@@ -846,7 +1755,7 @@ def build_plan(release: dict[str, Any], summary: dict[str, Any]) -> dict[str, An
     }
 
 
-def atomic_write_json(path_text: str, value: dict[str, Any]) -> None:
+def atomic_write_json(path_text: str, value: dict[str, Any], *, mode: int = 0o644) -> None:
     destination = Path(path_text)
     parent = destination.parent
     if not parent.is_dir():
@@ -861,7 +1770,7 @@ def atomic_write_json(path_text: str, value: dict[str, Any]) -> None:
             delete=False,
         ) as handle:
             temporary_name = handle.name
-            os.fchmod(handle.fileno(), 0o644)
+            os.fchmod(handle.fileno(), mode)
             json.dump(value, handle, ensure_ascii=False, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
@@ -890,7 +1799,10 @@ def emit_verification(summary: dict[str, Any], as_json: bool, authorization: dic
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return
     print(f"Release lock structurally valid: {summary['releaseId']} (sequence {summary['sequence']}).")
-    print("Cryptographic authorization was not requested; this result cannot authorize a production rollout.")
+    if authorization:
+        print("Cryptographic authorization verified; the public adapter still cannot authorize a production rollout.")
+    else:
+        print("Cryptographic authorization was not requested; this result cannot authorize a production rollout.")
 
 
 def emit_plan(plan: dict[str, Any], as_json: bool) -> None:
@@ -898,7 +1810,7 @@ def emit_plan(plan: dict[str, Any], as_json: bool) -> None:
         print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True))
         return
     print(f"Safe update plan generated for {plan['releaseId']} (sequence {plan['sequence']}).")
-    print("Apply requires verified BFT/Bank evidence, a snapshot receipt, and explicit operator confirmation.")
+    print("Apply requires full TUF/BFT/Bank evidence, an attestation request plus restore-tested snapshot receipt, and explicit operator confirmation.")
     print("Phases: " + ", ".join(phase["id"] for phase in plan["phases"]))
 
 
@@ -914,7 +1826,7 @@ def prepare_state_dir(state_dir_text: str) -> Path:
 def write_update_state(state_dir_text: str, state: dict[str, Any]) -> str:
     state_dir = prepare_state_dir(state_dir_text)
     state_file = state_dir / "update-state.json"
-    atomic_write_json(str(state_file), state)
+    atomic_write_json(str(state_file), state, mode=0o600)
     return str(state_file)
 
 
@@ -1012,11 +1924,10 @@ def run_staging_cell_deploy(summary: dict[str, Any], args: argparse.Namespace) -
 
 def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args: argparse.Namespace) -> int:
     required_paths = {
-        "--tuf-proof": args.tuf_proof,
-        "--tuf-root-key": args.tuf_root_key,
         "--bft-receipt": args.bft_receipt,
         "--validator-roster": args.validator_roster,
         "--bank-observer-report": args.bank_observer_report,
+        "--snapshot-attestation-request": args.snapshot_attestation_request,
         "--snapshot-receipt": args.snapshot_receipt,
         "--snapshot-provider-key": args.snapshot_provider_key,
     }
@@ -1027,7 +1938,7 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
 
     try:
         guard_previous_update_state(args.state_dir, summary, args.environment)
-        tuf_result = verify_tuf_proof(release, summary, args.tuf_proof, args.tuf_root_key)
+        tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
         receipt_result = verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster)
         observer_result = verify_bank_observer_report(
             release,
@@ -1036,12 +1947,15 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
             args.validator_roster,
         )
         snapshot_result = validate_snapshot_receipt(
+            release,
             summary,
             args.snapshot_receipt,
+            args.snapshot_attestation_request,
             args.environment,
             args.snapshot_provider_key,
         )
-    except ReleaseValidationError as error:
+        tuf_state_file = persist_tuf_state(args.tuf_state_dir, tuf_result)
+    except (ReleaseValidationError, OSError) as error:
         print(f"update blocked: {error}", file=sys.stderr)
         return EXIT_CANNOT_APPLY
 
@@ -1090,10 +2004,12 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         "environment": args.environment,
         "updateId": update_id,
         "stateFile": state_file,
+        "tufStateFile": tuf_state_file,
         "tufSignatureVerified": tuf_result["signatureVerified"],
         "bftSignaturesVerified": receipt_result["signaturesVerified"],
         "bankObserversVerified": observer_result["compatibleObservers"],
         "snapshotId": snapshot_result["snapshotId"],
+        "snapshotSetDigest": snapshot_result["snapshotSetDigest"],
     }
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
@@ -1113,7 +2029,16 @@ def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argpar
     if not args.state_dir:
         print("update blocked: --state-dir is required for an applied update", file=sys.stderr)
         return EXIT_CANNOT_APPLY
+    if not args.tuf_state_dir:
+        print("update blocked: --tuf-state-dir is required for an applied update", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
     try:
+        state_dir = prepare_state_dir(args.state_dir)
+        tuf_state_dir = prepare_state_dir(args.tuf_state_dir)
+        if not os.path.samefile(state_dir, tuf_state_dir):
+            raise ApplyBlockedError(
+                "--tuf-state-dir must identify the same protected directory as --state-dir so update.lock serializes trust-state writes"
+            )
         descriptor, lock_file = acquire_update_lock(args.state_dir, summary)
     except (ApplyBlockedError, OSError) as error:
         print(f"update blocked: {error}", file=sys.stderr)
@@ -1132,25 +2057,28 @@ def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argpar
 
 
 def load_and_validate(path: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    release = read_release(path)
-    return release, validate_release(release)
+    release, release_bytes = read_release(path)
+    summary = validate_release(release)
+    summary["_releaseBytes"] = release_bytes
+    return release, summary
 
 
 def command_verify(args: argparse.Namespace) -> int:
     release, summary = load_and_validate(args.release)
-    evidence_paths = (
-        args.tuf_proof,
-        args.tuf_root_key,
-        args.bft_receipt,
-        args.validator_roster,
-        args.bank_observer_report,
+    tuf_requested = bool(
+        args.tuf_proof
+        or args.tuf_metadata_dir
+        or args.tuf_trusted_root
+        or args.tuf_root_key
+        or args.tuf_state_dir
     )
-    if any(evidence_paths) and not all(evidence_paths):
+    other_evidence_paths = (args.bft_receipt, args.validator_roster, args.bank_observer_report)
+    if tuf_requested != any(other_evidence_paths) or (any(other_evidence_paths) and not all(other_evidence_paths)):
         raise ReleaseValidationError("verify-release requires BFT receipt, validator roster, and Bank observer report together")
     authorization = None
-    if all(evidence_paths):
+    if tuf_requested:
         authorization = {
-            "tuf": verify_tuf_proof(release, summary, args.tuf_proof, args.tuf_root_key),
+            "tuf": verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=False),
             "bft": verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster),
             "bankObservers": verify_bank_observer_report(
                 release,
@@ -1186,8 +2114,6 @@ def command_update(args: argparse.Namespace) -> int:
 def command_check_update(args: argparse.Namespace) -> int:
     release, summary = load_and_validate(args.release)
     required_paths = {
-        "--tuf-proof": args.tuf_proof,
-        "--tuf-root-key": args.tuf_root_key,
         "--bft-receipt": args.bft_receipt,
         "--validator-roster": args.validator_roster,
         "--bank-observer-report": args.bank_observer_report,
@@ -1198,7 +2124,7 @@ def command_check_update(args: argparse.Namespace) -> int:
         return EXIT_CANNOT_APPLY
 
     try:
-        tuf_result = verify_tuf_proof(release, summary, args.tuf_proof, args.tuf_root_key)
+        tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
         receipt_result = verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster)
         observer_result = verify_bank_observer_report(
             release,
@@ -1245,6 +2171,7 @@ def command_check_update(args: argparse.Namespace) -> int:
         "nextAction": next_action,
         "bankObserversVerified": observer_result["compatibleObservers"],
         "tufSignatureVerified": tuf_result["signatureVerified"],
+        "tufMetadataVersions": tuf_result.get("metadataVersions"),
         "bftSignaturesVerified": receipt_result["signaturesVerified"],
     }
     if previous_status is not None:
@@ -1272,8 +2199,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = subcommands.add_parser("verify-release", help="validate structure and immutable release references")
     verify.add_argument("--release", required=True, help="path to a release-lock JSON document")
-    verify.add_argument("--tuf-proof", help="signed TUF target proof JSON")
-    verify.add_argument("--tuf-root-key", help="trusted TUF root Ed25519 public key in base64 DER form")
+    verify.add_argument("--tuf-proof", help="legacy signed target proof JSON; cannot authorize an apply")
+    verify.add_argument("--tuf-metadata-dir", help="offline TUF 1.x metadata bundle directory")
+    verify.add_argument("--tuf-trusted-root", help="protected out-of-band TUF root metadata file for an offline metadata bundle")
+    verify.add_argument("--tuf-root-key", help="legacy proof verifier Ed25519 public key in base64 DER form")
+    verify.add_argument("--tuf-state-dir", help="optional read-only directory holding trusted TUF metadata versions")
     verify.add_argument("--bft-receipt", help="signed BFT release receipt JSON")
     verify.add_argument("--validator-roster", help="trusted validator roster JSON")
     verify.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
@@ -1298,12 +2228,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="deployment target; the public adapter is the two-plane staging cell",
     )
     update.add_argument("--confirm-release", help="exact release ID confirmation required with --apply")
-    update.add_argument("--tuf-proof", help="signed TUF target proof JSON")
-    update.add_argument("--tuf-root-key", help="trusted TUF root Ed25519 public key in base64 DER form")
+    update.add_argument("--tuf-proof", help="legacy signed target proof JSON; cannot authorize --apply")
+    update.add_argument("--tuf-metadata-dir", help="offline TUF 1.x metadata bundle directory required with --apply")
+    update.add_argument("--tuf-trusted-root", help="protected out-of-band TUF root metadata file required with --apply")
+    update.add_argument("--tuf-root-key", help="legacy proof verifier Ed25519 public key in base64 DER form")
+    update.add_argument("--tuf-state-dir", help="persistent trusted-TUF state directory required with --apply")
     update.add_argument("--bft-receipt", help="signed BFT release receipt JSON")
     update.add_argument("--validator-roster", help="trusted validator roster JSON")
     update.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
-    update.add_argument("--snapshot-receipt", help="verified snapshot provider receipt JSON")
+    update.add_argument(
+        "--snapshot-attestation-request",
+        help="unsigned, fail-closed VolumeSnapshot collection request bound to this release",
+    )
+    update.add_argument("--snapshot-receipt", help="signed restore-tested snapshot provider receipt JSON")
     update.add_argument(
         "--snapshot-provider-key",
         help="trusted snapshot provider Ed25519 public key in base64 DER form",
@@ -1318,8 +2255,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--release", required=True, help="path to a release-lock JSON document")
     check.add_argument("--environment", choices=("staging-cell",), default="staging-cell")
-    check.add_argument("--tuf-proof", required=True, help="signed TUF target proof JSON")
-    check.add_argument("--tuf-root-key", required=True, help="trusted TUF root Ed25519 public key in base64 DER form")
+    check.add_argument("--tuf-proof", help="legacy signed target proof JSON; cannot authorize check-update")
+    check.add_argument("--tuf-metadata-dir", help="offline TUF 1.x metadata bundle directory")
+    check.add_argument("--tuf-trusted-root", help="protected out-of-band TUF root metadata file")
+    check.add_argument("--tuf-root-key", help="legacy proof verifier Ed25519 public key in base64 DER form")
+    check.add_argument("--tuf-state-dir", help="trusted TUF state directory; required and never modified by check-update")
     check.add_argument("--bft-receipt", required=True, help="signed BFT release receipt JSON")
     check.add_argument("--validator-roster", required=True, help="trusted validator roster JSON")
     check.add_argument("--bank-observer-report", required=True, help="signed Bank observer compatibility report JSON")
@@ -1328,7 +2268,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.set_defaults(handler=command_check_update)
 
     version = subcommands.add_parser("version", help="print the controller revision")
-    version.set_defaults(handler=lambda _args: (print("kerosene-stack v0.2.0-staging-cell"), 0)[1])
+    version.set_defaults(handler=lambda _args: (print("kerosene-stack v0.3.0-staging-cell"), 0)[1])
     return parser
 
 

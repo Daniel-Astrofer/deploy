@@ -42,10 +42,10 @@ internos. Eles não são a API normal para humanos ou agentes.
 
 `kerosene-stack` é o controlador de release da Cell completa em implantação.
 Ele valida um lock imutável que inclui Admin, Core, KFE, Node, Vault, web-page,
-PostgreSQL, Redis, Bitcoin, LND e Tor. Com provas TUF/BFT/Bank, recibo de
-snapshot e confirmação explícita, `update --apply` executa os overlays
-`staging-vault` e `staging`; sem essas provas permanece somente em plano. Não
-ativa signers Vault. Veja
+PostgreSQL, Redis, Bitcoin, LND e Tor. Com cadeia TUF offline, BFT/Bank,
+requisição de atestação VolumeSnapshot, recibo de restore-test e confirmação
+explícita, `update --apply` executa os overlays `staging-vault` e `staging`;
+sem essas provas permanece somente em plano. Não ativa signers Vault. Veja
 [`docs/ops/KEROSENE_STACK.md`](../docs/ops/KEROSENE_STACK.md).
 
 ## Layout

@@ -1,0 +1,60 @@
+{
+  "schema": "kerosene.release-lock/v2",
+  "schemaVersion": 2,
+  "releaseId": "bank-mainnet-2026.09.28.1",
+  "sequence": 42,
+  "network": { "id": "bank-mainnet", "plane": "bank" },
+  "authorization": {
+    "tuf": { "targetPath": "releases/bank-mainnet-2026.09.28.1.json" },
+    "bft": {
+      "networkId": "bank-release-governance",
+      "height": 8120,
+      "commitDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "threshold": 3,
+      "members": 4
+    },
+    "vaultCompatibility": {
+      "threshold": 2,
+      "members": 3,
+      "attestationDigest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  },
+  "source": {
+    "bundle": {
+      "uri": "oci://registry.example.invalid/kerosene/source-bundle@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "repositories": {
+      "admin": { "commit": "1111111111111111111111111111111111111111", "bundleDigest": "sha256:0101010101010101010101010101010101010101010101010101010101010101" },
+      "clients": { "commit": "2222222222222222222222222222222222222222", "bundleDigest": "sha256:0202020202020202020202020202020202020202020202020202020202020202" },
+      "contracts": { "commit": "3333333333333333333333333333333333333333", "bundleDigest": "sha256:0303030303030303030303030303030303030303030303030303030303030303" },
+      "core": { "commit": "4444444444444444444444444444444444444444", "bundleDigest": "sha256:0404040404040404040404040404040404040404040404040404040404040404" },
+      "deploy": { "commit": "5555555555555555555555555555555555555555", "bundleDigest": "sha256:0505050505050505050505050505050505050505050505050505050505050505" },
+      "kfe": { "commit": "6666666666666666666666666666666666666666", "bundleDigest": "sha256:0606060606060606060606060606060606060606060606060606060606060606" },
+      "node": { "commit": "7777777777777777777777777777777777777777", "bundleDigest": "sha256:0707070707070707070707070707070707070707070707070707070707070707" },
+      "rails": { "commit": "8888888888888888888888888888888888888888", "bundleDigest": "sha256:0808080808080808080808080808080808080808080808080808080808080808" },
+      "shared": { "commit": "9999999999999999999999999999999999999999", "bundleDigest": "sha256:0909090909090909090909090909090909090909090909090909090909090909" },
+      "vault": { "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "bundleDigest": "sha256:0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a" }
+    }
+  },
+  "services": {
+    "admin": { "image": "registry.example.invalid/kerosene/admin@sha256:1111111111111111111111111111111111111111111111111111111111111111", "configDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111", "repository": "admin", "rollout": "operator" },
+    "core": { "image": "registry.example.invalid/kerosene/core@sha256:2222222222222222222222222222222222222222222222222222222222222222", "configDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222", "repository": "core", "rollout": "application" },
+    "kfe": { "image": "registry.example.invalid/kerosene/kfe@sha256:3333333333333333333333333333333333333333333333333333333333333333", "configDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333", "repository": "kfe", "rollout": "application" },
+    "node": { "image": "registry.example.invalid/kerosene/node@sha256:4444444444444444444444444444444444444444444444444444444444444444", "configDigest": "sha256:4444444444444444444444444444444444444444444444444444444444444444", "repository": "node", "rollout": "quorum" },
+    "vault": { "image": "registry.example.invalid/kerosene/vault@sha256:5555555555555555555555555555555555555555555555555555555555555555", "configDigest": "sha256:5555555555555555555555555555555555555555555555555555555555555555", "repository": "vault", "rollout": "quorum" },
+    "web-page": { "image": "registry.example.invalid/kerosene/web-page@sha256:6666666666666666666666666666666666666666666666666666666666666666", "configDigest": "sha256:6666666666666666666666666666666666666666666666666666666666666666", "repository": "clients", "rollout": "application" },
+    "postgres": { "image": "registry.example.invalid/kerosene/postgres@sha256:7777777777777777777777777777777777777777777777777777777777777777", "configDigest": "sha256:7777777777777777777777777777777777777777777777777777777777777777", "repository": "deploy", "rollout": "stateful" },
+    "redis": { "image": "registry.example.invalid/kerosene/redis@sha256:8888888888888888888888888888888888888888888888888888888888888888", "configDigest": "sha256:8888888888888888888888888888888888888888888888888888888888888888", "repository": "deploy", "rollout": "stateful" },
+    "bitcoin": { "image": "registry.example.invalid/kerosene/bitcoin@sha256:9999999999999999999999999999999999999999999999999999999999999999", "configDigest": "sha256:9999999999999999999999999999999999999999999999999999999999999999", "repository": "deploy", "rollout": "network" },
+    "lnd": { "image": "registry.example.invalid/kerosene/lnd@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "configDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "repository": "deploy", "rollout": "network" },
+    "tor": { "image": "registry.example.invalid/kerosene/tor@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "configDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "repository": "deploy", "rollout": "network" }
+  },
+  "policy": { "allowSourceBuild": false, "vaultSignerActivation": false, "minimumBankObservers": 3 },
+  "migration": {
+    "id": "cell-schema-42",
+    "classification": "reversible",
+    "snapshotRequired": true,
+    "recoveryEvidenceDigest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  }
+}
