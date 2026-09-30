@@ -9,8 +9,9 @@ LND e Tor; também prende os commits dos repositórios `admin`, `clients`,
 O Admin é um artefato CLI efêmero. A entrada `admin` no lock não autoriza nem
 cria um Deployment, StatefulSet, DaemonSet ou Service Kubernetes e não deve ser
 embutida nas imagens de Core, Node ou Vault. O operador executa a versão
-imutável em uma estação/bastion endurecido ou em um contêiner administrativo de
-vida curta e remove o artefato e as credenciais temporárias ao terminar.
+imutável em uma estação/bastion endurecido ou em um contêiner administrativo
+local de vida curta, fora do Kubernetes, e remove o artefato e as credenciais
+temporárias ao terminar.
 
 O corte atual valida a estrutura do lock, os digests imutáveis, a prova TUF,
 o recibo BFT, o relatório assinado dos observadores Bank e o recibo de snapshot.
@@ -100,11 +101,11 @@ um componente da Cell e deve estar presente no lock e no rollout.
 ### 2. Aceitar somente o snapshot assinado
 
 Antes de qualquer `--apply`, o operador deve obter um recibo de snapshot ligado
-ao `releaseId`, à sequência e ao ambiente `staging-cell`. O recibo precisa ser
-assinado pelo provedor; a chave pública confiável do provedor é passada
-separadamente em `--snapshot-provider-key`. Um JSON criado ou alterado pelo
-operador não é prova de backup e não autoriza a atualização. O controlador
-também verifica status, digest, identificador e expiração do recibo.
+ao `releaseId` e ao ambiente `staging-cell`. O recibo precisa ser assinado pelo
+provedor; a chave pública confiável do provedor é passada separadamente em
+`--snapshot-provider-key`. Um JSON criado ou alterado pelo operador não é prova
+de backup e não autoriza a atualização. O controlador também verifica status,
+digest, identificador e expiração do recibo.
 
 ### 3. Fazer o dry-run com todas as provas
 
@@ -150,6 +151,14 @@ existentes. A produção continua bloqueada no repositório público.
 fica `failed` com `manualRecoveryRequired: true`; pare e siga o procedimento de
 recuperação. Não repita o comando nem faça rollback automático de PostgreSQL,
 Bitcoin, LND ou Vault.
+
+O `--apply` cria `update.lock` de forma exclusiva no `--state-dir` e o mantém
+por toda a execução. Se o lock já existir, o comando bloqueia antes de iniciar
+qualquer rollout: isso pode indicar outro operador ativo ou um lock antigo de
+uma interrupção inesperada. Nos dois casos, preserve `update.lock` e
+`update-state.json`, investigue manualmente se há uma execução em curso e
+reconcilie o estado da Cell antes de uma liberação autorizada. Não apague o lock
+automaticamente e não use tentativas repetidas para contornar essa barreira.
 
 Sem prova TUF, recibo BFT, relatório Bank, snapshot, confirmação exata do
 release ou `--state-dir`, `--apply` falha com código `78`.

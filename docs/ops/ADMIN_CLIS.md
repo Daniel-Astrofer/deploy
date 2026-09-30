@@ -9,10 +9,10 @@ The `admin` entry in a release lock means an immutable operator artifact. It is
 not a Kubernetes workload: do not create a Deployment, StatefulSet, DaemonSet
 or Service for it, and do not add it to the Core, Node or Vault runtime images.
 Run the CLI from a hardened operator workstation/bastion or a short-lived
-administrative container, then remove the binary/container and its temporary
-credentials. The CLI does not become a source of truth or acquire authority by
-being present on a host; server authorization and signed release evidence
-remain authoritative.
+local administrative container outside Kubernetes, then remove the
+binary/container and its temporary credentials. The CLI does not become a
+source of truth or acquire authority by being present on a host; server
+authorization and signed release evidence remain authoritative.
 
 Build the standalone operator images with:
 
@@ -22,7 +22,8 @@ bash infra/docker/build-image.sh kerosene-jctl
 ```
 
 Run them only from an operator workstation, hardened bastion or short-lived
-administrative pod. Do not add either binary to the Core, Node or Vault runtime
+local administrative container; never from a Kubernetes Pod that is kept as
+part of the Cell. Do not add either binary to the Core, Node or Vault runtime
 images. Mount CA/operator identity files read-only from a secret manager or
 systemd credentials. Do not put tokens, private keys or passphrases in profiles,
 image layers, environment files committed to Git, shell history or GitHub
@@ -135,3 +136,12 @@ The operator workflow is deliberately gated:
    signal. If the state is `failed` or `manualRecoveryRequired` is set, stop
    and follow the recovery runbook; do not retry or perform an automatic
    rollback of PostgreSQL, Bitcoin, LND or Vault.
+
+   `update --apply` creates `update.lock` exclusively in `--state-dir` and
+   holds it throughout the operation. An existing lock blocks the update before
+   rollout: it can mean another operator is active or that a previous operator
+   process ended unexpectedly. Treat both cases as manual-investigation
+   conditions. Preserve the lock and state record, establish whether an update
+   is still running and reconcile the Cell before an authorized operator clears
+   anything. Never delete `update.lock` automatically or use a retry loop to
+   bypass it.
