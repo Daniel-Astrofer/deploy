@@ -185,4 +185,28 @@ else
   [[ "$status" -eq 78 ]] || fail "--apply returned $status instead of 78"
 fi
 
+EPHEMERAL_STATE_DIR="$TMP_DIR/ephemeral-update-state"
+set +e
+output="$("$STACK" update --release "$VALID_RELEASE" --apply \
+  --environment staging-cell --confirm-release bank-mainnet-2026.09.28.1 \
+  --state-dir "$EPHEMERAL_STATE_DIR" 2>&1)"
+status=$?
+set -e
+[[ "$status" -eq 78 ]] || fail "unverified update returned $status instead of 78"
+[[ ! -e "$EPHEMERAL_STATE_DIR/update.lock" ]] \
+  || fail "failed evidence validation left an update lock behind"
+
+LOCKED_STATE_DIR="$TMP_DIR/locked-update-state"
+mkdir -p "$LOCKED_STATE_DIR"
+printf '%s\n' 'operator investigation required' > "$LOCKED_STATE_DIR/update.lock"
+set +e
+output="$("$STACK" update --release "$VALID_RELEASE" --apply \
+  --environment staging-cell --confirm-release bank-mainnet-2026.09.28.1 \
+  --state-dir "$LOCKED_STATE_DIR" 2>&1)"
+status=$?
+set -e
+[[ "$status" -eq 78 ]] || fail "locked update returned $status instead of 78"
+grep -q 'another update is active or requires manual investigation' <<<"$output" \
+  || fail "locked update did not explain the concurrency gate"
+
 echo "Kerosene Stack release-lock tests passed."

@@ -34,6 +34,7 @@ MAX_RELEASE_BYTES = 1024 * 1024
 MAX_EVIDENCE_BYTES = 256 * 1024
 EXIT_VALIDATION = 65
 EXIT_CANNOT_APPLY = 78
+UPDATE_LOCK_FILENAME = "update.lock"
 
 IDENTIFIER_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,127}$")
 GIT_COMMIT_RE = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -901,10 +902,17 @@ def emit_plan(plan: dict[str, Any], as_json: bool) -> None:
     print("Phases: " + ", ".join(phase["id"] for phase in plan["phases"]))
 
 
-def write_update_state(state_dir_text: str, state: dict[str, Any]) -> str:
+def prepare_state_dir(state_dir_text: str) -> Path:
     state_dir = Path(state_dir_text)
-    state_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if state_dir.is_symlink() or not state_dir.is_dir():
+        raise OSError(f"state directory must be a real directory: {state_dir}")
     os.chmod(state_dir, 0o700)
+    return state_dir
+
+
+def write_update_state(state_dir_text: str, state: dict[str, Any]) -> str:
+    state_dir = prepare_state_dir(state_dir_text)
     state_file = state_dir / "update-state.json"
     atomic_write_json(str(state_file), state)
     return str(state_file)
@@ -915,6 +923,47 @@ def read_existing_update_state(state_dir_text: str) -> dict[str, Any] | None:
     if not state_file.exists():
         return None
     return read_json_document(str(state_file), "existing update state")
+
+
+def acquire_update_lock(state_dir_text: str, summary: dict[str, Any]) -> tuple[int, Path]:
+    state_dir = prepare_state_dir(state_dir_text)
+    lock_file = state_dir / UPDATE_LOCK_FILENAME
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    try:
+        descriptor = os.open(lock_file, flags, 0o600)
+    except FileExistsError as error:
+        raise ApplyBlockedError(
+            f"another update is active or requires manual investigation: {lock_file}"
+        ) from error
+    try:
+        record = {
+            "schema": "kerosene.stack.update-lock/v1",
+            "releaseId": summary["releaseId"],
+            "sequence": summary["sequence"],
+            "pid": os.getpid(),
+            "startedAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        os.write(descriptor, canonical_bytes(record) + b"\n")
+        os.fsync(descriptor)
+    except BaseException:
+        os.close(descriptor)
+        lock_file.unlink(missing_ok=True)
+        raise
+    return descriptor, lock_file
+
+
+def release_update_lock(descriptor: int, lock_file: Path) -> None:
+    held = os.fstat(descriptor)
+    os.close(descriptor)
+    try:
+        current = os.stat(lock_file, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if (current.st_dev, current.st_ino) != (held.st_dev, held.st_ino):
+        raise OSError(f"update lock changed while held and was not removed: {lock_file}")
+    lock_file.unlink()
 
 
 def guard_previous_update_state(state_dir_text: str, summary: dict[str, Any], environment: str) -> None:
@@ -961,16 +1010,7 @@ def run_staging_cell_deploy(summary: dict[str, Any], args: argparse.Namespace) -
             raise ApplyBlockedError(f"deploy adapter failed for {target} with exit code {result.returncode}")
 
 
-def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argparse.Namespace) -> int:
-    if args.confirm_release != summary["releaseId"]:
-        print("update blocked: --confirm-release must exactly match the release ID", file=sys.stderr)
-        return EXIT_CANNOT_APPLY
-    if args.environment != "staging-cell":
-        print("update blocked: only --environment staging-cell is implemented in the public adapter", file=sys.stderr)
-        return EXIT_CANNOT_APPLY
-    if not args.state_dir:
-        print("update blocked: --state-dir is required for an applied update", file=sys.stderr)
-        return EXIT_CANNOT_APPLY
+def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args: argparse.Namespace) -> int:
     required_paths = {
         "--tuf-proof": args.tuf_proof,
         "--tuf-root-key": args.tuf_root_key,
@@ -1061,6 +1101,34 @@ def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argpar
         print(f"Kerosene Cell update {state['status']}: {summary['releaseId']} ({args.environment}).")
         print(f"State recorded at {state_file}.")
     return 0
+
+
+def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argparse.Namespace) -> int:
+    if args.confirm_release != summary["releaseId"]:
+        print("update blocked: --confirm-release must exactly match the release ID", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+    if args.environment != "staging-cell":
+        print("update blocked: only --environment staging-cell is implemented in the public adapter", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+    if not args.state_dir:
+        print("update blocked: --state-dir is required for an applied update", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+    try:
+        descriptor, lock_file = acquire_update_lock(args.state_dir, summary)
+    except (ApplyBlockedError, OSError) as error:
+        print(f"update blocked: {error}", file=sys.stderr)
+        return EXIT_CANNOT_APPLY
+
+    result = EXIT_CANNOT_APPLY
+    try:
+        result = apply_locked_release(release, summary, args)
+    finally:
+        try:
+            release_update_lock(descriptor, lock_file)
+        except OSError as error:
+            print(f"update lock requires manual investigation: {error}", file=sys.stderr)
+            result = EXIT_CANNOT_APPLY
+    return result
 
 
 def load_and_validate(path: str) -> tuple[dict[str, Any], dict[str, Any]]:
