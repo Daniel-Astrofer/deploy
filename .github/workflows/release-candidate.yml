@@ -1,0 +1,77 @@
+name: Unsigned release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      selection_commit:
+        description: Full Deploy commit containing the reviewed candidate input and materials
+        required: true
+        type: string
+      selection_path:
+        description: Candidate input JSON path relative to that commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out packaging tools at the workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: tools
+          persist-credentials: false
+      - name: Validate operator selection
+        env:
+          SELECTION_COMMIT: ${{ inputs.selection_commit }}
+          SELECTION_PATH: ${{ inputs.selection_path }}
+        run: |
+          python3 - <<'PY'
+          import os, re
+          from pathlib import PurePosixPath
+          commit = os.environ['SELECTION_COMMIT']
+          path = os.environ['SELECTION_PATH']
+          if not re.fullmatch(r'[0-9a-f]{40}', commit):
+              raise SystemExit('selection_commit must be a full lowercase Git SHA-1 commit')
+          if not path or path.startswith('/') or '\\' in path or any(ord(c) < 32 for c in path):
+              raise SystemExit('selection_path must be relative')
+          if any(part in ('', '.', '..') for part in path.split('/')) or PurePosixPath(path).suffix != '.json':
+              raise SystemExit('selection_path must be a canonical JSON path')
+          PY
+      - name: Check out selected data, never run its scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.selection_commit }}
+          path: materials
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Exercise local security and reproducibility tests
+        run: python3 tools/infra/tests/stack-archive-test.py
+      - name: Assemble twice and compare exact candidate bytes
+        env:
+          SELECTION_PATH: ${{ inputs.selection_path }}
+        run: |
+          python3 tools/infra/stack/package-release.py \
+            --selection "materials/$SELECTION_PATH" --input-root "$GITHUB_WORKSPACE/materials" \
+            --output "$RUNNER_TEMP/unsigned-candidate" > "$RUNNER_TEMP/candidate-index.json"
+          python3 tools/infra/stack/package-release.py \
+            --selection "materials/$SELECTION_PATH" --input-root "$GITHUB_WORKSPACE/materials" \
+            --output "$RUNNER_TEMP/reproduced-candidate" > "$RUNNER_TEMP/reproduced-index.json"
+          cmp "$RUNNER_TEMP/unsigned-candidate/index.json" "$RUNNER_TEMP/reproduced-candidate/index.json"
+          cmp "$RUNNER_TEMP/unsigned-candidate/candidate.tar" "$RUNNER_TEMP/reproduced-candidate/candidate.tar"
+      - name: Upload unsigned candidate for separate review and authorization
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-candidate-${{ inputs.selection_commit }}
+          path: |
+            ${{ runner.temp }}/unsigned-candidate/index.json
+            ${{ runner.temp }}/unsigned-candidate/candidate.tar
+          if-no-files-found: error
+          retention-days: 7
