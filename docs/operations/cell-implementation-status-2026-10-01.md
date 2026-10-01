@@ -15,8 +15,8 @@ and no real Cell or production cluster has been updated.
 | Repository | Commit | Implemented boundary |
 | --- | --- | --- |
 | Contracts | `d1de045` | 0.3.0 typed observation/approval contracts, generated schemas and signature vectors; published branch provides Node's immutable dependency |
-| Node | `51b9717` | Authenticated Bank reads, separate Bank/Node signature verification, durable anti-replay, negative observations visible but not authorizing |
-| Core | `6e0a066` | Authenticated/audited operator API, normative Node consumer, explicit missing-evidence blockers, KFE reader, private durable plan intent |
+| Node | `51b9717`, `23475d3` | Authenticated Bank reads, separate Bank/Node signature verification, durable anti-replay, negative observations visible but not authorizing; actual Core wire qualification probe |
+| Core | `6e0a066`, `a21bfc1` | Authenticated/audited operator API and normative Node consumer; certificate-only signed Bank runtime producer, explicit missing-evidence blockers, bounded KFE credential reader, private durable plan intent |
 | Admin | `e1f57b5` | jctl Cell reads, bounded local package integrity verification, target-bound plan requests; no shell deploy or database access |
 | Clients | `113e94f` | Admin dashboard evidence/votes/blockers/history and intent; rejects unknown schema, invented/duplicate vote counts and interrupted readiness |
 | Vault | `3a8a5c1`, `f8b3fc4` | Independently approved immutable Git histories per release/repository, real pinned Git plumbing, authenticated raw archive API |
@@ -35,9 +35,19 @@ maintenance implementation does not invent those financial classes.
   restart/concurrent replay, negative reads and private authority-state checks.
   Observer-only strict Clippy passed. Broader strict Clippy remains blocked by
   22 preexisting ledger warnings; no finance code was changed to mask them.
-- Core: 26 focused production-source tests passed with no skips, including HTTP
-  authorization/audit, independent signature layers, freshness, negative votes,
-  missing evidence, intent persistence and unsafe filesystem rejection.
+- Core: complete `:auth-service:compileJava` and `:auth-service:test` passed;
+  425 tests, no failures or skips. Architecture and endpoint-policy guardrails
+  also passed after moving protocol parser construction into configuration and
+  declaring the new route `CERTIFICATE_ONLY`, not public/JWT authorized.
+  Focused tests include real mandatory-mTLS Bank responses, no-certificate TLS
+  rejection, trusted-but-unpinned denial, current-runtime signed mismatch,
+  caller-status rejection, earliest independent evidence expiry, canonical
+  distinct signing identities and bounded/rotating private KFE credentials.
+- Node/Core wire: the separately selected integration task passed one test,
+  no skips. A real disposable Tomcat Bank producer was queried over mTLS by
+  Node's actual Rust `BankTransport`/`ReleaseObserver`; it verified the separate
+  Bank signature and challenge/target binding, persisted an unknown observation,
+  and refused aggregate signing. This is not successful Cell compatibility.
 - Admin: 64 tests passed with no skips. Its package verifier checks a local
   signature and bytes, not TUF/BFT/provenance; output explicitly states
   `releaseAuthorized:false`. Signed package publication remains separate work.
@@ -48,7 +58,7 @@ maintenance implementation does not invent those financial classes.
   authenticated API and corruption before 304 handling. Broader API/domain
   suites passed 17 and 50 tests respectively. The inherited Admin Unix-day test
   vector was corrected independently; timestamp behavior was not weakened.
-- Deploy: 18 archive tests, 13 lifecycle tests, release-lock and signed-evidence
+- Deploy: 18 archive tests, 14 lifecycle tests, release-lock and signed-evidence
   suites and architecture guardrails passed. Snapshot workflow contract tests
   explicitly use fake kubectl/synthetic receipts, not real CSI recovery.
 - Governance: Go race tests passed. Four real isolated CometBFT processes proved
@@ -67,9 +77,13 @@ maintenance implementation does not invent those financial classes.
 2. Complete maintenance coverage of all financial mutation starts, callbacks,
    side-effecting reads, queues and remote uncertainty. Remove conservative
    coverage blockers only after drain/admission/restart race tests prove safety.
-3. Implement Core's normative `/v1/releases/observation` producer from actual
-   local target and compatibility checks, with mandatory authenticated mTLS and
-   independently pinned Bank signing identity. Current Core is a consumer only.
+3. Complete authoritative target compatibility checks behind Core's normative
+   `/v1/releases/observation`. Its real signed mTLS producer now exists, but
+   deliberately returns only `unknown` or verified runtime `incompatible`, never
+   `compatible`. Its local digest-checked catalog identifies targets without
+   authorizing them. Qualify a dedicated Bank listener/deployment where browser
+   callers cannot satisfy mandatory client-certificate authentication; do not
+   disable mTLS or substitute forwarded certificate headers.
 4. Integrate Vault independent compatibility/rebuild and its threshold attestation
    into the target/apply path. Git archival receipts do not authorize releases.
 5. Implement reproducible source-to-OCI builds, SBOM/provenance validation,

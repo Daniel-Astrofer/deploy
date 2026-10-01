@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Local lifecycle/configuration validation tests; not a financial Cell E2E."""
 import copy
+import datetime as dt
 import importlib.machinery
 import importlib.util
 import json
@@ -169,6 +170,26 @@ class DeploymentTest(unittest.TestCase):
             state.return_value.update(status="committed", updateId="sha256:" + "f" * 64)
             with redirect_stdout(StringIO()):
                 self.assertEqual(stack.command_check_update(args), stack.EXIT_CANNOT_APPLY)
+
+    def test_maintenance_requires_actual_phase_revision_change_and_explicit_coverage(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        status = {"schema": "kerosene.kfe-maintenance/v1", "mode": "DRAINING", "changeId": "change-one", "revision": 1,
+                  "observedAt": now.isoformat(), "safeToUpdate": True,
+                  "blockers": {"mutationCoverageUnknown": 0, "callbackCoverageUnknown": 0, "readSideEffectsUnknown": 0}}
+        # Validator unit fixture; the actual KFE still has conservative coverage blockers.
+        self.assertEqual(lifecycle.validate_maintenance(stack, status, "change-one", now), status)
+        changes = [{"mode": "ACTIVE"}, {"mode": "DRAINED"}, {"changeId": "other"}, {"revision": 0},
+                   {"revision": True}, {"revision": 9007199254740992}, {"blockers": {}},
+                   {"blockers": {"mutationCoverageUnknown": 0, "callbackCoverageUnknown": 0}},
+                   {"observedAt": (now - dt.timedelta(seconds=31)).isoformat()}]
+        for changeset in changes:
+            with self.subTest(changeset=changeset), self.assertRaises((stack.ApplyBlockedError, stack.ReleaseValidationError)):
+                lifecycle.validate_maintenance(stack, {**status, **changeset}, "change-one", now)
+        for invalid in [1, False, -1, 0.0]:
+            changed = copy.deepcopy(status)
+            changed["blockers"]["callbackCoverageUnknown"] = invalid
+            with self.subTest(invalid=invalid), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.validate_maintenance(stack, changed, "change-one", now)
 
 
 if __name__ == "__main__":

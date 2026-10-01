@@ -311,16 +311,33 @@ def verify_maintenance(stack, args):
             raw = response.read(65537)
             if response.status != 200 or len(raw) > 65536:
                 raise stack.ApplyBlockedError("maintenance response is invalid or oversized")
-        status = json.loads(raw)
+        def unique_fields(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate maintenance JSON field")
+                result[key] = value
+            return result
+        def invalid_constant(value):
+            raise ValueError("non-finite maintenance JSON value")
+        status = json.loads(raw, object_pairs_hook=unique_fields, parse_constant=invalid_constant)
     except (OSError, ValueError) as error:
         raise stack.ApplyBlockedError("authenticated maintenance status unavailable") from error
-    if status.get("schema") != "kerosene.kfe-maintenance/v1" or status.get("mode") != "DRAINING" or status.get("changeId") != args.change_id or status.get("safeToUpdate") is not True:
+    return validate_maintenance(stack, status, args.change_id)
+
+
+def validate_maintenance(stack, status, change_id, now=None):
+    status = stack.require_keys(status, "live KFE maintenance", ("schema", "mode", "changeId", "revision", "observedAt", "safeToUpdate", "blockers"))
+    if status.get("schema") != "kerosene.kfe-maintenance/v1" or status.get("mode") != "DRAINING" or status.get("changeId") != change_id or status.get("safeToUpdate") is not True:
         raise stack.ApplyBlockedError("KFE is not safely drained for this exact operator change")
+    stack.require_integer(status.get("revision"), "KFE maintenance revision", minimum=1)
     blockers = stack.require_object(status.get("blockers"), "KFE blockers")
+    if not {"mutationCoverageUnknown", "callbackCoverageUnknown", "readSideEffectsUnknown"}.issubset(blockers):
+        raise stack.ApplyBlockedError("KFE maintenance coverage evidence is missing")
     if any(type(value) is not int or value != 0 for value in blockers.values()):
         raise stack.ApplyBlockedError("KFE reports unresolved/unknown mutation blockers")
     observed = stack.parse_rfc3339(status.get("observedAt"), "KFE observedAt")
-    now = dt.datetime.now(dt.timezone.utc)
+    now = now or dt.datetime.now(dt.timezone.utc)
     if observed > now + dt.timedelta(seconds=30) or now - observed > dt.timedelta(seconds=30):
         raise stack.ApplyBlockedError("live KFE drain observation is stale or future-dated")
     return {key: status[key] for key in ("schema", "mode", "changeId", "revision", "observedAt", "safeToUpdate", "blockers")}

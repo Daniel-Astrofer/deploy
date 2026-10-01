@@ -86,7 +86,8 @@ implementation capabilities exist and their integration tests pass:
 3. Node/Vault replica-by-replica rollout preserving real quorum and identities.
 4. Installation/upgrade of the approved Admin artifact, not merely its digest.
 
-Also required for final Cell acceptance: authoritative Core Bank read producer,
+Also required for final Cell acceptance: authoritative complete-Cell compatibility
+checks behind the implemented signed Core Bank read producer,
 complete KFE drain coverage, source-to-OCI provenance and signed publication,
 real CSI/CNI/admission restore qualification, and a complete install/update/
 interruption/recovery run against all actual services. These are distinct from
@@ -94,3 +95,14 @@ the already passing contract, archive, UI and governance tests. The snapshot
 Kind experiment is deliberately disposable and currently incomplete; it does
 not provide production backup evidence. No Vault signer is automatically
 activated by this controller.
+
+## KFE live evidence follow-up
+
+The live maintenance gate requires the actual KFE `DRAINING` mode, this exact
+operator change, a positive interoperable revision, a fresh observation and
+explicit mutation/callback/read-side-effect coverage counts, all zero. Empty or
+omitted coverage is not a safe drain. Duplicate/non-finite JSON is rejected.
+The real KFE currently retains conservative unknown-coverage blockers; no
+caller-provided status or this validation can remove them. Existing execution
+capability blockers still prevent a real apply before its runtime mechanisms
+are implemented and qualified.
