@@ -23,9 +23,13 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "stack"))
+import lifecycle  # Installed controller module, never imported from release archives.
+
 
 RELEASE_SCHEMA_V1 = "kerosene.release-lock/v1"
 RELEASE_SCHEMA_V2 = "kerosene.release-lock/v2"
+RELEASE_SCHEMA_V3 = "kerosene.release-lock/v3"
 STACK_PLAN_SCHEMA = "kerosene.stack.update-plan/v1"
 RELEASE_RECEIPT_SCHEMA = "kerosene.release-receipt/v1"
 ROSTER_SCHEMA = "kerosene.release-roster/v1"
@@ -296,6 +300,8 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
         release_schema_version = 1
     elif root["schema"] == RELEASE_SCHEMA_V2 and root["schemaVersion"] == 2:
         release_schema_version = 2
+    elif root["schema"] == RELEASE_SCHEMA_V3 and root["schemaVersion"] == 3:
+        release_schema_version = 3
     else:
         fail(
             "$.schema",
@@ -314,7 +320,7 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
         "$.authorization",
         ("tuf", "bft", "vaultCompatibility"),
     )
-    tuf_required = ("targetPath",) if release_schema_version == 2 else (
+    tuf_required = ("targetPath",) if release_schema_version >= 2 else (
         "targetPath",
         "metadataVersion",
         "targetDigest",
@@ -339,11 +345,12 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
     bft = require_keys(
         authorization["bft"],
         "$.authorization.bft",
-        ("networkId", "height", "commitDigest", "threshold", "members"),
+        ("networkId", "epoch", "threshold", "members") if release_schema_version == 3 else ("networkId", "height", "commitDigest", "threshold", "members"),
     )
     bft_network_id = require_identifier(bft["networkId"], "$.authorization.bft.networkId")
-    bft_height = require_integer(bft["height"], "$.authorization.bft.height", 1)
-    bft_commit = require_digest(bft["commitDigest"], "$.authorization.bft.commitDigest")
+    bft_height = require_integer(bft["height"], "$.authorization.bft.height", 1) if release_schema_version < 3 else None
+    bft_commit = require_digest(bft["commitDigest"], "$.authorization.bft.commitDigest") if release_schema_version < 3 else None
+    bft_epoch = require_integer(bft["epoch"], "$.authorization.bft.epoch", 1) if release_schema_version == 3 else None
     bft_threshold = require_integer(bft["threshold"], "$.authorization.bft.threshold", 1)
     bft_members = require_integer(bft["members"], "$.authorization.bft.members", 4)
     minimum_bft_threshold = (2 * bft_members) // 3 + 1
@@ -438,6 +445,7 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
             "networkId": bft_network_id,
             "height": bft_height,
             "commitDigest": bft_commit,
+            "epoch": bft_epoch,
             "threshold": bft_threshold,
             "members": bft_members,
         },
@@ -474,6 +482,8 @@ def read_regular_file_bytes(path: Path, label: str, maximum_bytes: int) -> bytes
     the check and the read, so keep one no-follow descriptor open throughout.
     """
     flags = os.O_RDONLY
+    # Opening a FIFO must not hang before fstat can reject it.
+    flags |= getattr(os, "O_NONBLOCK", 0)
     if hasattr(os, "O_CLOEXEC"):
         flags |= os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -790,7 +800,7 @@ def read_tuf_state(state_dir_text: str | None) -> dict[str, int]:
     if not state_file.exists():
         return {}
     state = read_json_document(str(state_file), "trusted TUF state")
-    root = require_keys(state, "$.tufState", ("schema", "metadataVersions"))
+    root = require_keys(state, "$.tufState", ("schema", "metadataVersions"), ("metadataDigests",))
     if root["schema"] != "kerosene.tuf-trusted-state/v1":
         fail("$.tufState.schema", "must equal 'kerosene.tuf-trusted-state/v1'")
     versions = require_object(root["metadataVersions"], "$.tufState.metadataVersions")
@@ -800,6 +810,21 @@ def read_tuf_state(state_dir_text: str | None) -> dict[str, int]:
             fail("$.tufState.metadataVersions", "contains an invalid role name")
         parsed[role] = require_integer(version, f"$.tufState.metadataVersions.{role}", 1)
     return parsed
+
+
+def guard_tuf_equivocation(state_dir_text: str | None, versions: dict[str, int], digests: dict[str, str]) -> None:
+    if not state_dir_text:
+        return
+    path = Path(state_dir_text) / TUF_STATE_FILENAME
+    if not path.exists():
+        return
+    previous = read_json_document(str(path), "trusted TUF state")
+    old_versions = read_tuf_state(state_dir_text)
+    old_digests = require_object(previous.get("metadataDigests", {}), "TUF metadata digests")
+    for role, digest in old_digests.items():
+        require_digest(digest, f"TUF metadata digests.{role}")
+        if versions.get(role) == old_versions.get(role) and digests.get(role) != digest:
+            fail(f"TUF metadata {role}", "same-version equivocation against persistent trusted metadata")
 
 
 def guard_tuf_versions(versions: dict[str, int], trusted_versions: dict[str, int]) -> None:
@@ -822,13 +847,19 @@ def persist_tuf_state(state_dir_text: str, tuf_result: dict[str, Any]) -> str:
         for role, version in versions.items()
     }
     state_dir = prepare_state_dir(state_dir_text)
-    guard_tuf_versions(parsed_versions, read_tuf_state(str(state_dir)))
+    old_versions = read_tuf_state(str(state_dir))
+    guard_tuf_versions(parsed_versions, old_versions)
+    digests = require_object(tuf_result.get("metadataDigests", {}), "verified TUF metadata digests")
+    guard_tuf_equivocation(str(state_dir), parsed_versions, digests)
+    old_file = state_dir / TUF_STATE_FILENAME
+    old_digests = read_json_document(str(old_file), "trusted TUF state").get("metadataDigests", {}) if old_file.exists() else {}
     destination = state_dir / TUF_STATE_FILENAME
     atomic_write_json(
         str(destination),
         {
             "schema": "kerosene.tuf-trusted-state/v1",
-            "metadataVersions": parsed_versions,
+            "metadataVersions": {**old_versions, **parsed_versions},
+            "metadataDigests": {**old_digests, **digests},
         },
         mode=0o600,
     )
@@ -1012,10 +1043,14 @@ def resolve_tuf_target(
     versions: dict[str, int],
     visited: set[str],
     depth: int = 0,
+    digests: dict[str, str] | None = None,
 ) -> str | None:
     if depth > MAX_TUF_DELEGATION_DEPTH:
         fail("TUF delegations", f"exceed the maximum depth of {MAX_TUF_DELEGATION_DEPTH}")
     verify_tuf_role(role["document"], role_keyids, role_threshold, role_keys, "TUF targets role")
+    if digests is not None:
+        # Pin precisely the document just verified, not a later path reread.
+        digests[role["name"]] = canonical_digest(role["signed"])
     if target_path in role["targets"]:
         verify_tuf_target_binding(
             role["targets"][target_path], target_path, role, release, release_bytes, summary, "TUF target"
@@ -1046,6 +1081,7 @@ def resolve_tuf_target(
             versions,
             visited | {filename},
             depth + 1,
+            digests,
         )
         if found is not None:
             return found
@@ -1098,6 +1134,7 @@ def verify_tuf_metadata_bundle(
         "snapshot": snapshot_signed["version"],
         "targets": targets["version"],
     }
+    digests = {"root": canonical_digest(root["signed"]), "timestamp": canonical_digest(timestamp_signed), "snapshot": canonical_digest(snapshot_signed)}
     target_role = resolve_tuf_target(
         metadata_dir,
         snapshot_signed,
@@ -1111,16 +1148,19 @@ def verify_tuf_metadata_bundle(
         summary,
         versions,
         {"targets.json"},
+        digests=digests,
     )
     if target_role is None:
         fail("TUF targets", f"does not authorize {summary['tuf']['targetPath']}")
     guard_tuf_versions(versions, read_tuf_state(tuf_state_dir))
+    guard_tuf_equivocation(tuf_state_dir, versions, digests)
     return {
         "schema": "tuf-1.x-metadata-bundle",
         "mode": "full",
         "signatureVerified": True,
         "targetRole": target_role,
         "metadataVersions": versions,
+        "metadataDigests": digests,
     }
 
 
@@ -1225,6 +1265,8 @@ def verify_bft_receipt(
     receipt_path: str,
     roster_path: str,
 ) -> dict[str, Any]:
+    if summary["releaseSchemaVersion"] == 3:
+        raise ApplyBlockedError("v3 requires a real ordered consensus proof, not a detached signature receipt")
     receipt = read_json_document(receipt_path, "BFT release receipt")
     root = require_keys(
         receipt,
@@ -1249,6 +1291,27 @@ def verify_bft_receipt(
         "$.receipt.signatures",
     )
     return {"schema": RELEASE_RECEIPT_SCHEMA, "signaturesVerified": count}
+
+
+def verify_consensus_authorization(release: dict[str, Any], summary: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    if summary["releaseSchemaVersion"] < 3:
+        return verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster)
+    if not args.cell_dir or not args.consensus_proof:
+        raise ApplyBlockedError("v3 consensus verification requires --cell-dir with protected anchor/verifier and --consensus-proof")
+    config = lifecycle.load_config(sys.modules[__name__], args.cell_dir)
+    lifecycle.verify_bootstrap_trust(sys.modules[__name__], args.cell_dir, config)
+    anchor = read_json_document(str(Path(args.cell_dir) / "consensus-anchor.json"), "protected consensus anchor", 8 * 1024 * 1024)
+    policy = require_object(anchor.get("policy"), "consensus anchor policy")
+    if any(policy.get(key) != summary["bft"][key] for key in ("networkId", "epoch", "threshold")) or len(require_object(policy.get("members"), "governance policy members")) != summary["bft"]["members"]:
+        raise ApplyBlockedError("release consensus policy differs from the independently trusted anchor")
+    roster = validate_roster(args.validator_roster, summary)
+    if set(policy["members"]) != set(roster):
+        raise ApplyBlockedError("consensus proposal authorizers differ from trusted release roster")
+    for member_id, public_key in policy["members"].items():
+        if TUF_ED25519_SPKI_PREFIX + decode_base64(public_key, "governance proposal public key") != roster[member_id]:
+            raise ApplyBlockedError("consensus proposal authorizer key differs from trusted release roster")
+    result = lifecycle.verify_consensus(sys.modules[__name__], args.cell_dir, config, args.consensus_proof, canonical_digest(release), summary)
+    return result
 
 
 def verify_tuf_proof(
@@ -1304,10 +1367,10 @@ def verify_tuf_authorization(
     if full_requested and legacy_requested:
         fail("TUF authorization", "--tuf-metadata-dir and --tuf-proof are mutually exclusive")
     if full_requested:
-        if summary["releaseSchemaVersion"] != 2:
+        if summary["releaseSchemaVersion"] not in (2, 3):
             fail(
                 "TUF authorization",
-                "full TUF metadata requires a kerosene.release-lock/v2 document; v1 has a circular target digest",
+                "full TUF metadata requires a kerosene.release-lock/v2 or v3 document; v1 has a circular target digest",
             )
         if args.tuf_root_key:
             fail("TUF authorization", "--tuf-root-key is only valid with legacy --tuf-proof")
@@ -1776,6 +1839,11 @@ def atomic_write_json(path_text: str, value: dict[str, Any], *, mode: int = 0o64
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary_name, destination)
+        parent_descriptor = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(parent_descriptor)
+        finally:
+            os.close(parent_descriptor)
         temporary_name = None
     finally:
         if temporary_name:
@@ -1878,7 +1946,7 @@ def release_update_lock(descriptor: int, lock_file: Path) -> None:
     lock_file.unlink()
 
 
-def guard_previous_update_state(state_dir_text: str, summary: dict[str, Any], environment: str) -> None:
+def guard_previous_update_state(state_dir_text: str, summary: dict[str, Any], environment: str, resume_update_id: str | None = None, change_id: str | None = None) -> None:
     previous = read_existing_update_state(state_dir_text)
     if previous is None:
         return
@@ -1890,9 +1958,13 @@ def guard_previous_update_state(state_dir_text: str, summary: dict[str, Any], en
     previous_sequence = require_integer(previous.get("sequence"), "$.sequence", 1)
     previous_status = require_string(previous.get("status"), "$.status")
     if previous.get("manualRecoveryRequired") is True or previous_status == "failed":
-        raise ApplyBlockedError("existing update-state.json requires manual recovery before another update")
+        if resume_update_id and resume_update_id == previous.get("updateId") == summary.get("_canonicalDigest") and previous_sequence == summary["sequence"] and change_id == previous.get("changeId"):
+            return
+        raise ApplyBlockedError("existing update-state.json requires explicit same-target recovery with --resume-update-id and original changeId")
     if previous_status not in ("committed", "dry-run-passed"):
-        raise ApplyBlockedError("existing update-state.json records an incomplete update")
+        if resume_update_id and resume_update_id == previous.get("updateId") == summary.get("_canonicalDigest") and previous_sequence == summary["sequence"] and change_id == previous.get("changeId"):
+            return
+        raise ApplyBlockedError("existing update-state.json records an incomplete update; recovery must revalidate all gates")
     if previous_status == "committed" and previous_sequence >= summary["sequence"]:
         raise ApplyBlockedError(
             f"release sequence {summary['sequence']} is not newer than the committed sequence {previous_sequence}"
@@ -1904,11 +1976,21 @@ def run_staging_cell_deploy(summary: dict[str, Any], args: argparse.Namespace) -
         raise ApplyBlockedError(
             "only --environment staging-cell is implemented; production requires the private ops adapter"
         )
+    if args.deployment_manifest:
+        artifact = lifecycle.verify_deployment(sys.modules[__name__], args._release, summary, args.deployment_manifest)
+        lifecycle.execute(sys.modules[__name__], artifact, summary, args, args._checkpoint)
+        return
+    if not args.dry_run:
+        raise ApplyBlockedError("real apply requires --deployment-manifest with approved configuration digests; legacy adapter is dry-run only")
     repo_root = Path(__file__).resolve().parents[1]
     deploy_script = repo_root / "infra/kubernetes/scripts/deploy.sh"
     if not deploy_script.is_file():
         raise ApplyBlockedError(f"missing deploy adapter: {deploy_script}")
     environment = os.environ.copy()
+    for unsafe in ("KEROSENE_SKIP_STAGING_SMOKES", "KEROSENE_FORCE_CONFLICTS", "KEROSENE_ENSURE_MONITORING"):
+        if environment.get(unsafe, "0") != "0":
+            raise ApplyBlockedError(f"verified updates forbid inherited {unsafe}")
+        environment.pop(unsafe, None)
     for component, variable in DEPLOY_IMAGE_ENV.items():
         environment[variable] = summary["services"][component]["image"]
     targets = ("staging-vault", "staging")
@@ -1924,7 +2006,7 @@ def run_staging_cell_deploy(summary: dict[str, Any], args: argparse.Namespace) -
 
 def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args: argparse.Namespace) -> int:
     required_paths = {
-        "--bft-receipt": args.bft_receipt,
+        "--consensus-proof" if summary["releaseSchemaVersion"] == 3 else "--bft-receipt": args.consensus_proof if summary["releaseSchemaVersion"] == 3 else args.bft_receipt,
         "--validator-roster": args.validator_roster,
         "--bank-observer-report": args.bank_observer_report,
         "--snapshot-attestation-request": args.snapshot_attestation_request,
@@ -1937,9 +2019,21 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         return EXIT_CANNOT_APPLY
 
     try:
-        guard_previous_update_state(args.state_dir, summary, args.environment)
+        summary["_canonicalDigest"] = canonical_digest(release)
+        guard_previous_update_state(args.state_dir, summary, args.environment, args.resume_update_id, args.change_id)
+        if args.deployment_manifest:
+            lifecycle.verify_deployment(sys.modules[__name__], release, summary, args.deployment_manifest)
+        elif not args.dry_run:
+            raise ApplyBlockedError("--deployment-manifest is required before any state-changing deployment")
+        if not args.dry_run and summary["releaseSchemaVersion"] < 3:
+            raise ApplyBlockedError("real apply requires v3 ordered consensus authorization; v1/v2 detached signatures are dry-run only")
+        if not args.dry_run:
+            lifecycle.require_execution_capabilities(sys.modules[__name__])
         tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
-        receipt_result = verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster)
+        receipt_result = verify_consensus_authorization(release, summary, args)
+        if not args.dry_run:
+            lifecycle.verify_maintenance(sys.modules[__name__], args)
+            lifecycle.verify_recovery_plan(sys.modules[__name__], release, summary, args)
         observer_result = verify_bank_observer_report(
             release,
             summary,
@@ -1966,6 +2060,8 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         "releaseId": summary["releaseId"],
         "sequence": summary["sequence"],
         "environment": args.environment,
+        "changeId": args.change_id,
+        "operatorId": args.operator_id,
         "status": "verified",
         "phase": "verified",
         "evidence": {
@@ -1977,23 +2073,31 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         "startedAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     state_file = write_update_state(args.state_dir, state)
+    args._release = release
+    def checkpoint(phase: str, evidence: dict[str, Any]) -> None:
+        state["phase"] = phase
+        event = {"phase": phase, "observedAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"), "evidence": evidence}
+        state.setdefault("events", []).append(event)
+        write_update_state(args.state_dir, state)
+        history = prepare_state_dir(str(Path(args.state_dir) / "history"))
+        audit_file = history / (str(summary["sequence"]) + "-" + dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ") + ".json")
+        atomic_write_json(str(audit_file), state, mode=0o600)
+    args._checkpoint = checkpoint
 
     try:
-        state["phase"] = "snapshot-accepted"
-        write_update_state(args.state_dir, state)
-        state["phase"] = "rollout-started"
-        write_update_state(args.state_dir, state)
+        checkpoint("snapshot-accepted", {})
+        checkpoint("rollout-started", {})
         run_staging_cell_deploy(summary, args)
         state["phase"] = "validate-and-commit"
         state["status"] = "committed" if not args.dry_run else "dry-run-passed"
         state["completedAt"] = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
-        write_update_state(args.state_dir, state)
-    except (ApplyBlockedError, OSError) as error:
+        checkpoint("validate-and-commit", {})
+    except (ApplyBlockedError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         state["phase"] = "failed"
         state["status"] = "failed"
         state["failure"] = str(error)
         state["manualRecoveryRequired"] = True
-        write_update_state(args.state_dir, state)
+        checkpoint("failed", {})
         print(f"update failed after state was recorded: {error}", file=sys.stderr)
         return EXIT_CANNOT_APPLY
 
@@ -2072,14 +2176,14 @@ def command_verify(args: argparse.Namespace) -> int:
         or args.tuf_root_key
         or args.tuf_state_dir
     )
-    other_evidence_paths = (args.bft_receipt, args.validator_roster, args.bank_observer_report)
+    other_evidence_paths = (args.consensus_proof if summary["releaseSchemaVersion"] == 3 else args.bft_receipt, args.validator_roster, args.bank_observer_report)
     if tuf_requested != any(other_evidence_paths) or (any(other_evidence_paths) and not all(other_evidence_paths)):
         raise ReleaseValidationError("verify-release requires BFT receipt, validator roster, and Bank observer report together")
     authorization = None
     if tuf_requested:
         authorization = {
             "tuf": verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=False),
-            "bft": verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster),
+            "bft": verify_consensus_authorization(release, summary, args),
             "bankObservers": verify_bank_observer_report(
                 release,
                 summary,
@@ -2101,6 +2205,31 @@ def command_plan(args: argparse.Namespace) -> int:
 
 
 def command_update(args: argparse.Namespace) -> int:
+    if args.cell_dir:
+        config = lifecycle.load_config(sys.modules[__name__], args.cell_dir)
+        lifecycle.verify_bootstrap_trust(sys.modules[__name__], args.cell_dir, config)
+        args.state_dir = args.state_dir or str(Path(args.cell_dir) / "state")
+        args.tuf_state_dir = args.tuf_state_dir or args.state_dir
+        args.tuf_trusted_root = args.tuf_trusted_root or str(Path(args.cell_dir) / "tuf-root.json")
+        args.validator_roster = args.validator_roster or str(Path(args.cell_dir) / "validator-roster.json")
+        args.snapshot_provider_key = args.snapshot_provider_key or str(Path(args.cell_dir) / "snapshot-provider.pub")
+    if args.bundle_dir:
+        bundle = Path(args.bundle_dir)
+        args.release = args.release or str(bundle / "release-lock.json")
+        args.deployment_manifest = args.deployment_manifest or str(bundle / "deployment.json")
+        args.tuf_metadata_dir = args.tuf_metadata_dir or str(bundle / "metadata")
+        args.bft_receipt = args.bft_receipt or str(bundle / "release-receipt.json")
+        args.bank_observer_report = args.bank_observer_report or str(bundle / "bank-observer-report.json")
+        args.snapshot_attestation_request = args.snapshot_attestation_request or str(bundle / "snapshot-attestation-request.json")
+        args.snapshot_receipt = args.snapshot_receipt or str(bundle / "snapshot-receipt.json")
+        args.consensus_proof = args.consensus_proof or str(bundle / "consensus-proof.json")
+    if not args.release:
+        raise ReleaseValidationError("--release or --bundle-dir is required")
+    if args.command == "install":
+        if not args.cell_dir:
+            raise ReleaseValidationError("install requires --cell-dir initialized with explicit public trust anchors")
+        if read_existing_update_state(args.state_dir) is not None:
+            raise ApplyBlockedError("install refuses an existing deployment journal; use update or explicit recovery")
     release, summary = load_and_validate(args.release)
     if not args.apply:
         plan = build_plan(release, summary)
@@ -2114,7 +2243,7 @@ def command_update(args: argparse.Namespace) -> int:
 def command_check_update(args: argparse.Namespace) -> int:
     release, summary = load_and_validate(args.release)
     required_paths = {
-        "--bft-receipt": args.bft_receipt,
+        "--consensus-proof" if summary["releaseSchemaVersion"] == 3 else "--bft-receipt": args.consensus_proof if summary["releaseSchemaVersion"] == 3 else args.bft_receipt,
         "--validator-roster": args.validator_roster,
         "--bank-observer-report": args.bank_observer_report,
     }
@@ -2125,7 +2254,7 @@ def command_check_update(args: argparse.Namespace) -> int:
 
     try:
         tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
-        receipt_result = verify_bft_receipt(release, summary, args.bft_receipt, args.validator_roster)
+        receipt_result = verify_consensus_authorization(release, summary, args)
         observer_result = verify_bank_observer_report(
             release,
             summary,
@@ -2207,6 +2336,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--bft-receipt", help="signed BFT release receipt JSON")
     verify.add_argument("--validator-roster", help="trusted validator roster JSON")
     verify.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
+    verify.add_argument("--cell-dir", help="protected bootstrap consensus anchor and verifier")
+    verify.add_argument("--consensus-proof", help="v3 real CometBFT ordered approval and application-state proof")
     verify.add_argument("--json", action="store_true", help="emit machine-readable output")
     verify.set_defaults(handler=command_verify)
 
@@ -2216,8 +2347,10 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--json", action="store_true", help="emit machine-readable output")
     plan.set_defaults(handler=command_plan)
 
-    update = subcommands.add_parser("update", help="produce a plan or apply a verified staging-cell release")
-    update.add_argument("--release", required=True, help="path to a release-lock JSON document")
+    update = subcommands.add_parser("update", aliases=("install", "recover"), help="produce a plan or apply a verified staging-cell release")
+    update.add_argument("--release", help="path to a release-lock JSON document")
+    update.add_argument("--cell-dir", help="protected Cell directory created by init; supplies public anchors and state defaults")
+    update.add_argument("--bundle-dir", help="prepared offline release data directory; never executes contained source code")
     update.add_argument("--output", help="optional path for an atomically written JSON plan")
     update.add_argument("--json", action="store_true", help="emit machine-readable output")
     update.add_argument("--apply", action="store_true", help="execute the staging-cell rollout after all evidence gates pass")
@@ -2246,8 +2379,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="trusted snapshot provider Ed25519 public key in base64 DER form",
     )
     update.add_argument("--state-dir", help="directory for the atomic update state record")
+    update.add_argument("--deployment-manifest", help="exact approved JSON deployment artifact; each configuration digest must match release lock")
+    update.add_argument("--change-id", help="audited operator change identifier")
+    update.add_argument("--operator-id", help="local operator attribution, not a substitute for API authentication")
+    update.add_argument("--consensus-proof", help="v3 real CometBFT ordered approval and application-state proof")
+    update.add_argument("--maintenance-endpoint", help="HTTPS KFE maintenance status endpoint, rechecked at each runtime phase")
+    update.add_argument("--maintenance-ca", help="KFE TLS trust CA")
+    update.add_argument("--maintenance-cert", help="operator mTLS certificate")
+    update.add_argument("--maintenance-key", help="operator mTLS key reference; never stored in the journal")
+    update.add_argument("--maintenance-token-file", help="protected authenticated ADMIN session token reference")
+    update.add_argument("--recovery-evidence", help="quorum-approved tested recovery plan bound by migration.recoveryEvidenceDigest")
+    update.add_argument("--resume-update-id", help="recover only this exact interrupted canonical release digest; never clears locks or bypasses gates")
     update.add_argument("--dry-run", action="store_true", help="run both staging overlays with server-side dry-run")
     update.set_defaults(handler=command_update)
+
+    lifecycle.add_commands(sys.modules[__name__], subcommands)
 
     check = subcommands.add_parser(
         "check-update",
@@ -2260,7 +2406,9 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--tuf-trusted-root", help="protected out-of-band TUF root metadata file")
     check.add_argument("--tuf-root-key", help="legacy proof verifier Ed25519 public key in base64 DER form")
     check.add_argument("--tuf-state-dir", help="trusted TUF state directory; required and never modified by check-update")
-    check.add_argument("--bft-receipt", required=True, help="signed BFT release receipt JSON")
+    check.add_argument("--bft-receipt", help="legacy signed BFT release receipt JSON")
+    check.add_argument("--consensus-proof", help="v3 real CometBFT ordered approval and application-state proof")
+    check.add_argument("--cell-dir", help="protected bootstrap consensus anchor and verifier")
     check.add_argument("--validator-roster", required=True, help="trusted validator roster JSON")
     check.add_argument("--bank-observer-report", required=True, help="signed Bank observer compatibility report JSON")
     check.add_argument("--state-dir", help="optional directory containing the last update-state.json")
@@ -2268,7 +2416,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.set_defaults(handler=command_check_update)
 
     version = subcommands.add_parser("version", help="print the controller revision")
-    version.set_defaults(handler=lambda _args: (print("kerosene-stack v0.3.0-staging-cell"), 0)[1])
+    version.set_defaults(handler=lambda _args: (print("kerosene-stack v0.4.0-cell-operations"), 0)[1])
     return parser
 
 

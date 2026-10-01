@@ -37,6 +37,26 @@ jobs:
         run: |
           bash infra/tests/kerosene-stack-test.sh
           bash infra/tests/kerosene-stack-evidence-test.sh
+          python3 infra/tests/stack-archive-test.py
+          python3 infra/tests/stack-lifecycle-test.py
+          bash infra/tests/staging-snapshot-workflow-test.sh
+
+  release-governance:
+    name: Ordered release governance with four real validators
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GOTOOLCHAIN: go1.26.5
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify application and proof checks under the race detector
+        working-directory: infra/governance
+        run: go test -race ./...
+      - name: Prove quorum loss and recovery with real CometBFT processes
+        run: bash infra/governance/testnet-test.sh
 
   spiffe-admission:
     name: SPIFFE admission impersonation tests

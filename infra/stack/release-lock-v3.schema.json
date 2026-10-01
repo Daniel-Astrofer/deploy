@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:kerosene:release-lock:v3",
+  "title": "Kerosene complete Cell release v3",
+  "description": "Ordered approval height/block hash live in detached CometBFT proof, avoiding circular hashes in the release target. v1/v2 detached signature receipts do not authorize runtime changes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "releaseId", "sequence", "network", "authorization", "source", "services", "policy", "migration"],
+  "properties": {
+    "schema": {"const": "kerosene.release-lock/v3"},
+    "schemaVersion": {"const": 3},
+    "releaseId": {"$ref": "release-lock-v2.schema.json#/$defs/identifier"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "network": {"$ref": "release-lock-v2.schema.json#/properties/network"},
+    "source": {"$ref": "release-lock-v2.schema.json#/properties/source"},
+    "services": {"$ref": "release-lock-v2.schema.json#/properties/services"},
+    "policy": {"$ref": "release-lock-v2.schema.json#/properties/policy"},
+    "migration": {"$ref": "release-lock-v2.schema.json#/properties/migration"},
+    "authorization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tuf", "bft", "vaultCompatibility"],
+      "properties": {
+        "tuf": {"$ref": "release-lock-v2.schema.json#/properties/authorization/properties/tuf"},
+        "vaultCompatibility": {"$ref": "release-lock-v2.schema.json#/$defs/vaultCompatibility"},
+        "bft": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["networkId", "epoch", "threshold", "members"],
+          "properties": {
+            "networkId": {"$ref": "release-lock-v2.schema.json#/$defs/identifier"},
+            "epoch": {"type": "integer", "minimum": 1},
+            "threshold": {"type": "integer", "minimum": 3},
+            "members": {"type": "integer", "minimum": 4}
+          }
+        }
+      }
+    }
+  }
+}

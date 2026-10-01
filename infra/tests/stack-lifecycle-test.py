@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Local lifecycle/configuration validation tests; not a financial Cell E2E."""
+import copy
+import importlib.machinery
+import importlib.util
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+loader = importlib.machinery.SourceFileLoader("tested_stack", str(ROOT / "kerosene-stack"))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+stack = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = stack
+loader.exec_module(stack)
+lifecycle = stack.lifecycle
+
+
+class DeploymentTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.release = json.loads((ROOT / "stack/examples/release-lock-v2.example.json").read_text())
+        resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging"}}]
+        for name, service in self.release["services"].items():
+            if name == "admin":
+                continue
+            resources.append({"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": name, "namespace": "kerosene-staging"}, "spec": {"replicas": 1, "selector": {"matchLabels": {"app": name}}, "template": {"metadata": {"labels": {"app": name}}, "spec": {"containers": [{"name": name, "image": service["image"]}]}}}})
+        self.artifact = {"schema": lifecycle.SCHEMA, "environment": "staging-cell", "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://core.invalid"}}}
+        for name, service in self.release["services"].items():
+            service["configDigest"] = lifecycle.digest(lifecycle.component_config(self.artifact, service["image"], name))
+        self.summary = stack.validate_release(self.release)
+        self.path = self.root / "deployment.json"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def verify(self, artifact=None):
+        self.path.write_text(json.dumps(artifact or self.artifact))
+        return lifecycle.verify_deployment(stack, self.release, self.summary, str(self.path))
+
+    def test_exact_configuration(self):
+        self.assertEqual(self.verify(), self.artifact)
+
+    def test_changes_to_shared_input_block_every_service(self):
+        changed = copy.deepcopy(self.artifact)
+        changed["resources"][0]["metadata"]["labels"] = {"changed": "true"}
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "configuration digest mismatch"):
+            self.verify(changed)
+
+    def test_extra_runtime_image_rejected(self):
+        changed = copy.deepcopy(self.artifact)
+        changed["resources"][1]["spec"]["template"]["spec"]["initContainers"] = [{"name": "injected", "image": "evil.invalid/untrusted:latest"}]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "not an approved"):
+            self.verify(changed)
+
+    def test_inline_secret_and_foreign_namespace_rejected(self):
+        changed = copy.deepcopy(self.artifact)
+        changed["resources"].append({"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "forbidden", "namespace": "kerosene-staging"}, "data": {"value": "encoded"}})
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "cannot create Secrets"):
+            self.verify(changed)
+        changed = copy.deepcopy(self.artifact)
+        changed["resources"][1]["metadata"]["namespace"] = "other-bank"
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "Cell namespace"):
+            self.verify(changed)
+
+    def test_privilege_and_admin_tamper(self):
+        changed = copy.deepcopy(self.artifact)
+        changed["resources"][1]["spec"]["template"]["spec"]["hostNetwork"] = True
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "host namespaces"):
+            self.verify(changed)
+        changed = copy.deepcopy(self.artifact)
+        changed["admin"]["image"] = self.release["services"]["core"]["image"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "Admin artifact"):
+            self.verify(changed)
+
+    def test_fifo_evidence_fails_without_blocking(self):
+        import os
+        os.mkfifo(self.root / "evidence")
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "regular file"):
+            stack.read_regular_file_bytes(self.root / "evidence", "FIFO", 100)
+
+    def test_hpa_blocks_before_any_apply(self):
+        changed = copy.deepcopy(self.artifact)
+        changed["resources"].append({"apiVersion": "autoscaling/v2", "kind": "HorizontalPodAutoscaler", "metadata": {"name": "auto", "namespace": "kerosene-staging"}, "spec": {"minReplicas": 1, "maxReplicas": 4}})
+        with patch.object(lifecycle, "apply_resource") as apply:
+            with self.assertRaisesRegex(stack.ApplyBlockedError, "HPA requires"):
+                self.verify(changed)
+            apply.assert_not_called()
+
+    def test_cluster_binding_never_uses_the_active_context(self):
+        config = {"cluster": {"kubeconfig": "/protected/cell.conf", "context": "cell-a", "systemNamespaceUid": "expected-uid"}}
+        with patch.object(lifecycle.shutil, "which", return_value="/usr/bin/kubectl"), patch.object(lifecycle, "run", return_value=b'{"metadata":{"uid":"expected-uid"}}') as run:
+            command = lifecycle.kubectl_command(stack, config)
+            self.assertEqual(command[:5], ["/usr/bin/kubectl", "--kubeconfig", "/protected/cell.conf", "--context", "cell-a"])
+            self.assertEqual(run.call_args.args[0][:5], command[:5])
+        with patch.object(lifecycle.shutil, "which", return_value="/usr/bin/kubectl"), patch.object(lifecycle, "run", return_value=b'{"metadata":{"uid":"foreign-uid"}}'):
+            with self.assertRaisesRegex(stack.ApplyBlockedError, "identity differs"):
+                lifecycle.kubectl_command(stack, config)
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "explicit Kubernetes"):
+            lifecycle.kubectl_command(stack, {})
+
+    def test_absent_safety_capabilities_cannot_be_replaced_by_evidence(self):
+        from types import SimpleNamespace
+        with patch.object(lifecycle, "run") as run:
+            with self.assertRaisesRegex(stack.ApplyBlockedError, "not qualified"):
+                lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False), lambda *_: None)
+            run.assert_not_called()
+
+    def test_preserves_delegated_role_highwater(self):
+        state = self.root / "state"
+        stack.prepare_state_dir(str(state))
+        stack.persist_tuf_state(str(state), {"metadataVersions": {"targets": 7, "delegated": 9}, "metadataDigests": {"targets": "sha256:" + "a" * 64, "delegated": "sha256:" + "b" * 64}})
+        stack.persist_tuf_state(str(state), {"metadataVersions": {"targets": 8}, "metadataDigests": {"targets": "sha256:" + "c" * 64}})
+        self.assertEqual(stack.read_tuf_state(str(state))["delegated"], 9)
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "equivocation"):
+            stack.persist_tuf_state(str(state), {"metadataVersions": {"targets": 8}, "metadataDigests": {"targets": "sha256:" + "d" * 64}})
+
+    def test_tuf_pins_verified_document_without_rereading_an_untrusted_path(self):
+        signed = {"version": 7, "targets": {"approved.json": {}}}
+        role = {"document": {"signed": signed, "signatures": []}, "name": "targets", "signed": signed, "targets": signed["targets"]}
+        digests = {}
+        # Unit test of file-read ordering, not a substitute for signature tests.
+        with patch.object(stack, "verify_tuf_role"), patch.object(stack, "verify_tuf_target_binding"), patch.object(stack, "read_tuf_metadata_file") as read:
+            result = stack.resolve_tuf_target(self.root, {}, role, [], 1, {}, "approved.json", {}, b"", {}, {}, set(), digests=digests)
+            self.assertEqual(result, "targets")
+            self.assertEqual(digests["targets"], stack.canonical_digest(signed))
+            read.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()

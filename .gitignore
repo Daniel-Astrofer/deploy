@@ -11,4 +11,6 @@
 **/secrets/
 !**/examples/secrets/
 .smart_build_state.json
+**/__pycache__/
+*.pyc
 infra/kubernetes/overlays/local-full/local-dev-secrets.yaml
