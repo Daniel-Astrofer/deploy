@@ -10,7 +10,7 @@
     "schema": {"const": "kerosene.release-lock/v3"},
     "schemaVersion": {"const": 3},
     "releaseId": {"$ref": "release-lock-v2.schema.json#/$defs/identifier"},
-    "sequence": {"type": "integer", "minimum": 1},
+    "sequence": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
     "network": {"$ref": "release-lock-v2.schema.json#/properties/network"},
     "source": {"$ref": "release-lock-v2.schema.json#/properties/source"},
     "services": {"$ref": "release-lock-v2.schema.json#/properties/services"},
@@ -29,9 +29,9 @@
           "required": ["networkId", "epoch", "threshold", "members"],
           "properties": {
             "networkId": {"$ref": "release-lock-v2.schema.json#/$defs/identifier"},
-            "epoch": {"type": "integer", "minimum": 1},
-            "threshold": {"type": "integer", "minimum": 3},
-            "members": {"type": "integer", "minimum": 4}
+            "epoch": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "threshold": {"const": 3},
+            "members": {"const": 4}
           }
         }
       }

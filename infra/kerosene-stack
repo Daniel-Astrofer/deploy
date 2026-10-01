@@ -181,6 +181,8 @@ def require_string(value: Any, path: str) -> str:
 def require_integer(value: Any, path: str, minimum: int = 0) -> int:
     if type(value) is not int or value < minimum:
         fail(path, f"must be an integer greater than or equal to {minimum}")
+    if value > 9007199254740991:
+        fail(path, "exceeds the interoperable JSON integer range")
     return value
 
 
@@ -353,6 +355,8 @@ def validate_release(release: dict[str, Any]) -> dict[str, Any]:
     bft_epoch = require_integer(bft["epoch"], "$.authorization.bft.epoch", 1) if release_schema_version == 3 else None
     bft_threshold = require_integer(bft["threshold"], "$.authorization.bft.threshold", 1)
     bft_members = require_integer(bft["members"], "$.authorization.bft.members", 4)
+    if release_schema_version == 3 and (bft_members != 4 or bft_threshold != 3):
+        fail("$.authorization.bft", "v3 currently supports only static four-member, three-authorizer governance")
     minimum_bft_threshold = (2 * bft_members) // 3 + 1
     if bft_threshold < minimum_bft_threshold or bft_threshold > bft_members:
         fail(
@@ -2278,15 +2282,18 @@ def command_check_update(args: argparse.Namespace) -> int:
             return EXIT_CANNOT_APPLY
         previous_status = require_string(previous.get("status"), "$.status")
         previous_sequence = require_integer(previous.get("sequence"), "$.sequence", 1)
-        manual_recovery_required = previous_status == "failed" or previous.get("manualRecoveryRequired") is True
+        manual_recovery_required = previous_status not in ("committed", "dry-run-passed") or previous.get("manualRecoveryRequired") is True
         if previous_status == "committed":
             current_sequence = previous_sequence
+            if current_sequence == summary["sequence"] and previous.get("updateId") != canonical_digest(release):
+                print("check-update blocked: same sequence is bound to different committed release bytes", file=sys.stderr)
+                return EXIT_CANNOT_APPLY
 
     update_required = current_sequence is None or summary["sequence"] > current_sequence
     if manual_recovery_required:
         next_action = "manual-recovery-required"
     elif update_required:
-        next_action = "kerosene-stack update --apply"
+        next_action = "review-update-plan-execution-not-qualified" if lifecycle.EXECUTION_BLOCKERS or summary["releaseSchemaVersion"] < 3 else "kerosene-stack update --apply"
     else:
         next_action = "no-action"
     result = {
@@ -2302,6 +2309,9 @@ def command_check_update(args: argparse.Namespace) -> int:
         "tufSignatureVerified": tuf_result["signatureVerified"],
         "tufMetadataVersions": tuf_result.get("metadataVersions"),
         "bftSignaturesVerified": receipt_result["signaturesVerified"],
+        "orderedConsensusVerified": receipt_result.get("consensusVerified", False),
+        "applyQualified": not lifecycle.EXECUTION_BLOCKERS and summary["releaseSchemaVersion"] == 3,
+        "executionBlockers": list(lifecycle.EXECUTION_BLOCKERS) + (["legacy-detached-receipt-not-ordered-consensus"] if summary["releaseSchemaVersion"] < 3 else []),
     }
     if previous_status is not None:
         result["previousStatus"] = previous_status
@@ -2312,7 +2322,7 @@ def command_check_update(args: argparse.Namespace) -> int:
             print(f"Update blocked: manual recovery is required before {summary['releaseId']}.")
         elif update_required:
             current = "none" if current_sequence is None else str(current_sequence)
-            print(f"Update required: Bank quorum approved sequence {summary['sequence']} (current: {current}).")
+            print(f"Update available: verified Bank evidence for sequence {summary['sequence']} (current: {current}); review execution qualification before applying.")
         else:
             print(f"No update required: current sequence {current_sequence} satisfies {summary['sequence']}.")
         print(f"Verified Bank observers: {observer_result['compatibleObservers']}; next action: {next_action}.")

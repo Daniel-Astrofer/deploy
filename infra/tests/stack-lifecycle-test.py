@@ -45,6 +45,19 @@ class DeploymentTest(unittest.TestCase):
     def test_exact_configuration(self):
         self.assertEqual(self.verify(), self.artifact)
 
+    def test_v3_matches_actual_static_consensus_capabilities_and_integer_range(self):
+        release = copy.deepcopy(self.release)
+        release.update(schema="kerosene.release-lock/v3", schemaVersion=3)
+        release["authorization"]["bft"] = {"networkId": "bank-governance", "epoch": 1, "members": 4, "threshold": 3}
+        self.assertEqual(stack.validate_release(release)["releaseSchemaVersion"], 3)
+        release["authorization"]["bft"].update(members=5, threshold=4)
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "static four-member"):
+            stack.validate_release(release)
+        release["authorization"]["bft"].update(members=4, threshold=3)
+        release["sequence"] = 9007199254740992
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "interoperable JSON"):
+            stack.validate_release(release)
+
     def test_changes_to_shared_input_block_every_service(self):
         changed = copy.deepcopy(self.artifact)
         changed["resources"][0]["metadata"]["labels"] = {"changed": "true"}
@@ -129,6 +142,33 @@ class DeploymentTest(unittest.TestCase):
             self.assertEqual(result, "targets")
             self.assertEqual(digests["targets"], stack.canonical_digest(signed))
             read.assert_not_called()
+
+    def test_update_notice_distinguishes_available_evidence_from_execution_and_interruption(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from types import SimpleNamespace
+        summary = copy.deepcopy(self.summary)
+        summary["_releaseBytes"] = b"unit-only"
+        args = SimpleNamespace(release="unit.json", bft_receipt="receipt.json", validator_roster="roster.json", bank_observer_report="bank.json", state_dir="unit-state", environment="staging-cell", json=True)
+        # Notice routing unit test; crypto and real consensus are tested separately.
+        with patch.object(stack, "load_and_validate", return_value=(self.release, summary)), patch.object(stack, "verify_tuf_authorization", return_value={"signatureVerified": True}), patch.object(stack, "verify_consensus_authorization", return_value={"signaturesVerified": 3}), patch.object(stack, "verify_bank_observer_report", return_value={"compatibleObservers": 3}), patch.object(stack, "read_existing_update_state") as state:
+            state.return_value = None
+            output = StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(stack.command_check_update(args), 0)
+            notice = json.loads(output.getvalue())
+            self.assertTrue(notice["updateRequired"])
+            self.assertFalse(notice["applyQualified"])
+            self.assertFalse(notice["orderedConsensusVerified"])
+            self.assertEqual(notice["nextAction"], "review-update-plan-execution-not-qualified")
+            state.return_value = {"schema": "kerosene.stack.update-state/v1", "environment": "staging-cell", "status": "rollout-started", "sequence": summary["sequence"]}
+            output = StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(stack.command_check_update(args), 0)
+            self.assertEqual(json.loads(output.getvalue())["nextAction"], "manual-recovery-required")
+            state.return_value.update(status="committed", updateId="sha256:" + "f" * 64)
+            with redirect_stdout(StringIO()):
+                self.assertEqual(stack.command_check_update(args), stack.EXIT_CANNOT_APPLY)
 
 
 if __name__ == "__main__":
