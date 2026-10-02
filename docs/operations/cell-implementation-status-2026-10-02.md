@@ -13,7 +13,7 @@ signer provisioning or Vault signer activation was performed.
 
 ## Integrated and verified in this wave
 
-### KFE: `3cea91a`
+### KFE: `074e08a` (continues `3cea91a`)
 
 - Restored the exact historically committed pricing/quorum facades from
   `6b287b1`, before the incomplete extraction. No substitute financial algorithm.
@@ -26,11 +26,43 @@ signer provisioning or Vault signer activation was performed.
   checked expiry-on-read, cancellation, notifications and statement retention.
 - Webhook child capture before commit/enqueue; parent commit never proves remote
   delivery. JWT verifier errors no longer swallow downstream business failures.
-- Full `./gradlew --no-daemon check bootJar`: **747 tests, zero failures/skips**.
+- Full `./gradlew --no-daemon check bootJar`: **1,211 tests, zero failures/skips**.
   The actual Flyway V1–V58 chain and PostgreSQL concurrency/restart suites ran in
   two separate explicitly disposable databases, not only a minimal schema fixture.
 - CI references real Contracts/Shared repositories at immutable revisions and
   explicitly enables the two PostgreSQL suites. Hosted CI has not been claimed.
+
+The subsequent continuation wave integrated and verified:
+
+- Mandatory fail-closed injection before balance/custodial/cold scans, inbound/
+  network/outbound confirmations, payment-request monitors and tax classification.
+- Guarded startup/system wallets, receive addresses/MPC keygen, statements before
+  EntityManager flush/upsert, prepared-payload persistence and peer inbound.
+  Rejected startup pauses without aborting the ADMIN process and refuses readiness;
+  management routing to unready pods remains unqualified.
+- Whole outbox batch/processor/heartbeat/helper and direct onchain/Lightning rail
+  starts. A valid claim token is not maintenance provenance. Nonempty claims and
+  remote outcomes remain uncertain; empty claims observe commit/rollback.
+- Publisher, custodial deposit notification and helper after-completion V58 children
+  persist before commit/enqueue. Confirmed-outbound resync no longer escapes into
+  a detached grandchild thread. Delivery returns/caught errors remain UNCERTAIN.
+- Lightning SETTLED callbacks now use the actual transactional self proxy; indices
+  advance after its return. Real Spring boundary/commit-failure tests do not invent
+  a successful ledger settlement or durable stream acknowledgement.
+- Actual ZMQ worker callbacks admit before refresh/ingest/sequence changes. Reactive
+  flush admits before consuming pending targets and preserves them on rejection.
+  Unit tests use the real callback/worker without live sockets; hints are not durable.
+- Four real transaction-publisher/JDBC/PostgreSQL cases verify WAITING-before-commit,
+  captured-child delivery during drain, rollback and lost in-memory closure leaving
+  READY visible to a recreated store. The 14 generic/publisher PostgreSQL tests and
+  two full Flyway financial-schema tests all ran without skips. Queue-loss simulation
+  is not a replay runner or complete financial recovery.
+
+Six workers contributed bounded disjoint patches; interrupted final scopes were
+taken over, completed and verified by the coordinator. No unreturned audit result
+is counted as evidence. The financial helper runbook separately records a preserved
+pre-existing conflict/refund concern: null outpoint/RPC-error results are not proof
+that inputs are free. These admission tests do not qualify that refund algorithm.
 
 HTTP roots and remote best-effort workflows conservatively retain UNCERTAIN.
 All three unknown coverage blockers remain 1. This can accumulate unresolved
@@ -91,11 +123,13 @@ they were not falsely rerun or elevated to full-Cell proof in this wave.
 
 ## Work still required for the requested complete service
 
-1. **Complete KFE drain/recovery.** Guard the remaining bootstrap/address/key/tax,
-   inbound/confirmation/reorg/stream/ZMQ, embedded execution and publisher roots.
-   Integrate durable provenance across remaining callbacks and prove actual
+1. **Complete KFE drain/recovery.** Finish the low-level/embedded participant inventory,
+   including balance/liquidity/movement/audit/fee/cursor callers and alternate host
+   chains. Qualify actual stream reconnect, durable cursors/target hints and source
+   reconciliation. Integrate provenance across remaining callbacks and prove actual
    completion/reconciliation without clearing uncertainty by TTL, labels or IDs.
    Replace coverage blockers only after complete inventory/race/restart evidence.
+   Independently review and qualify the preserved conflict/refund financial concern.
 2. **Authoritative Bank compatibility.** Implement target build/runtime/provenance/
    migration/recovery checks behind Core's certificate-only observation producer
    and qualify the dedicated mandatory-mTLS deployment. Current real producer
@@ -126,3 +160,5 @@ they were not falsely rerun or elevated to full-Cell proof in this wave.
 The next live lab run needs an explicit capacity decision. Expanding the named
 40 GiB Docker loop image to 60 GiB was requested but not authorized. Space is
 one external test constraint, **not** the only missing implementation above.
+The subsequent read-only capacity check showed 122 MiB available; no resize,
+prune or new live qualification was attempted in this continuation wave.
