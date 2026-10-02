@@ -10,6 +10,8 @@ Start here:
 - [Repository boundary](../REPOSITORY_BOUNDARY.md): source and artifact boundaries.
 - [Staging runbook](../ops/STAGING_DEPLOY.md): current staging procedure and gates.
 - [SPIRE staging identity](SPIRE_STAGING.md): workload identity rollout and limits.
+- [Complete Cell implementation status](../operations/cell-implementation-status-2026-10-02.md): tested mechanisms and remaining execution blockers.
+- [Offline release publication](../operations/release-publication.md): TUF/package signatures and private publication-store recovery.
 
 ## Supported entrypoints
 

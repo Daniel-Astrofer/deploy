@@ -158,6 +158,7 @@ render_request() {
     "$TMP_DIR/$VAULT_NAMESPACE.json" <<'PY'
 import hashlib
 import json
+import math
 import sys
 from datetime import datetime
 
@@ -210,20 +211,48 @@ except ValueError:
 
 
 def load_snapshot_list(path, namespace):
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON field")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError("nonfinite JSON constant")
+
+    def finite_float(value):
+        parsed = float(value)
+        if not math.isfinite(parsed):
+            raise ValueError("nonfinite JSON number")
+        return parsed
+
     try:
-        with open(path, encoding="utf-8") as handle:
-            document = json.load(handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        fail(f"could not parse VolumeSnapshot list for namespace {namespace}: {exc}")
+        with open(path, "rb") as handle:
+            raw = handle.read(8 * 1024 * 1024 + 1)
+        if len(raw) > 8 * 1024 * 1024:
+            fail(f"VolumeSnapshot list for {namespace} exceeds byte limit")
+        document = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_fields,
+                              parse_constant=invalid_constant, parse_float=finite_float)
+    except (OSError, ValueError, UnicodeError, RecursionError):
+        fail(f"could not parse strict VolumeSnapshot list for namespace {namespace}")
 
     document = required_mapping(document, f"VolumeSnapshot list for {namespace}")
-    if document.get("apiVersion") != "snapshot.storage.k8s.io/v1":
-        fail(f"VolumeSnapshot list for {namespace} must use snapshot.storage.k8s.io/v1")
-    if document.get("kind") != "VolumeSnapshotList":
-        fail(f"VolumeSnapshot list for {namespace} must have kind VolumeSnapshotList")
+    # kubectl's client builder may render a generic v1/List even for one CRD
+    # resource. Accept only these exact envelope pairs; every item below still
+    # requires the actual snapshot.storage.k8s.io/v1 VolumeSnapshot identity.
+    if (document.get("apiVersion"), document.get("kind")) not in (
+            ("snapshot.storage.k8s.io/v1", "VolumeSnapshotList"), ("v1", "List")):
+        fail(f"VolumeSnapshot list for {namespace} has unsupported envelope")
+    metadata = required_mapping(document.get("metadata", {}), "snapshot list metadata")
+    remaining = metadata.get("remainingItemCount")
+    if metadata.get("continue") not in (None, "") or not (
+            remaining is None or type(remaining) is int and remaining == 0):
+        fail(f"VolumeSnapshot list for {namespace} is partial/paginated")
     items = document.get("items")
-    if not isinstance(items, list):
-        fail(f"VolumeSnapshot list for {namespace} must contain an items array")
+    if not isinstance(items, list) or len(items) > 1024:
+        fail(f"VolumeSnapshot list for {namespace} must contain a bounded items array")
     return items
 
 

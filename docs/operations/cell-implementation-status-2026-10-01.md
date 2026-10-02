@@ -1,5 +1,9 @@
 # Complete Cell implementation checkpoint — 2026-10-01
 
+Historical checkpoint. See the [October 2 checkpoint](cell-implementation-status-2026-10-02.md)
+for restored full KFE compilation, integrated admission batches, real offline
+publication and current CSI lab results. Statements below describe October 1 only.
+
 **Not complete and not qualified for live installation/update.** This checkpoint
 distinguishes implemented/tested interfaces from remaining runtime mechanisms.
 Scope remains the entire Cell: Admin/jctl, Core, KFE, Node, Vault, web-page,

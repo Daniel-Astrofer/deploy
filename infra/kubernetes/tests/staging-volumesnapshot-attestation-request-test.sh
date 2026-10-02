@@ -93,6 +93,41 @@ vault_records='[
 write_snapshot_list "$FIXTURE_DIR/normal.kerosene-staging.json" kerosene-staging "$staging_records"
 write_snapshot_list "$FIXTURE_DIR/normal.kerosene-staging-vault.json" kerosene-staging-vault "$vault_records"
 
+# Real kubectl can return the generic client-side envelope. Fixtures keep
+# actual CRD identities on every item; malformed envelopes/items stay denied.
+python3 - "$FIXTURE_DIR" <<'PY'
+import copy
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+for namespace in ("kerosene-staging", "kerosene-staging-vault"):
+    original = json.loads((root / ("normal." + namespace + ".json")).read_bytes())
+    generic = copy.deepcopy(original)
+    generic.update(apiVersion="v1", kind="List")
+    variants = {"generic": generic}
+    mixed = copy.deepcopy(generic)
+    mixed["kind"] = "VolumeSnapshotList"
+    variants["mixed-envelope"] = mixed
+    wrong = copy.deepcopy(generic)
+    wrong["items"][0]["kind"] = "Secret"
+    variants["generic-wrong-item"] = wrong
+    paginated = copy.deepcopy(generic)
+    paginated["metadata"] = {"continue": "synthetic-page-token"}
+    variants["paginated"] = paginated
+    variants["remaining-items"] = {**generic, "metadata": {"remainingItemCount": 1}}
+    variants["too-many-items"] = {**generic, "items": generic["items"] * 1025}
+    for variant, document in variants.items():
+        (root / (variant + "." + namespace + ".json")).write_text(json.dumps(document))
+    (root / ("duplicate-json." + namespace + ".json")).write_text(
+        json.dumps(generic).replace('"items":', '"items": [], "items":', 1))
+    nonfinite = copy.deepcopy(generic)
+    nonfinite["items"][0]["status"]["restoreSize"] = float("nan")
+    (root / ("nonfinite-json." + namespace + ".json")).write_text(json.dumps(nonfinite))
+    (root / ("oversized-json." + namespace + ".json")).write_text(
+        json.dumps({**generic, "syntheticPadding": "x" * (8 * 1024 * 1024)}))
+PY
+
 reversed_staging_records="$(python3 - "$staging_records" <<'PY'
 import json
 import sys
@@ -234,6 +269,15 @@ PY
 
 run_subject reversed "$TMP_DIR/reversed.json" "$TMP_DIR/reversed.stderr"
 cmp -s "$TMP_DIR/normal.json" "$TMP_DIR/reversed.json" || fail "snapshot request changed when kubectl item order changed"
+
+run_subject generic "$TMP_DIR/generic.json" "$TMP_DIR/generic.stderr"
+cmp -s "$TMP_DIR/normal.json" "$TMP_DIR/generic.json" || fail "generic kubectl envelope changed snapshot evidence"
+for variant in mixed-envelope generic-wrong-item paginated remaining-items too-many-items duplicate-json nonfinite-json oversized-json; do
+  if run_subject "$variant" "$TMP_DIR/$variant.json" "$TMP_DIR/$variant.stderr"; then
+    fail "collector accepted malformed/incomplete snapshot list: $variant"
+  fi
+  [[ ! -s "$TMP_DIR/$variant.json" ]] || fail "collector emitted payload for rejected list: $variant"
+done
 
 : > "$TMP_DIR/kubectl-output.log"
 KUBECTL="$FAKE_BIN/kubectl" \

@@ -71,11 +71,16 @@ try:
             pv='pv-'+name; obj['spec']['volumeName']=pv; obj['status']={'phase':'Bound'}
             put({'kind':'PersistentVolume','metadata':{'name':pv},'spec':{'csi':{'driver':'test.csi.invalid','volumeHandle':'restored-'+name},'claimRef':{'namespace':ns,'name':name,'uid':m['uid']}}})
         elif kind=='Pod':
+            if os.environ.get('FAKE_OMITEMPTY')=='1':
+                for field in ('hostNetwork','hostPID','hostIPC'):obj['spec'].pop(field,None)
+            if os.environ.get('FAKE_HOST_NETWORK')=='1':obj['spec']['hostNetwork']=True
             config=json.loads(obj['spec']['containers'][0]['command'][3])
             result={'status':'passed','treeDigest':config['expectedTreeDigest'],'filesRead':2,'bytesRead':128,'checks':['full-file-read','approved-tree-sha256','read-only-mount','egress-denied']}
             db['logs'][name]=json.dumps(result,sort_keys=True)+'\n'
             exitcode=78 if os.environ.get('FAKE_PROBE_FAIL')=='1' else 0
             obj['status']={'phase':'Failed' if exitcode else 'Succeeded','containerStatuses':[{'restartCount':0,'imageID':'containerd://sha256:'+'a'*64,'state':{'terminated':{'exitCode':exitcode,'finishedAt':'2026-10-01T00:00:00Z'}}}]}
+        elif kind=='NetworkPolicy' and os.environ.get('FAKE_OMITEMPTY')=='1':
+            for field in ('ingress','egress'):obj['spec'].pop(field,None)
         emit(obj)
     elif verb=='logs': print(db['logs'][args[1]],end='')
     else: rc=1
@@ -141,6 +146,15 @@ with tempfile.TemporaryDirectory(prefix='FAKE-staging-workflow-') as tmp:
             assert len(spec['containers'])==1 and len(spec['volumes'])==1 and 'env' not in spec['containers'][0]
     assert not (checked/'receipt.json').exists()
     command(restore,['check']+restore_args,False)  # Existing output/namespace fail closed.
+    write(state,backup_state)
+    omitted=t/'api-omitempty'
+    omitted_args=[str(omitted) if x==str(checked) else x for x in restore_args]
+    command(restore,['check']+omitted_args,True,{'FAKE_OMITEMPTY':'1'})
+    assert len(json.loads((omitted/'evidence.json').read_text())['probes'])==10
+    write(state,backup_state)
+    host_network=t/'api-host-network'
+    command(restore,['check']+[str(host_network) if x==str(checked) else x for x in restore_args],False,{'FAKE_HOST_NETWORK':'1'})
+    assert not (host_network/'evidence.json').exists()
     for failure in ('FAKE_PROBE_FAIL','FAKE_UNREADY','FAKE_SNAPSHOT_ERROR'):
         write(state,backup_state)
         target=t/failure
@@ -178,6 +192,18 @@ with tempfile.TemporaryDirectory(prefix='FAKE-staging-workflow-') as tmp:
     # Execute the actual probe functions on ordinary SYNTHETIC files, not just fake logs.
     embedded=restore.read_text().split("<<'PY'\n",1)[1].rsplit('\nPY',1)[0]
     tree=ast.parse(embedded);probe=next(ast.literal_eval(node.value) for node in tree.body if isinstance(node,ast.Assign) and any(isinstance(x,ast.Name) and x.id=='PROBE' for x in node.targets))
+    observer_names={'subset','pod_spec_matches','deny_all_spec'}
+    observer_scope={}
+    exec(compile(ast.Module(body=[n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name in observer_names],type_ignores=[]),'<actual-restore-serialization>','exec'),observer_scope)
+    deny=observer_scope['deny_all_spec']; match=observer_scope['pod_spec_matches']
+    base_policy={'podSelector':{},'policyTypes':['Ingress','Egress']}
+    assert deny(base_policy) and deny({**base_policy,'ingress':[],'egress':[]})
+    for bad in ({**base_policy,'ingress':[{}]},{**base_policy,'egress':None},{**base_policy,'egress':{}},{**base_policy,'unexpected':True},{'podSelector':{}}):
+        assert not deny(bad)
+    spec={'hostNetwork':False,'hostPID':False,'hostIPC':False,'automountServiceAccountToken':False}
+    assert match(spec,{'automountServiceAccountToken':False})
+    for bad in ({},{'automountServiceAccountToken':0},{**spec,'hostNetwork':True},{**spec,'hostPID':None},{**spec,'hostIPC':0}):
+        assert not match(spec,bad)
     functions=probe.split('\ntry:\n',1)[0];scope={};exec(functions,scope)
     files=t/'synthetic-files';files.mkdir();(files/'data').write_bytes(b'SYNTHETIC NONSECRET BYTES')
     records=scope['inventory'](files);assert records[0]['sha256']==hashlib.sha256(b'SYNTHETIC NONSECRET BYTES').hexdigest()

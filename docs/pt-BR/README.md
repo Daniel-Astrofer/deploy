@@ -11,6 +11,8 @@ Comece por estes documentos:
 - [Fronteira do repositório](../REPOSITORY_BOUNDARY.md): separação entre código e deploy.
 - [Procedimento de staging](../ops/STAGING_DEPLOY.md): processo atual e bloqueios.
 - [Identidade SPIFFE/SPIRE em staging](SPIRE-STAGING.md): arquitetura, rollout e limites.
+- [Estado da implementação do serviço completo](../operations/cell-implementation-status-2026-10-02.md): resultados comprovados e implementações ainda pendentes.
+- [Publicação offline de releases](../operations/release-publication.md): assinaturas TUF/pacote e recuperação do histórico local.
 
 ## Uso local
 

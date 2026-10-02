@@ -244,12 +244,29 @@ def pod_spec(i, config):
 def subset(expected, actual):
     if isinstance(expected, dict): return isinstance(actual, dict) and all(key in actual and subset(value, actual[key]) for key, value in expected.items())
     if isinstance(expected, list): return isinstance(actual, list) and len(actual) == len(expected) and all(subset(x, y) for x, y in zip(expected, actual))
+    if isinstance(expected, bool): return isinstance(actual, bool) and expected == actual
     return expected == actual
+def pod_spec_matches(expected, actual):
+    # Kubernetes omits these three default-false PodSpec fields. No other
+    # missing field, especially token/mount/security controls, is accepted.
+    if not isinstance(actual, dict): return False
+    expected = dict(expected)
+    for field in ('hostNetwork', 'hostPID', 'hostIPC'):
+        if expected.get(field) is False and field not in actual: expected.pop(field)
+    return subset(expected, actual)
+def deny_all_spec(actual):
+    if not isinstance(actual, dict): return False
+    actual = dict(actual)
+    for field in ('ingress', 'egress'):
+        if field in actual:
+            if not isinstance(actual[field], list) or actual[field]: return False
+            actual.pop(field)
+    return actual == {'podSelector': {}, 'policyTypes': ['Ingress', 'Egress']}
 def isolation():
     namespace = get('namespace', run)
     need(namespace['metadata'].get('labels', {}).get(LABEL) == run and not namespace['metadata'].get('deletionTimestamp'), 'namespace identity/isolation changed')
     policies = get('networkpolicies', ns=run)['items']
-    need(len(policies) == 1 and policies[0]['metadata']['name'] == 'deny-all' and policies[0]['spec'] == {'podSelector': {}, 'policyTypes': ['Ingress', 'Egress'], 'ingress': [], 'egress': []}, 'only default-deny ingress/egress policy is permitted')
+    need(len(policies) == 1 and policies[0]['metadata']['name'] == 'deny-all' and deny_all_spec(policies[0]['spec']), 'only default-deny ingress/egress policy is permitted')
     for resource in ('secrets', 'services', 'endpoints', 'endpointslices', 'ingresses', 'deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'rolebindings', 'roles'):
         need(not get(resource, ns=run)['items'], 'unexpected resource in isolated namespace: ' + resource)
     sa = get('serviceaccount', 'restore-check', run)
@@ -269,7 +286,7 @@ def observed(i, s, config):
     restored_handle = pv['spec']['csi'].get('volumeHandle')
     need(restored_handle and restored_handle not in {original['spec']['source']['volumeHandle'] for original in source_contents}, 'restore must provision a distinct backend volume, never reuse any source')
     pod = get('pod', 'probe-' + str(i), run)
-    need(subset(pod_spec(i, config), pod['spec']) and not pod['spec'].get('initContainers') and not pod['spec'].get('ephemeralContainers') and not pod['spec'].get('imagePullSecrets'), 'probe pod mutated or credentials injected')
+    need(pod_spec_matches(pod_spec(i, config), pod['spec']) and not pod['spec'].get('initContainers') and not pod['spec'].get('ephemeralContainers') and not pod['spec'].get('imagePullSecrets'), 'probe pod mutated or credentials injected')
     container = pod['spec']['containers'][0]
     need(set(container) <= {'name', 'image', 'imagePullPolicy', 'command', 'securityContext', 'resources', 'volumeMounts', 'terminationMessagePath', 'terminationMessagePolicy'}, 'unexpected probe container fields (env/ports/lifecycle/etc)')
     security = container['securityContext']
@@ -343,7 +360,7 @@ try:
             isolation()
             # Create consumer before waiting for Bound: supports WaitForFirstConsumer storage.
             pod = create({'apiVersion': 'v1', 'kind': 'Pod', 'metadata': meta('probe-' + str(i), run), 'spec': pod_spec(i, configs[i])})
-            need(subset(pod_spec(i, configs[i]), pod['spec']) and not pod['spec'].get('initContainers'), 'admission mutated probe')
+            need(pod_spec_matches(pod_spec(i, configs[i]), pod['spec']) and not pod['spec'].get('initContainers'), 'admission mutated probe')
             wait('pods', 'probe-' + str(i), run, lambda x: x.get('status', {}).get('phase') == 'Succeeded')
             record = observed(i, s, configs[i])
             save('probe-' + str(i) + '.json', record)
