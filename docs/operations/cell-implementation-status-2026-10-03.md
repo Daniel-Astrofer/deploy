@@ -11,6 +11,8 @@ KFE work remains on isolated `feat/complete-cell-operations`, current commit
 `feat/staging-volumesnapshot-attestation-request`; this Deploy wave changes
 documentation only. Dirty primary checkouts were untouched. No production update,
 real custody/provider action, release authority provisioning or signer activation.
+Admin's current isolated `feat/complete-cell-operations` commit is `f84dec2`;
+it adds a bounded KFE diagnostic client, not Admin installation by the updater.
 
 ## Implemented and verified
 
@@ -145,6 +147,36 @@ The audit found no conflict-notification route or adapter override in inspected
 isolated Core sources. The producer's -1 DTO defect is therefore not the only
 delivery gap. Changing it to 0 alone would not provide an authenticated receiver,
 event semantics or proof of refund; no financial policy was rewritten.
+
+## Admin operator-client continuation
+
+The installed jctl distribution now exposes `kfe maintenance status` and
+`kfe maintenance admissions --limit 1..100 [--cursor NEXT_CURSOR]`. Both require
+an explicit --kfe-endpoint origin and use only the dedicated runtime
+KEROSENE_KFE_ADMIN_TOKEN, never a Core profile/origin/token. Production retains
+the existing operator mTLS requirements. No drift into database access, drain,
+resume, clear, automatic paging or update mutation is added.
+
+The new client validates the exact read routes, expected schema and diagnostic
+page flag; rejects redirects, duplicate/trailing JSON and oversized streamed
+bodies; and applies a complete-body deadline. A successful read does not prove
+remote facts or authorize financial completion. Staging requires HTTPS and the
+dedicated token; HTTP is limited to explicit local loopback test mode.
+
+Current Admin `check installDist` passed **75 tests, zero failures/errors/skips**.
+The eleven added cases include loopback HTTP, redirect/error/boundary handling,
+stalled-body cancellation and actual Main JVM launches proving Core credentials
+are not forwarded and the dedicated token is not printed. They do not qualify
+authentic session issuance, actual operator mTLS or deployed KFE interaction.
+Deploy's offline publication suite also passed all **45 cases** with this newly
+built CLI binary. Other component suites, including KFE's 1,828/31 PostgreSQL
+results above, were not rerun in this client-only wave.
+
+The Admin catalog, quickstart, source-boundary document and status are updated.
+All four live execution blockers remain, including Admin artifact installation:
+a locally built CLI distribution and diagnostic command integration are not
+automatic approved-OCI installation or complete-Cell deployment qualification.
+No runtime manifest, signer, cluster, retained snapshots or custody state changed.
 
 ## Remaining work for the complete service
 
