@@ -1,0 +1,126 @@
+# Complete Cell implementation checkpoint — 2026-10-03
+
+**Not complete. Installation/update remains fail-closed.** Scope is the full
+service: Admin/jctl/operator UI, Core, KFE, Node, Vault, web-page, PostgreSQL,
+Redis, Bitcoin, LND and Tor. This checkpoint updates the KFE participant gaps in
+the [October 2 checkpoint](cell-implementation-status-2026-10-02.md); unchanged
+component evidence there is historical, not a newly rerun full-Cell test.
+
+KFE work remains on isolated `feat/complete-cell-operations`, commit `0c46542`
+(continues `074e08a`). Deploy remains on
+`feat/staging-volumesnapshot-attestation-request`; this Deploy wave changes
+documentation only. Dirty primary checkouts were untouched. No production update,
+real custody/provider action, release authority provisioning or signer activation.
+
+## Implemented and verified
+
+Three disjoint workers implemented bounded leaves; the coordinator reviewed and
+integrated them, owned all builds, and repaired the shared transaction guard.
+All workers are closed. Static handoff alone is not verification evidence.
+
+- Balance genesis, reservation/settlement/release, available/reorg/observed writes,
+  defensive zeroing and locked mutable balance access now admit before effects.
+- Derivation cursor issuance admits before locking/writing; original algorithm
+  and REQUIRED propagation remain. Direct no-transaction calls stay uncertain.
+- Fee credit/reversal/restoration and movement recording admit before existence
+  checks, profit lookup and writes; original idempotency/financial ordering remain.
+- Lightning reservation, consumption/release and enabled circuit-breaker
+  evaluation admit before locks, probes or latch changes. Pure capacity observations
+  and disabled-breaker noops stay available; reserve/probe outcomes stay uncertain.
+- Audit hashing/appender lock/persistence/logging have independent admission.
+  REQUIRED and forensic REQUIRES_NEW propagation are preserved, not replaced.
+- State transitions/audit, idempotency reserve/complete, external outbox production,
+  internal payment-request lock/markPaid now admit before managed state or effects.
+  Pure lookups/hashing and existing noops retain their contracts.
+
+Every new boundary has an unavailable constructor default and mandatory real
+guard injection. Returned IDs/managed entities are not continuation credentials.
+Financial algorithms, schema and transaction propagation were not rewritten.
+
+### Reproduced and repaired nested-transaction bug
+
+A real PostgreSQL regression demonstrated that a caught REQUIRES_NEW commit
+failure could previously leave a successfully committing outer admission
+COMPLETED, although its inner cursor write rolled back. Nested completion now
+preserves failure/unknown uncertainty before root resolution. Nested transactions
+without observable synchronization reject before effects. A root admitted without
+an observed transaction cannot obtain completion proof merely by starting one later.
+Joined committed local work still follows its original transaction contract.
+
+The reproduced database case now leaves UNCERTAIN. This is maintenance bookkeeping
+repair, not financial-policy replacement or permission to resume/update.
+
+### Accepted verification
+
+Final `./gradlew --no-daemon check bootJar`: **1,503 tests; zero failures, errors
+or skips**. All new source/test files were included. Local success is not a claim
+that hosted CI ran or that the complete service was installed.
+
+The four new bounded participant unit suites total 277 cases (63 balance/cursor,
+53 fee/movement, 73 liquidity/audit, 88 transaction participants). The real
+PostgreSQL suites ran 14 generic/publisher cases and 12 full-schema cases.
+Full-schema verification uses the entire actual Flyway chain through V58,
+Hibernate schema validation, exact balance/cursor/audit JPA entities/repositories,
+real transactional proxies and JpaTransactionManager. New cases cover:
+
+- Balance/cursor commit, rollback, drain rejection and deferred PostgreSQL commit
+  rejection after service return, with actual stored buckets/hash/index assertions.
+- Two already admitted existing-cursor writers finishing with distinct indices
+  across drain while fresh issuance is rejected. Absent-cursor creation races are
+  not thereby qualified.
+- REQUIRED audit rollback and REQUIRES_NEW forensic survival across outer rollback.
+  The real append-only trigger rejects deletion; synthetic forensic rows remain
+  in the exclusive disposable database. No trigger bypass or Flyway clean.
+- The caught inner commit-failure/outer commit regression and unchanged nonzero
+  unknown coverage blockers.
+
+Metadata/event/structured-log ports in these JPA fixtures are mocked. Real
+delivery, uncommitted financial foreign-key scenarios, concurrent audit chaining,
+liquidity advisory-lock/terminal concurrency and the complete submit context are
+not inferred from these results. KFE STATUS and the indexed bounded runbooks
+record those limits.
+
+## Remaining work for the complete service
+
+1. **Complete KFE drain/recovery:** qualify remaining upstream settlement/quorum,
+   direct MPC/approval/notification and embedded starts before external effects;
+   alternate host security chains; real reconnect/durable cursors/hints/source
+   reconciliation; and audited completion/reconciliation of uncertain admissions.
+   Protected leaves do not certify all callers. Preserve the three unknown counts
+   until complete inventory/race/restart evidence. Independently qualify the
+   previously documented conflict/refund concern; no financial-policy fix claimed.
+2. **Authoritative Bank compatibility:** implement target build/runtime/provenance,
+   migration/recovery decisions and mandatory-mTLS deployment qualification. The
+   current real producer's unknown/incompatible result and signed Node transport
+   are not successful compatibility proof.
+3. **Independent Vault release verification:** independent source/build checks and
+   threshold attestation integrated with apply. Git/archive storage is not release
+   execution authority.
+4. **Release material and availability:** all pinned-source reproducible OCI/SBOM/
+   provenance, independently authorized signatures and durable Vault/mirror fetching
+   with Byzantine-safe availability. The prior offline publisher is not a build or
+   distribution/reconciliation service.
+5. **Installation/update execution:** Admin artifact installation, ordered migrations
+   with tested data recovery and replica-by-replica Node/Vault rollout preserving
+   quorum. All four explicit `infra/stack/lifecycle.py` execution blockers remain
+   unchanged; do not remove them as flags.
+6. **Real restore qualification:** resolve retained WFFC pilot binding failure,
+   obtain authorized lab capacity, run the actual ten-volume restore CLI and
+   qualify failure/recovery matrices including genuine LND state. No live final
+   qualification or qualification.json exists.
+7. **Whole-Cell acceptance:** actual Admin/Node/UI and all services through install,
+   release notice, plan, drain, update, interruption, recovery, restore and explicit
+   operator-approved resume, retaining bound evidence and never auto-activating
+   Vault signers.
+
+KFE `mutationCoverageUnknown`, `callbackCoverageUnknown` and
+`readSideEffectsUnknown` remain 1; safeToUpdate remains false. HTTP/remote and many
+participant outcomes intentionally accumulate UNCERTAIN with no force-clear or
+automatic replay/resume. This is not yet an operationally complete safe updater.
+
+The read-only Docker capacity check in this wave reports 0 MiB available and 100%
+use on the named 40 GiB loop filesystem, below the required 256 MiB lab margin.
+No resize, prune, data deletion, cluster recreation or new live CSI qualification
+was attempted. Capacity is an external test constraint, not the only remaining
+implementation requirement. The dedicated PostgreSQL fixtures use the separate
+workspace-backed disposable lab; they are not production recovery evidence.

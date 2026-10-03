@@ -8,6 +8,7 @@ Documentation entrypoints:
 - [Documentação para operadores em português](docs/pt-BR/README.md)
 - [Docker, Kubernetes and scripts index](docs/en/DEPLOYMENT_INDEX.md)
 - [Kerosene Stack release lock and safe update plan](docs/ops/KEROSENE_STACK.md)
+- [Complete Cell implementation checkpoint — not yet qualified](docs/operations/cell-implementation-status-2026-10-03.md)
 
 This repository contains Docker/Kubernetes/Tor/observability configuration and
 operational validation for independently released services. It must not contain runtime secrets,
