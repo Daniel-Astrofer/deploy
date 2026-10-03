@@ -362,6 +362,38 @@ class DeploymentTest(unittest.TestCase):
         with patch.object(lifecycle, "run", side_effect=live), self.assertRaisesRegex(stack.ApplyBlockedError, "not safe"):
             lifecycle.verify_critical_group_available(stack, ["/bound/kubectl"], "vault", members, 2)
 
+    def test_complete_cell_acceptance_binds_every_component_and_safety_scenario(self):
+        verifier = self.root / "acceptance-verifier"
+        verifier.write_bytes(b"synthetic installed verifier")
+        verifier.chmod(0o700)
+        config = {"cellId": "cell-a", "cluster": {"systemNamespaceUid": "cluster-uid",
+                  "kubeconfig": "/protected/kubeconfig", "context": "cell-a"},
+                  "acceptanceVerifier": {"path": str(verifier),
+                  "digest": "sha256:" + lifecycle.hashlib.sha256(verifier.read_bytes()).hexdigest()}}
+        summary = copy.deepcopy(self.summary)
+        summary["_canonicalDigest"] = "sha256:" + "b" * 64
+        passed = {"passed": True, "evidenceDigest": "sha256:" + "a" * 64}
+        report = {"schema": "kerosene.cell-acceptance/v1", "cellId": "cell-a", "clusterUid": "cluster-uid",
+                  "releaseLockCanonicalDigest": summary["_canonicalDigest"], "sequence": summary["sequence"],
+                  "changeId": "change-a", "operatorId": "operator-a",
+                  "observedAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+                  "components": {name: dict(passed) for name in summary["services"]},
+                  "scenarios": {name: dict(passed) for name in ("releaseObserved", "planReviewed",
+                      "maintenanceDrained", "rolloutCompleted", "interruptionRecovered", "restoreQualified",
+                      "nodeQuorumReady", "vaultQuorumReady", "operatorResumeGuarded")},
+                  "financialReadinessVerified": True, "autoActivateVaultSigners": False,
+                  "operatorResumeRequired": True, "operatorResumePerformed": False}
+        process = SimpleNamespace(returncode=0, stdout=json.dumps(report).encode(), stderr=b"")
+        args = SimpleNamespace(change_id="change-a", operator_id="operator-a")
+        with patch.object(lifecycle.subprocess, "run", return_value=process) as run:
+            result = lifecycle.verify_complete_cell_acceptance(stack, config, self.root, summary, args)
+        self.assertTrue(result["financialReadinessVerified"])
+        self.assertIn("--cluster-uid", run.call_args.args[0])
+        report["components"].pop("admin")
+        process.stdout = json.dumps(report).encode()
+        with patch.object(lifecycle.subprocess, "run", return_value=process), self.assertRaisesRegex(stack.ApplyBlockedError, "coverage"):
+            lifecycle.verify_complete_cell_acceptance(stack, config, self.root, summary, args)
+
     def test_canonical_node_tor_sidecar_topology_is_supported_in_both_planes(self):
         node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node")
         tor = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "tor")
@@ -409,7 +441,7 @@ class DeploymentTest(unittest.TestCase):
         # Test orchestration only: capabilities and readiness are mocked. This
         # deliberately provides no qualification for live apply or quorum.
         config = {"cellId": "unit", "cluster": {"kubeconfig": "/protected/cell.conf", "context": "cell-a"}}
-        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value=config), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]) as binding, patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "verify_critical_group_available", side_effect=self.critical_observations) as critical_ready, patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry, *precondition: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run") as run, patch.dict(lifecycle.os.environ, {}, clear=True):
+        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value=config), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]) as binding, patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "verify_complete_cell_acceptance", return_value={}), patch.object(lifecycle, "verify_critical_group_available", side_effect=self.critical_observations) as critical_ready, patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry, *precondition: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run") as run, patch.dict(lifecycle.os.environ, {}, clear=True):
             lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
             self.assertEqual(binding.call_count, 2)
             smokes = [call.args[0] for call in run.call_args_list if call.args[0][0] == "bash"]

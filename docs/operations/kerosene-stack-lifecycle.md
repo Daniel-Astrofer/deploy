@@ -26,8 +26,8 @@ actual installation requires a plan, but no SQL is executed by its validation.
 Provision public TUF root, governance roster, independent Vault compatibility
 roster, snapshot-provider public key and real consensus anchor out of band.
 Never trust anchors embedded in a downloaded
-candidate. Independently install the governance verifier and approve its
-binary digest. Private keys, sessions and Kubernetes credentials stay outside
+candidate. Independently install the governance and whole-Cell acceptance
+verifiers and approve their binary digests. Private keys, sessions and Kubernetes credentials stay outside
 the release archive and update journal.
 
 ```sh
@@ -38,6 +38,7 @@ infra/kerosene-stack init --cell-dir /protected/cell-a --cell-id cell-a \
   --snapshot-provider-key /protected/snapshot-provider.pub \
   --consensus-anchor /protected/consensus-anchor.json \
   --consensus-verifier /protected/kerosene-release-consensus \
+  --acceptance-verifier /protected/kerosene-cell-acceptance \
   --kubeconfig /protected/cell-a.kubeconfig --kube-context staging-cell-a
 infra/kerosene-stack preflight --cell-dir /protected/cell-a
 infra/kerosene-stack preflight --cell-dir /protected/cell-a \
@@ -292,8 +293,13 @@ implementation capabilities exist and their integration tests pass:
    `node-vault-live-quorum-rollout-not-qualified` blocker remains until this is
    exercised against the real two-plane Node and three-member Vault topology.
 4. Live OCI qualification of the integrated Admin artifact installation.
-5. Complete-Cell acceptance checks covering actual protocol/readiness, not just
-   the legacy single-Vault health and Core login scripts.
+5. Live qualification of the integrated complete-Cell verifier contract. Its
+   bootstrap-pinned executable must bind the Cell, cluster UID, release,
+   sequence, change and operator; prove every release component plus rollout,
+   interruption, restore, Node/Vault quorum and resume-guard scenarios; and
+   report fresh financial readiness without activating signers or resuming
+   maintenance. `complete-cell-live-acceptance-not-qualified` remains until a
+   real full-service run produces that evidence.
 
 The installed legacy smoke subprocesses now receive the bootstrap's explicit
 kubectl executable, kubeconfig and context, after rechecking cluster UID at the
@@ -302,8 +308,9 @@ The default unbound scripts remain available only for their legacy manual use.
 These probes still use a loopback login and insecure TLS single-Vault health;
 they are not authenticated full-quorum, financial readiness or data-recovery
 qualification. Their checkpoint explicitly records `completeCellAcceptance=false`.
-The dedicated acceptance capability blocker prevents them from being promoted
-to complete-Cell success by removing an unrelated execution blocker.
+The pinned verifier runs after these probes and emits a separate
+`complete-cell-acceptance-passed` checkpoint. The dedicated live-qualification
+blocker prevents a mocked or synthetic verifier from authorizing apply.
 
 Also required for final Cell acceptance: authoritative complete-Cell compatibility
 checks behind the implemented signed Core Bank read producer,

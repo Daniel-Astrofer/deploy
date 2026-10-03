@@ -38,7 +38,7 @@ EXECUTION_BLOCKERS = (
     "migration-executor-live-recovery-not-qualified",
     "node-vault-live-quorum-rollout-not-qualified",
     "admin-artifact-installation-not-qualified",
-    "complete-cell-acceptance-not-qualified",
+    "complete-cell-live-acceptance-not-qualified",
 )
 
 
@@ -993,6 +993,8 @@ def execute(stack, artifact, summary, args, checkpoint):
         for script in ("smoke-staging-vault.sh", "smoke-staging.sh"):
             run(["bash", str(root / "infra/kubernetes/scripts" / script), *binding])
         checkpoint("legacy-smokes-passed", {"completeCellAcceptance": False})
+        acceptance = verify_complete_cell_acceptance(stack, config, args.cell_dir, summary, args)
+        checkpoint("complete-cell-acceptance-passed", acceptance)
 
 
 def load_config(stack, directory):
@@ -1003,7 +1005,7 @@ def load_config(stack, directory):
 
 
 def verify_bootstrap_trust(stack, directory, config):
-    stack.require_keys(config, "Cell configuration", ("schema", "cellId", "environment", "trustDigests", "autoActivateVaultSigners"), ("consensusVerifier", "cluster"))
+    stack.require_keys(config, "Cell configuration", ("schema", "cellId", "environment", "trustDigests", "autoActivateVaultSigners"), ("consensusVerifier", "acceptanceVerifier", "cluster"))
     if config["schema"] != "kerosene.stack.cell/v1" or config["environment"] != "staging-cell" or config["autoActivateVaultSigners"] is not False:
         raise stack.ReleaseValidationError("unsupported Cell configuration or forbidden signer activation")
     expected_names = {"tuf-root.json", "validator-roster.json", "vault-roster.json", "snapshot-provider.pub"}
@@ -1249,6 +1251,91 @@ def verify_recovery_plan(stack, release, summary, args):
     return {"schema": plan["schema"], "testEvidenceDigest": plan["testEvidenceDigest"], "signaturesVerified": count, "testedAt": plan["testedAt"]}
 
 
+def verify_complete_cell_acceptance(stack, config, cell_dir, summary, args):
+    """Run the bootstrap-pinned whole-Cell verifier and validate exact output.
+
+    The verifier owns protocol-specific authenticated probes. The lifecycle
+    controller owns executable identity, cluster/release binding, freshness and
+    the fail-closed acceptance contract. No signer is activated and maintenance
+    is not resumed by this operation.
+    """
+    verifier = config.get("acceptanceVerifier")
+    cluster = config.get("cluster")
+    if not isinstance(verifier, dict) or not isinstance(cluster, dict):
+        raise stack.ApplyBlockedError("Cell bootstrap lacks a pinned complete-Cell acceptance verifier or cluster binding")
+    stack.require_keys(verifier, "acceptance verifier", ("path", "digest"))
+    path = Path(verifier["path"])
+    if not path.is_absolute():
+        raise stack.ApplyBlockedError("acceptance verifier must have an absolute installed path")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        import stat
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode) or info.st_size > 64 * 1024 * 1024 or
+                info.st_mode & 0o022 or not info.st_mode & 0o111):
+            raise stack.ApplyBlockedError("acceptance verifier must be bounded, executable and protected against shared writes")
+        h = hashlib.sha256()
+        while chunk := os.read(descriptor, 1024 * 1024):
+            h.update(chunk)
+        if "sha256:" + h.hexdigest() != verifier["digest"]:
+            raise stack.ApplyBlockedError("installed acceptance verifier digest changed")
+        command = [f"/proc/self/fd/{descriptor}", "verify", "--cell-dir", str(Path(cell_dir).absolute()),
+                   "--cell-id", config["cellId"], "--cluster-uid", cluster["systemNamespaceUid"],
+                   "--kubeconfig", cluster["kubeconfig"], "--context", cluster["context"],
+                   "--release-digest", summary["_canonicalDigest"], "--sequence", str(summary["sequence"]),
+                   "--change-id", args.change_id, "--operator-id", args.operator_id]
+        result = subprocess.run(command, pass_fds=(descriptor,), capture_output=True, timeout=300, check=False)
+    finally:
+        os.close(descriptor)
+    if result.returncode or len(result.stdout) > 64 * 1024:
+        raise stack.ApplyBlockedError("complete-Cell acceptance verifier failed")
+    try:
+        def unique_fields(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate acceptance JSON field")
+                value[key] = item
+            return value
+        report = json.loads(result.stdout, object_pairs_hook=unique_fields,
+                            parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+    except (ValueError, TypeError) as error:
+        raise stack.ApplyBlockedError("complete-Cell acceptance output is invalid") from error
+    required = ("schema", "cellId", "clusterUid", "releaseLockCanonicalDigest", "sequence", "changeId",
+                "operatorId", "observedAt", "components", "scenarios", "financialReadinessVerified",
+                "autoActivateVaultSigners", "operatorResumeRequired", "operatorResumePerformed")
+    stack.require_keys(report, "complete-Cell acceptance", required)
+    expected = {"schema": "kerosene.cell-acceptance/v1", "cellId": config["cellId"],
+                "clusterUid": cluster["systemNamespaceUid"], "releaseLockCanonicalDigest": summary["_canonicalDigest"],
+                "sequence": summary["sequence"], "changeId": args.change_id, "operatorId": args.operator_id,
+                "financialReadinessVerified": True, "autoActivateVaultSigners": False,
+                "operatorResumeRequired": True, "operatorResumePerformed": False}
+    if any(report.get(key) != value for key, value in expected.items()):
+        raise stack.ApplyBlockedError("complete-Cell acceptance binding or safety result differs")
+    observed = stack.parse_rfc3339(report["observedAt"], "acceptance observedAt")
+    now = dt.datetime.now(dt.timezone.utc)
+    if observed > now + dt.timedelta(seconds=30) or now - observed > dt.timedelta(seconds=30):
+        raise stack.ApplyBlockedError("complete-Cell acceptance is stale or future-dated")
+    expected_components = set(summary["services"])
+    components = stack.require_object(report["components"], "acceptance components")
+    scenarios = stack.require_object(report["scenarios"], "acceptance scenarios")
+    expected_scenarios = {"releaseObserved", "planReviewed", "maintenanceDrained", "rolloutCompleted",
+                          "interruptionRecovered", "restoreQualified", "nodeQuorumReady", "vaultQuorumReady",
+                          "operatorResumeGuarded"}
+    if set(components) != expected_components or set(scenarios) != expected_scenarios:
+        raise stack.ApplyBlockedError("complete-Cell acceptance coverage is incomplete or unexpected")
+    for label, checks in (("component", components), ("scenario", scenarios)):
+        for name, check in checks.items():
+            stack.require_keys(check, f"acceptance {label} {name}", ("passed", "evidenceDigest"))
+            if check["passed"] is not True:
+                raise stack.ApplyBlockedError(f"complete-Cell acceptance {label} failed: {name}")
+            stack.require_digest(check["evidenceDigest"], f"acceptance {label} {name} evidence")
+    return {"schema": report["schema"], "observedAt": report["observedAt"],
+            "componentsVerified": sorted(components), "scenariosVerified": sorted(scenarios),
+            "financialReadinessVerified": True, "operatorResumeRequired": True,
+            "operatorResumePerformed": False}
+
+
 def command_init(stack, args):
     target = Path(args.cell_dir).absolute()
     if target.exists():
@@ -1283,6 +1370,9 @@ def command_init(stack, args):
     if args.consensus_verifier:
         raw = stack.read_regular_file_bytes(Path(args.consensus_verifier), "installed consensus verifier", 64 * 1024 * 1024)
         config["consensusVerifier"] = {"path": str(Path(args.consensus_verifier).absolute()), "digest": "sha256:" + hashlib.sha256(raw).hexdigest()}
+    if args.acceptance_verifier:
+        raw = stack.read_regular_file_bytes(Path(args.acceptance_verifier), "installed complete-Cell acceptance verifier", 64 * 1024 * 1024)
+        config["acceptanceVerifier"] = {"path": str(Path(args.acceptance_verifier).absolute()), "digest": "sha256:" + hashlib.sha256(raw).hexdigest()}
     stack.atomic_write_json(str(target / "cell.json"), config, mode=0o600)
     stack.prepare_state_dir(str(target / "state"))
     print(json.dumps({"status": "initialized", "cellId": args.cell_id, "cellDir": str(target), "servicesStarted": False, "nextAction": "preflight"}))
@@ -1355,6 +1445,7 @@ def add_commands(stack, subcommands):
     init.add_argument("--snapshot-provider-key", required=True)
     init.add_argument("--consensus-anchor", help="independently verified immutable Comet light block and governance policy")
     init.add_argument("--consensus-verifier", help="independently installed verifier executable, pinned by digest at bootstrap")
+    init.add_argument("--acceptance-verifier", help="independently installed whole-Cell protocol verifier, pinned by digest at bootstrap")
     init.add_argument("--kubeconfig", help="explicit Kubernetes configuration reference; secrets remain outside the Cell journal")
     init.add_argument("--kube-context", help="explicit context pinned to kube-system UID at initialization")
     init.set_defaults(handler=lambda args: command_init(stack, args))

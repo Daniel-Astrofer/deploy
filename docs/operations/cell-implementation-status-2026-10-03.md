@@ -266,10 +266,12 @@ No runtime manifest, signer, cluster, retained snapshots or custody state change
    obtain authorized lab capacity, run the actual ten-volume restore CLI and
    qualify failure/recovery matrices including genuine LND state. No live final
    qualification or qualification.json exists.
-7. **Whole-Cell acceptance:** actual Admin/Node/UI and all services through install,
-   release notice, plan, drain, update, interruption, recovery, restore and explicit
-   operator-approved resume, retaining bound evidence and never auto-activating
-   Vault signers.
+7. **Whole-Cell acceptance:** qualify the integrated bootstrap-pinned verifier
+   against actual Admin/Node/UI and all services through release observation,
+   plan, drain, update, interruption, recovery and restore. Its strict report
+   binds Cell/cluster/release/change/operator, requires evidence digests for
+   every component and safety scenario, leaves resume explicitly required but
+   unperformed, and never auto-activates Vault signers.
 
 KFE `mutationCoverageUnknown`, `callbackCoverageUnknown` and
 `readSideEffectsUnknown` remain 1; safeToUpdate remains false. HTTP/remote and many
