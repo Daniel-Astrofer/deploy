@@ -206,6 +206,7 @@ func testAdmissionHTTPConsumption(t *testing.T, db *sql.DB, anchor TrustAnchor, 
 		case <-time.After(10 * time.Second):
 			t.Fatal("service shutdown timed out")
 		}
+		testAdmissionCLIRecovery(t, dir, path, hashBytes(profile), address, client, encodedRequest, result.AdmissionDigest)
 	}
 	return result
 }

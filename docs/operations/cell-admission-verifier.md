@@ -98,7 +98,7 @@ fixed mandatory-mTLS server before binding. SIGINT/SIGTERM stop new requests and
 allow up to 45 seconds for active requests; forced shutdown requires inspection
 of uncertain consumption. Restart retains registry records and does not reuse
 nonces. It creates no roles, certificates, policies or Cell workloads. The
-compiled command/signal qualification, live cluster binding
+live cluster binding
 revalidation and installation controller integration remain pending. Do not
 interpret a successfully started admission listener as complete Cell acceptance.
 
@@ -106,8 +106,13 @@ The opt-in real PostgreSQL/TLS harness also exercises `runAdmissionService`, the
 command's execution path: protected profile/anchor/operator policy and PKI are
 loaded, the connected database/user are verified, and a real mTLS HTTP request
 inspects a previously consumed admission without authorizing installation.
-Context cancellation shuts down this listener successfully. This is not yet a
-subprocess CLI/SIGTERM test or a live Bank/Cell installation qualification.
+Context cancellation shuts down this listener successfully. The same lab builds
+the actual CLI and starts two consecutive `serve-admission` subprocesses using
+the protected profile. Each inspects the retained admission, rejects nonce replay
+and exits successfully after SIGTERM. Startup and shutdown are bounded, and
+failed test processes are killed and reaped. This qualifies the command boundary
+with synthetic authority and real PostgreSQL/TLS, not live Bank/Cell installation
+or database restart/failover recovery.
 
 `admissionOperatorIdentity` derives transport identity from the actual completed
 mandatory-mTLS listener state, verified certificate chain, current certificate
