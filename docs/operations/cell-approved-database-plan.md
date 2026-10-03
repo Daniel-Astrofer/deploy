@@ -69,9 +69,18 @@ no shell, arbitrary hook, image startup script or workload command is reused.
 Only three datasource variables from the service's migration Secret are supplied.
 Runtime/custody configuration, ports and runtime Service/PDB labels are not copied.
 
+The `capabilities` preparation mode instead supplies an empty environment list,
+no Secret references or Secret volumes, and a 30-second deadline. Its fixed
+argument is `--cell-migration=capabilities`; its Job identity differs from
+`migrate` and `validate` and remains within Kubernetes' 63-character limit.
+This does not erase image-baked environment values or isolate network access.
+The future executor must first establish network isolation and independently
+qualify the image; self-reported JSON is not release authorization, an
+attestation, or proof that another execution path is free of side effects.
+
 Jobs are nonroot, read-only apart from bounded `/tmp`, without service-account
 tokens, extra capabilities, init containers or automatic retries. They have a
-five-minute deadline and no automatic TTL cleanup. Names bind update identity,
+five-minute deadline for `migrate`/`validate` and no automatic TTL cleanup. Names bind update identity,
 plan digest, component and operation; complete identities remain in annotations.
 Existing Jobs must still be matched by actual UID/spec and journal ownership
 before the future executor could resume them. Names alone are not completion proof.

@@ -342,7 +342,7 @@ def initial_database_migration_jobs(stack, artifact, summary, update_id, operati
     Scheduling, bound-target verification and recovery are still unqualified.
     """
     stack.require_digest(update_id, "database migration update identity")
-    if operation not in ("validate", "migrate"):
+    if operation not in ("capabilities", "validate", "migrate"):
         raise stack.ApplyBlockedError("unsupported database migration operation")
     plan = initial_database_plan(stack, artifact, summary)
     if plan is None:
@@ -353,11 +353,13 @@ def initial_database_migration_jobs(stack, artifact, summary, update_id, operati
         reference = plan["services"][component]["migrationSecret"]
         image = summary["services"][component]["image"]
         key = digest({"updateId": update_id, "planDigest": plan_digest, "component": component, "operation": operation})[7:47]
+        prefix = f"cell-db-{component}-{operation}-"
+        job_name = prefix + key[:63 - len(prefix)]
         labels = {"app.kubernetes.io/name": "cell-database-migration", "kerosene.io/migration-component": component}
         jobs.append({"apiVersion": "batch/v1", "kind": "Job", "metadata": {
-            "name": f"cell-db-{component}-{operation}-{key}", "namespace": "kerosene-staging", "labels": labels,
+            "name": job_name, "namespace": "kerosene-staging", "labels": labels,
             "annotations": {"kerosene.io/update-id": update_id, "kerosene.io/database-plan-digest": plan_digest}},
-            "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 300, "template": {
+            "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 30 if operation == "capabilities" else 300, "template": {
                 "metadata": {"labels": labels}, "spec": {
                     "restartPolicy": "Never", "automountServiceAccountToken": False,
                     "securityContext": {"runAsNonRoot": True, "runAsUser": 65532, "runAsGroup": 65532,
@@ -366,7 +368,7 @@ def initial_database_migration_jobs(stack, artifact, summary, update_id, operati
                         "command": ["java", "-XX:+ExitOnOutOfMemoryError", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"],
                         "args": ["--cell-migration=" + operation],
                         "env": [{"name": variable, "valueFrom": {"secretKeyRef": {"name": reference["name"], "key": reference[field]}}}
-                                for variable, field in (("SPRING_DATASOURCE_URL", "urlKey"), ("SPRING_DATASOURCE_USERNAME", "usernameKey"), ("SPRING_DATASOURCE_PASSWORD", "passwordKey"))],
+                                for variable, field in (() if operation == "capabilities" else (("SPRING_DATASOURCE_URL", "urlKey"), ("SPRING_DATASOURCE_USERNAME", "usernameKey"), ("SPRING_DATASOURCE_PASSWORD", "passwordKey")))],
                         "resources": {"requests": {"cpu": "100m", "memory": "256Mi"}, "limits": {"cpu": "1", "memory": "1Gi"}},
                         "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
                                             "capabilities": {"drop": ["ALL"]}},

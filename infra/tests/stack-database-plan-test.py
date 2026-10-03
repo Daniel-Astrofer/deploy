@@ -160,6 +160,25 @@ class DatabasePlanTest(unittest.TestCase):
             self.assertIs(container["securityContext"]["readOnlyRootFilesystem"], True)
             self.assertEqual(job["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/name"], "cell-database-migration")
 
+    def test_capabilities_jobs_have_no_credentials_and_short_deadline(self):
+        self.refresh()
+        update = "sha256:" + "a" * 64
+        with patch.object(lifecycle, "run") as run:
+            jobs = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update, "capabilities")
+            run.assert_not_called()
+        migrate = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update)
+        for probe, migration in zip(jobs, migrate):
+            self.assertLessEqual(len(probe["metadata"]["name"]), 63)
+            self.assertNotEqual(probe["metadata"]["name"], migration["metadata"]["name"])
+            self.assertEqual(probe["spec"]["activeDeadlineSeconds"], 30)
+            pod = probe["spec"]["template"]["spec"]
+            self.assertIs(pod["automountServiceAccountToken"], False)
+            container = pod["containers"][0]
+            self.assertEqual(container["args"], ["--cell-migration=capabilities"])
+            self.assertEqual(container["env"], [])
+            self.assertNotIn("envFrom", container)
+            self.assertTrue(all("emptyDir" in volume for volume in pod["volumes"]))
+
     def test_migration_job_identity_and_operation_are_not_operator_overrides(self):
         self.refresh()
         update = "sha256:" + "a" * 64
