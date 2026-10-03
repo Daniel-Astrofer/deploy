@@ -704,6 +704,8 @@ def execute(stack, artifact, summary, args, checkpoint):
         configuration_records = verify_managed_configmaps(stack, kubectl, artifact)
         checkpoint("configuration-verified", {"configMaps": configuration_records})
     for phase in phases:
+        if not args.dry_run and verify_managed_configmaps(stack, kubectl, artifact) != configuration_records:
+            raise stack.ApplyBlockedError("managed ConfigMaps changed before the next Cell phase")
         # Core and KFE have reciprocal integration references. Submit the
         # entire phase before waiting, otherwise the first readiness gate can
         # deadlock bootstrap by waiting for a service not yet created.

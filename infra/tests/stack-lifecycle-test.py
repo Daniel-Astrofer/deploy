@@ -217,6 +217,33 @@ class DeploymentTest(unittest.TestCase):
                 lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=True, cell_dir="unit-only"), lambda *_: None)
             apply.assert_not_called()
 
+    def test_configmap_change_stops_before_next_runtime_phase(self):
+        from types import SimpleNamespace
+        baseline = [{"namespace": "kerosene-staging", "name": "config", "uid": "first", "contentDigest": "sha256:" + "a" * 64}]
+        for mutation in ("uid", "contentDigest"):
+            for completed_phases in (0, 1):
+                changed = copy.deepcopy(baseline)
+                changed[0][mutation] = "changed"
+                observations = [baseline] * (1 + completed_phases) + [changed]
+                applied = []
+                config = {"cellId": "unit", "cluster": {"kubeconfig": "/protected/config", "context": "unit"}}
+                with self.subTest(mutation=mutation, completed_phases=completed_phases), \
+                     patch.object(lifecycle, "require_execution_capabilities"), \
+                     patch.object(lifecycle, "load_config", return_value=config), \
+                     patch.object(lifecycle, "verify_bootstrap_trust"), \
+                     patch.object(lifecycle, "kubectl_command", return_value=["/bound/kubectl"]), \
+                     patch.object(lifecycle.admin_install, "install", return_value={}), \
+                     patch.object(lifecycle, "verify_managed_configmaps", side_effect=observations), \
+                     patch.object(lifecycle, "verify_maintenance"), \
+                     patch.object(lifecycle, "verify_running", return_value=[]), \
+                     patch.object(lifecycle, "run"), \
+                     patch.object(lifecycle, "apply_resource", side_effect=lambda command, resource, dry: applied.append(resource)), \
+                     patch.dict(lifecycle.os.environ, {}, clear=True), \
+                     self.assertRaisesRegex(stack.ApplyBlockedError, "before the next Cell phase"):
+                    lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
+                runtime_names = {r["metadata"]["name"] for r in applied if r["kind"] in lifecycle.WORKLOADS}
+                self.assertEqual(runtime_names, set() if completed_phases == 0 else {"postgres", "redis", "tor", "node"})
+
     def test_smoke_overrides_block_before_any_resource_write(self):
         from types import SimpleNamespace
         for variable in ["KEROSENE_STAGING_NAMESPACE", "KEROSENE_STAGING_VAULT_NAMESPACE",

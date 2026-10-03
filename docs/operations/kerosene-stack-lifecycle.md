@@ -141,9 +141,9 @@ their values. Empty omitted startup lists are equivalent to explicit empty lists
 This does not yet verify every admission-added PodSpec field, volume projection,
 mounted configuration byte or external Secret value.
 Managed ConfigMap `data`/`binaryData` are additionally compared against approved
-content after prerequisite apply and again after workload rollout. Receipts
+content after prerequisite apply, before each runtime phase and after rollout. Receipts
 contain only namespace/name, UID and content digest; replacement or mutation
-between checks blocks progress. No Secret values are fetched. ConfigMap API
+between checks blocks progress before the next phase is submitted. No Secret values are fetched. ConfigMap API
 content equality does not prove kubelet projection freshness or application
 reload; full mounted-file/application acceptance remains required. Failure does
 not trigger automatic resource deletion or database rollback.
