@@ -574,6 +574,16 @@ def verify_running(kubectl, resource):
     expected = resource["spec"]["replicas"]
     if type(expected) is not int or expected < 1 or type(live["spec"].get("replicas")) is not int or live["spec"]["replicas"] != expected:
         raise RuntimeError("live replica target differs from approved workload")
+    def startup_configuration(items):
+        result = {}
+        for container in items:
+            if container["name"] in result:
+                raise RuntimeError("duplicate runtime container identity")
+            result[container["name"]] = {key: container.get(key, []) for key in ("command", "args", "env", "envFrom")}
+        return result
+    approved_startup = startup_configuration(containers(resource))
+    if startup_configuration(containers(live)) != approved_startup:
+        raise RuntimeError("live workload startup configuration differs from approved manifest")
     status = live.get("status", {})
     if status.get("observedGeneration", 0) < live["metadata"].get("generation", 1):
         raise RuntimeError(f"controller has not observed {kind}/{name}")
@@ -619,6 +629,8 @@ def verify_running(kubectl, resource):
         actual = {c["name"]: c["image"] for c in pod_spec.get("containers", []) + pod_spec.get("initContainers", [])}
         if actual != images:
             raise RuntimeError("live pod images differ from approved named containers")
+        if startup_configuration(pod_spec.get("containers", []) + pod_spec.get("initContainers", [])) != approved_startup:
+            raise RuntimeError("live pod startup configuration differs from approved manifest")
         pod_status = pod.get("status", {})
         statuses = pod_status.get("containerStatuses", []) + pod_status.get("initContainerStatuses", [])
         if {s["name"] for s in statuses} != set(images) or any(not s.get("imageID") for s in statuses):

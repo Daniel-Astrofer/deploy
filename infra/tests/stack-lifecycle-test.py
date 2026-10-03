@@ -496,6 +496,26 @@ class RuntimeOwnershipTest(unittest.TestCase):
         final["metadata"]["resourceVersion"] = "new-status-version"
         self.assertEqual(len(self.verify(resource, live, rs, pod, final)), 1)
 
+    def test_changed_workload_or_pod_startup_configuration_is_rejected(self):
+        for target in ("workload", "pod"):
+            for field, value in (("command", ["sh"]), ("args", ["--unsafe"]),
+                    ("env", [{"name": "SPRING_DATASOURCE_URL", "value": "foreign"}]),
+                    ("envFrom", [{"secretRef": {"name": "foreign"}}])):
+                resource, live, rs, pod = self.fixture("Deployment")
+                container = live["spec"]["template"]["spec"]["containers"][0] if target == "workload" else pod["spec"]["containers"][0]
+                container[field] = value
+                with self.subTest(target=target, field=field), self.assertRaisesRegex(RuntimeError, "startup configuration"):
+                    self.verify(resource, live, rs, pod)
+
+    def test_approved_startup_inputs_are_accepted_with_omitted_empty_defaults(self):
+        resource, live, rs, pod = self.fixture("Deployment")
+        values = {"command": ["java"], "args": ["-jar", "/app/app.jar"], "env": [{"name": "SETTING", "value": "approved"}]}
+        for container in (resource["spec"]["template"]["spec"]["containers"][0],
+                live["spec"]["template"]["spec"]["containers"][0], pod["spec"]["containers"][0]):
+            container.update(copy.deepcopy(values))
+        pod["spec"]["containers"][0]["envFrom"] = []
+        self.assertEqual(len(self.verify(resource, live, rs, pod)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

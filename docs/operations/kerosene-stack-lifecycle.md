@@ -134,6 +134,12 @@ to UID, generation, spec, revision, readiness counters or deletion state during
 collection. Unrelated metadata/resourceVersion changes are not rollout changes.
 This bounds cross-generation observations, not an atomic Kubernetes snapshot or
 guarantee of continued health after the read; complete acceptance remains required.
+Both the live workload template and the actual pod must retain the approved
+named containers' commands, arguments, explicit environment and envFrom sources.
+Injected startup inputs or changed Secret references are rejected without echoing
+their values. Empty omitted startup lists are equivalent to explicit empty lists.
+This does not yet verify every admission-added PodSpec field, volume projection,
+mounted configuration byte or external Secret value.
 This verifies ownership/revision, not full runtime configuration or financial/quorum readiness;
 those broader acceptance gates remain mandatory and unqualified.
 Unidentified/ambiguously identified images, missing runtime components and
