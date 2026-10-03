@@ -6,8 +6,8 @@ Redis, Bitcoin, LND and Tor. This checkpoint updates the KFE participant gaps in
 the [October 2 checkpoint](cell-implementation-status-2026-10-02.md); unchanged
 component evidence there is historical, not a newly rerun full-Cell test.
 
-KFE work remains on isolated `feat/complete-cell-operations`, commit `0c46542`
-(continues `074e08a`). Deploy remains on
+KFE work remains on isolated `feat/complete-cell-operations`, current commit
+`d866416` (continues `0c46542` and `074e08a`). Deploy remains on
 `feat/staging-volumesnapshot-attestation-request`; this Deploy wave changes
 documentation only. Dirty primary checkouts were untouched. No production update,
 real custody/provider action, release authority provisioning or signer activation.
@@ -50,9 +50,9 @@ Joined committed local work still follows its original transaction contract.
 The reproduced database case now leaves UNCERTAIN. This is maintenance bookkeeping
 repair, not financial-policy replacement or permission to resume/update.
 
-### Accepted verification
+### Earlier participant-wave verification
 
-Final `./gradlew --no-daemon check bootJar`: **1,503 tests; zero failures, errors
+The earlier `./gradlew --no-daemon check bootJar`: **1,503 tests; zero failures, errors
 or skips**. All new source/test files were included. Local success is not a claim
 that hosted CI ran or that the complete service was installed.
 
@@ -80,15 +80,51 @@ liquidity advisory-lock/terminal concurrency and the complete submit context are
 not inferred from these results. KFE STATUS and the indexed bounded runbooks
 record those limits.
 
+## Upstream/provider continuation — current accepted result
+
+Two disjoint agents added direct Vault and remote-adapter boundaries while the
+coordinator protected settlement/quorum, integrated fixtures and added actual
+PostgreSQL evidence. Both agents are closed; primary checkouts remain untouched.
+
+- Settlement evaluation, require-pass and both audit entrypoints now admit before
+  flags, balance locks, provider probes, consensus, audit and signals.
+- Quorum gateway and direct Vault threshold/legacy consensus admit before
+  transport, including the legacy constitution-context GET. Direct MPC key
+  provisioning admits before provider resolution and deposit-key retrieval.
+- Four typed approval and fourteen reachable notification effect roots admit
+  before POST. Best-effort notification catches cannot swallow admission refusal.
+  Pure validation/unsupported legacy inputs remain local; payloads are unchanged.
+- Every remote/gate outcome remains uncertain, including accepted replies and
+  local financial commit. Already admitted synchronous work can finish across
+  drain, but fresh calls are rejected. No reconciliation/force-clear API is added.
+
+Current final `check bootJar`: **1,776 tests, zero failures/errors/skips**, including
+all current source/tests. New suites contain 47 settlement, 20 Vault provider and
+204 remote effect cases, plus two new full-schema PostgreSQL cases. The actual
+PostgreSQL suites now total 28 cases (14 generic/publisher and 14 full-schema).
+Quorum persistence tests prove uncertainty after actual commit/store recreation
+and actual drain refusal before fresh provider invocation. Their financial port
+is mocked; adapter accepted-proof fixtures also mock the cryptographic verifier.
+No real BFT/provider, release attestation or complete-Cell acceptance is claimed.
+
+Tests exposed a pre-existing conflict-notification defect: the client constructs
+confirmations=-1, rejected by the shared request contract before transport or
+admission. Four cases assert the exact local failure; they do not count as
+delivery evidence. The payload/contract mismatch remains separately unqualified,
+alongside the previously recorded conflict/refund concern. Successful test
+classification is not a financial-policy or notification-delivery repair.
+
 ## Remaining work for the complete service
 
-1. **Complete KFE drain/recovery:** qualify remaining upstream settlement/quorum,
-   direct MPC/approval/notification and embedded starts before external effects;
-   alternate host security chains; real reconnect/durable cursors/hints/source
+1. **Complete KFE drain/recovery:** complete remaining provider/embedded inventory
+   and alternate host security chains; the bounded settlement/quorum and direct
+   MPC/approval/notification starts above are now guarded, not remotely finalized.
+   Qualify real reconnect/durable cursors/hints/source
    reconciliation; and audited completion/reconciliation of uncertain admissions.
    Protected leaves do not certify all callers. Preserve the three unknown counts
    until complete inventory/race/restart evidence. Independently qualify the
    previously documented conflict/refund concern; no financial-policy fix claimed.
+   Resolve the separately documented outbound-conflicted notification mismatch.
 2. **Authoritative Bank compatibility:** implement target build/runtime/provenance,
    migration/recovery decisions and mandatory-mTLS deployment qualification. The
    current real producer's unknown/incompatible result and signed Node transport
