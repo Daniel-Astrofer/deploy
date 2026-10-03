@@ -24,7 +24,8 @@ def run_probe(argv: Sequence[str], *, timeout: float = MAX_TIMEOUT) -> bytes:
     The controller must choose/authorize the executable and arguments. This
     helper does not authorize commands, parse capabilities, or open any gates.
     Limits are bytes; stderr is counted and discarded, never returned. A new
-    POSIX session lets failure cleanup kill descendants retaining pipe handles.
+    POSIX session lets cleanup kill descendants, including after success.
+    waitid/WNOWAIT retains the leader until cleanup so its PID cannot be reused.
     """
     if (isinstance(argv, (str, bytes)) or not isinstance(argv, Sequence)
             or not argv or any(not isinstance(arg, str) or "\0" in arg for arg in argv)
@@ -44,7 +45,6 @@ def run_probe(argv: Sequence[str], *, timeout: float = MAX_TIMEOUT) -> bytes:
 
     stdout = bytearray()
     stderr_size = 0
-    succeeded = False
     try:
         with selectors.DefaultSelector() as selector:
             for stream in (child.stdout, child.stderr):
@@ -72,12 +72,16 @@ def run_probe(argv: Sequence[str], *, timeout: float = MAX_TIMEOUT) -> bytes:
                         stdout.extend(data)
                     else:
                         stderr_size += len(data)
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise ProbeProcessError("probe timed out")
-        if child.wait(timeout=remaining) != 0 or stderr_size:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ProbeProcessError("probe timed out")
+            terminal = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            if terminal is not None:
+                break
+            time.sleep(min(0.01, remaining))
+        if terminal.si_code != os.CLD_EXITED or terminal.si_status != 0 or stderr_size:
             raise ProbeProcessError("probe failed")
-        succeeded = True
         return bytes(stdout)
     except subprocess.TimeoutExpired:
         raise ProbeProcessError("probe timed out") from None
@@ -85,11 +89,10 @@ def run_probe(argv: Sequence[str], *, timeout: float = MAX_TIMEOUT) -> bytes:
         raise ProbeProcessError("probe collection failed") from None
     finally:
         # Also runs on interruption; never wait for pipe EOF during cleanup.
-        if not succeeded:
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         child.wait()
         child.stdout.close()
         child.stderr.close()

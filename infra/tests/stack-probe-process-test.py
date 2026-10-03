@@ -49,6 +49,44 @@ class ProbeProcessTest(unittest.TestCase):
     def test_exact_stdout_limit(self):
         self.assertEqual(self.run_code("import os; os.write(1, b'x' * 4096)"), b"x" * 4096)
 
+    def test_success_cleans_group_before_reaping_leader(self):
+        observed = []
+        real_killpg = os.killpg
+        def cleanup(pid, signal):
+            terminal = os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            self.assertIsNotNone(terminal)
+            observed.append(pid)
+            real_killpg(pid, signal)
+        with patch.object(probe_process.os, "killpg", side_effect=cleanup):
+            self.assertEqual(self.run_code("import os; os.write(1,b'ok')"), b"ok")
+        self.assertEqual(len(observed), 1)
+        with self.assertRaises(ChildProcessError):
+            os.waitpid(observed[0], os.WNOHANG)
+
+    def test_success_terminates_descendant_that_closed_pipes(self):
+        code = """import os,time
+pid = os.fork()
+if pid == 0:
+    os.close(1)
+    os.close(2)
+    time.sleep(60)
+else:
+    os.write(1, str(pid).encode())
+"""
+        pid = int(self.run_code(code, timeout=2))
+        status = Path(f"/proc/{pid}/status")
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                lines = status.read_text().splitlines()
+            except FileNotFoundError:
+                return
+            if any(line.startswith("State:") and "Z" in line for line in lines):
+                return  # Orphan reaping belongs to the host's init, not this helper.
+            time.sleep(0.01)
+        os.kill(pid, 9)  # Kill only this test's known synthetic descendant on failure.
+        self.fail("successful probe left a running descendant")
+
     def test_oversized_stdout(self):
         self.assert_failure("import os,time; os.write(1,b'PRIVATE'*10000); time.sleep(60)",
                             "output limit exceeded")

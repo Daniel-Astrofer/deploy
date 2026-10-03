@@ -96,7 +96,11 @@ this parser does not bound an already allocated input. It validates syntax and
 contract only, not pod UID, image identity, exit status or network isolation.
 The POSIX `probe_process.run_probe` transport bounds concurrent stdout/stderr
 collection to 4096 bytes each and at most 30 seconds, rejects nonzero exit or
-any stderr, and kills/reaps the process group on collection failure. It never
+any stderr, and kills the process group on every exit, reaping its direct child.
+The exited leader stays unreaped until group cleanup (`waitid`/`WNOWAIT`) to
+prevent PID reuse; successful children cannot leave descendants running simply
+by closing their pipes. Orphan reaping remains the host init's responsibility.
+The transport requires Unix `waitid`/`WNOWAIT`; it is not Windows-compatible. It never
 includes command arguments or output in errors. The controller still owns argv
 authorization, environment isolation and container/pod cleanup; this helper is
 not an OS sandbox. `collect_database_capabilities_output` uses it for fixed
