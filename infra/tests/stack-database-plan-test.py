@@ -223,6 +223,28 @@ class DatabasePlanTest(unittest.TestCase):
         with self.assertRaises(stack.ApplyBlockedError):
             lifecycle.verify_database_capabilities_output(stack, "vault", raw)
 
+    def test_probe_collection_uses_one_named_container_and_bounded_transport(self):
+        namespace = "cell-probe-" + "a" * 40
+        expected = {"schema": "kerosene.cell.migration-capabilities/v1", "component": "core", "operations": ["validate", "migrate"]}
+        command = ["/usr/bin/kubectl", "--kubeconfig", "/bound/config", "--context", "bound"]
+        with patch.object(lifecycle.probe_process, "run_probe", return_value=json.dumps(expected).encode()) as run:
+            self.assertEqual(lifecycle.collect_database_capabilities_output(stack, command, "core", namespace, "probe-pod"), expected)
+        run.assert_called_once_with(command + ["-n", namespace, "logs", "probe-pod", "--container=migration", "--timestamps=false", "--limit-bytes=4097"], timeout=30)
+
+    def test_probe_collection_rejects_foreign_targets_before_subprocess(self):
+        with patch.object(lifecycle.probe_process, "run_probe") as run:
+            for component, namespace, pod in (("vault", "cell-probe-" + "a" * 40, "probe"),
+                    ("core", "kerosene-staging", "probe"), ("core", "cell-probe-" + "a" * 40, "--all-containers")):
+                with self.subTest(component=component, namespace=namespace), self.assertRaises(stack.ReleaseValidationError):
+                    lifecycle.collect_database_capabilities_output(stack, ["/bound/kubectl"], component, namespace, pod)
+            run.assert_not_called()
+
+    def test_probe_transport_failure_is_generic_and_never_accepted(self):
+        with patch.object(lifecycle.probe_process, "run_probe", side_effect=lifecycle.probe_process.ProbeProcessError("private-marker")):
+            with self.assertRaises(stack.ApplyBlockedError) as error:
+                lifecycle.collect_database_capabilities_output(stack, ["/bound/kubectl"], "core", "cell-probe-" + "a" * 40, "probe")
+        self.assertEqual(str(error.exception), "database probe log collection failed")
+
     def test_migration_job_identity_and_operation_are_not_operator_overrides(self):
         self.refresh()
         update = "sha256:" + "a" * 64

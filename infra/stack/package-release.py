@@ -201,8 +201,10 @@ def lifecycle_configuration(raw, deployment, services):
         return services, "unverified-lifecycle-unavailable", {}
     stack_path = Path(__file__).parents[1] / "kerosene-stack"
     admin_path = lifecycle_path.with_name("admin_install.py")
+    probe_path = lifecycle_path.with_name("probe_process.py")
     controller_paths = {"kerosene-stack": stack_path, "lifecycle.py": lifecycle_path,
                         "admin_install.py": admin_path,
+                        "probe_process.py": probe_path,
                         "postgres/create-service-databases.sql": stack_path.parent / "runtime/postgres/create-service-databases.sql",
                         "postgres/service-runtime-grants.sql": stack_path.parent / "runtime/postgres/service-runtime-grants.sql"}
     for path in controller_paths.values():
@@ -210,7 +212,7 @@ def lifecycle_configuration(raw, deployment, services):
             raise ArchiveError("installed controller and dependencies must be regular local files")
     # Python reuses imported module names. Refuse a module from a different
     # checkout before loading the controller, not after calling its validator.
-    for module_name, path in (("lifecycle", lifecycle_path), ("admin_install", admin_path)):
+    for module_name, path in (("lifecycle", lifecycle_path), ("admin_install", admin_path), ("probe_process", probe_path)):
         cached = sys.modules.get(module_name)
         if cached is not None and Path(getattr(cached, "__file__", "")).resolve() != path.resolve():
             raise ArchiveError("cached controller dependency is not the installed module: " + module_name)
@@ -225,6 +227,8 @@ def lifecycle_configuration(raw, deployment, services):
         raise ArchiveError("lifecycle module did not load from the installed controller directory")
     if Path(lifecycle.admin_install.__file__).resolve() != admin_path.resolve():
         raise ArchiveError("Admin installer did not load from the installed controller directory")
+    if Path(lifecycle.probe_process.__file__).resolve() != probe_path.resolve():
+        raise ArchiveError("probe transport did not load from the installed controller directory")
     selected = {name: dict(service) for name, service in services.items()}
     try:
         for name, service in selected.items():

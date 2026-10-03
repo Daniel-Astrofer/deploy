@@ -345,6 +345,7 @@ class PackageTest(LocalTest):
             provenance = json.load(bundle.extractfile("provenance.json"))
         tools = provenance["predicate"]["tools"]
         self.assertEqual(tools["admin_install.py"], archive.file_record(STACK / "admin_install.py")["digest"])
+        self.assertEqual(tools["probe_process.py"], archive.file_record(STACK / "probe_process.py")["digest"])
         for name in ("create-service-databases.sql", "service-runtime-grants.sql"):
             self.assertEqual(tools["postgres/" + name], archive.file_record(STACK.parent / "runtime/postgres" / name)["digest"])
         self.selection["services"]["admin"]["configDigest"] = expected
@@ -354,7 +355,7 @@ class PackageTest(LocalTest):
             self.assemble("rejected")
 
     def test_foreign_cached_controller_dependency_is_rejected_before_loading(self):
-        for module in ["lifecycle", "admin_install"]:
+        for module in ["lifecycle", "admin_install", "probe_process"]:
             with self.subTest(module=module), patch.dict(sys.modules, {module: SimpleNamespace(__file__="/foreign/candidate/" + module + ".py")}), patch.object(package.importlib.machinery.SourceFileLoader, "exec_module") as load:
                 with self.assertRaisesRegex(archive.ArchiveError, "cached controller dependency"):
                     self.assemble("foreign-" + module)
@@ -363,7 +364,7 @@ class PackageTest(LocalTest):
 
     def test_controller_dependency_change_during_validation_rejects_candidate(self):
         original = package.file_record
-        targets = [STACK / "admin_install.py", STACK.parent / "runtime/postgres/create-service-databases.sql",
+        targets = [STACK / "admin_install.py", STACK / "probe_process.py", STACK.parent / "runtime/postgres/create-service-databases.sql",
                    STACK.parent / "runtime/postgres/service-runtime-grants.sql"]
         for index, target in enumerate(targets):
             reads = 0

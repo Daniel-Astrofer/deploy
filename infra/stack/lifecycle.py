@@ -18,6 +18,7 @@ import tempfile
 import urllib.parse
 import urllib.request
 import admin_install
+import probe_process
 
 SCHEMA = "kerosene.stack.deployment/v1"
 NAMESPACES = {"kerosene-staging", "kerosene-staging-vault"}
@@ -421,6 +422,23 @@ def verify_database_capabilities_output(stack, component, raw):
         return value
     except (ValueError, TypeError, UnicodeError, RecursionError) as error:
         raise stack.ApplyBlockedError("invalid database capabilities output") from error
+
+
+def collect_database_capabilities_output(stack, kubectl, component, namespace, pod_name):
+    """Read one controller-selected pod's bounded stdout; not completion proof.
+
+    Caller must verify cluster, pod UID/spec, terminal status and isolation
+    before and after collection. No label selector, follow or implicit context.
+    """
+    if component not in ("core", "kfe") or not isinstance(namespace, str) or not re.fullmatch(r"cell-probe-[a-f0-9]{40}", namespace):
+        raise stack.ApplyBlockedError("invalid database probe log target")
+    stack.require_identifier(pod_name, "database probe pod name")
+    try:
+        raw = probe_process.run_probe(kubectl + ["-n", namespace, "logs", pod_name,
+            "--container=migration", "--timestamps=false", "--limit-bytes=4097"], timeout=30)
+    except probe_process.ProbeProcessError:
+        raise stack.ApplyBlockedError("database probe log collection failed") from None
+    return verify_database_capabilities_output(stack, component, raw)
 
 
 def verify_external_secrets(stack, kubectl, references):

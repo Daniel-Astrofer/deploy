@@ -99,7 +99,13 @@ collection to 4096 bytes each and at most 30 seconds, rejects nonzero exit or
 any stderr, and kills/reaps the process group on collection failure. It never
 includes command arguments or output in errors. The controller still owns argv
 authorization, environment isolation and container/pod cleanup; this helper is
-not an OS sandbox and is not wired into automatic Cell execution yet.
+not an OS sandbox. `collect_database_capabilities_output` uses it for fixed
+`kubectl logs` arguments selecting one named pod/container in a dedicated probe
+namespace, with no follow, label selection or implicit target. Collection remains
+outside automatic Cell execution: the future executor must bind and recheck
+cluster/pod UID, PodSpec, terminal status, image identity and isolation.
+The installed transport module is included in candidate controller-tool digests;
+foreign cached modules or changes during candidate validation are rejected.
 Retain failed probe evidence; do not automatically delete namespaces or adopt
 leftover workloads. Explicit recovery must verify ownership and actual resources.
 
