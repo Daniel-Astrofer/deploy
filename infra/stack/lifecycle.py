@@ -624,6 +624,16 @@ def verify_running(kubectl, resource):
         if {s["name"] for s in statuses} != set(images) or any(not s.get("imageID") for s in statuses):
             raise RuntimeError("missing live runtime image identity")
         records.append({"workloadUid": workload_uid, "revision": revision, "podUid": pod["metadata"]["uid"], "images": [{"name": s["name"], "imageID": s["imageID"]} for s in statuses]})
+    final = json.loads(run(kubectl + ["-n", ns, "get", kind.lower(), name, "-o", "json"]))
+    def observation(workload):
+        meta = workload.get("metadata", {})
+        status = workload.get("status", {})
+        return {"identity": identity(workload), "uid": meta.get("uid"),
+            "generation": meta.get("generation"), "deletionTimestamp": meta.get("deletionTimestamp"),
+            "spec": workload.get("spec"), "revision": meta.get("annotations", {}).get("deployment.kubernetes.io/revision"),
+            "status": {key: status.get(key) for key in ("observedGeneration", "readyReplicas", "updatedReplicas", "currentRevision", "updateRevision")}}
+    if observation(final) != observation(live):
+        raise RuntimeError("workload changed while collecting rollout readiness")
     return records
 
 

@@ -129,6 +129,11 @@ pods from an older revision are rejected even when their image is unchanged.
 Live desired replica counts must still equal the approved positive integer;
 ready/updated counters must be actual integers, not JSON booleans. A scale change
 after approval cannot be masked by a smaller set of ready pods.
+After collecting pods, the controller re-reads the workload and rejects changes
+to UID, generation, spec, revision, readiness counters or deletion state during
+collection. Unrelated metadata/resourceVersion changes are not rollout changes.
+This bounds cross-generation observations, not an atomic Kubernetes snapshot or
+guarantee of continued health after the read; complete acceptance remains required.
 This verifies ownership/revision, not full runtime configuration or financial/quorum readiness;
 those broader acceptance gates remain mandatory and unqualified.
 Unidentified/ambiguously identified images, missing runtime components and

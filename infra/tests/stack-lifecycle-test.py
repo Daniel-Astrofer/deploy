@@ -401,10 +401,11 @@ class RuntimeOwnershipTest(unittest.TestCase):
             "conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "service", "imageID": image}]}}
         return resource, live, rs, pod
 
-    def verify(self, resource, live, rs, pod):
+    def verify(self, resource, live, rs, pod, final=None):
         responses = [live]
         if resource["kind"] == "Deployment": responses.append({"items": [rs]})
         responses.append({"items": [pod]})
+        responses.append(live if final is None else final)
         with patch.object(lifecycle, "run", side_effect=[json.dumps(r).encode() for r in responses]):
             return lifecycle.verify_running(["/bound/kubectl"], resource)
 
@@ -472,6 +473,28 @@ class RuntimeOwnershipTest(unittest.TestCase):
             live["status"][field] = True
             with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, "not all desired"):
                 self.verify(resource, live, rs, pod)
+
+    def test_workload_change_during_collection_invalidates_receipt(self):
+        for kind in ("Deployment", "StatefulSet"):
+            for mutation in ("uid", "generation", "replicas", "readiness", "revision", "deletion"):
+                resource, live, rs, pod = self.fixture(kind)
+                final = copy.deepcopy(live)
+                if mutation == "uid": final["metadata"]["uid"] = "replacement"
+                elif mutation == "generation": final["metadata"]["generation"] = 2
+                elif mutation == "replicas": final["spec"]["replicas"] = 2
+                elif mutation == "readiness": final["status"]["readyReplicas"] = 0
+                elif mutation == "deletion": final["metadata"]["deletionTimestamp"] = "now"
+                elif kind == "Deployment": final["metadata"]["annotations"]["deployment.kubernetes.io/revision"] = "3"
+                else: final["status"]["updateRevision"] = "next"
+                with self.subTest(kind=kind, mutation=mutation), self.assertRaisesRegex(RuntimeError, "changed while"):
+                    self.verify(resource, live, rs, pod, final)
+
+    def test_unrelated_metadata_update_does_not_invalidate_readiness(self):
+        resource, live, rs, pod = self.fixture("Deployment")
+        final = copy.deepcopy(live)
+        final["metadata"]["annotations"]["diagnostic"] = "updated"
+        final["metadata"]["resourceVersion"] = "new-status-version"
+        self.assertEqual(len(self.verify(resource, live, rs, pod, final)), 1)
 
 
 if __name__ == "__main__":
