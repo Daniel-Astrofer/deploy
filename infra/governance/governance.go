@@ -23,6 +23,7 @@ import (
 )
 
 const ApprovalSchema = "kerosene.release-approval/v1"
+const maxExactJSONInteger uint64 = 9007199254740991
 
 var hashRE = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{2,127}$`)
@@ -137,7 +138,7 @@ func strictDecode(raw []byte, out any) error {
 }
 
 func validatePolicy(p Policy) error {
-	if !nameRE.MatchString(p.NetworkID) || p.Epoch == 0 || len(p.Members) < 4 || p.Threshold < 2*len(p.Members)/3+1 || p.Threshold > len(p.Members) {
+	if !nameRE.MatchString(p.NetworkID) || p.Epoch == 0 || p.Epoch > maxExactJSONInteger || len(p.Members) < 4 || len(p.Members) > 64 || p.Threshold < 2*len(p.Members)/3+1 || p.Threshold > len(p.Members) {
 		return errors.New("invalid static governance policy")
 	}
 	keys := map[string]bool{}
@@ -156,10 +157,13 @@ func validateProposal(s State, p Proposal) error {
 	sequence := uint64(1)
 	if len(s.Approvals) > 0 {
 		last := s.Approvals[len(s.Approvals)-1]
+		if last.Sequence >= maxExactJSONInteger {
+			return errors.New("approval sequence exhausted")
+		}
 		previous = approvalDigest(last)
 		sequence = last.Sequence + 1
 	}
-	if a.Schema != ApprovalSchema || a.NetworkID != s.Policy.NetworkID || a.Epoch != s.Policy.Epoch || a.Sequence != sequence || a.PreviousApprovalDigest != previous || !hashRE.MatchString(a.ReleaseDigest) {
+	if a.Schema != ApprovalSchema || a.NetworkID != s.Policy.NetworkID || a.Epoch == 0 || a.Epoch > maxExactJSONInteger || a.Epoch != s.Policy.Epoch || a.Sequence == 0 || a.Sequence > maxExactJSONInteger || a.Sequence != sequence || a.PreviousApprovalDigest != previous || !hashRE.MatchString(a.ReleaseDigest) {
 		return errors.New("proposal domain, sequence or predecessor mismatch")
 	}
 	if len(p.Signatures) > len(s.Policy.Members) {

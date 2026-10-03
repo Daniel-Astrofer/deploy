@@ -268,6 +268,25 @@ class DeploymentTest(unittest.TestCase):
                 runtime_names = {r["metadata"]["name"] for r in applied if r["kind"] in lifecycle.WORKLOADS}
                 self.assertEqual(runtime_names, set() if completed_phases == 0 else {"postgres", "redis", "tor", "node"})
 
+    def test_initial_install_cannot_fall_through_to_update_maintenance(self):
+        from types import SimpleNamespace
+        with patch.object(lifecycle, "require_execution_capabilities"), \
+             patch.object(lifecycle, "load_config", return_value={"cellId": "unit"}), \
+             patch.object(lifecycle, "verify_bootstrap_trust"), \
+             patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]), \
+             patch.object(lifecycle, "verify_empty_installation"), \
+             patch.object(lifecycle, "initial_database_plan", return_value={"mode": "initial"}), \
+             patch.object(lifecycle.admin_install, "install") as admin, \
+             patch.object(lifecycle, "apply_resource") as apply, \
+             patch.object(lifecycle, "verify_maintenance") as maintenance, \
+             patch.dict(lifecycle.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(stack.ApplyBlockedError, "Bank initial admission"):
+                lifecycle.execute(stack, self.artifact, self.summary,
+                    SimpleNamespace(command="install", dry_run=False, cell_dir="unit-only"), lambda *_: None)
+            admin.assert_not_called()
+            apply.assert_not_called()
+            maintenance.assert_not_called()
+
     def test_smoke_overrides_block_before_any_resource_write(self):
         from types import SimpleNamespace
         for variable in ["KEROSENE_STAGING_NAMESPACE", "KEROSENE_STAGING_VAULT_NAMESPACE",

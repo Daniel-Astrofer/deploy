@@ -144,6 +144,27 @@ class DatabaseGrantsTest(unittest.TestCase):
                             f"SELECT count(*) FROM pg_database WHERE datname='{bindings['core'][0]}'")
         self.assertEqual(absent, "0")
 
+    def test_partial_initial_provisioning_is_preserved_without_automatic_recovery(self):
+        # Interruptions can leave Core either disabled (before its ACL) or
+        # enabled (before KFE creation). Neither state authorizes adoption.
+        for enabled in (False, True):
+            with self.subTest(connections_enabled=enabled):
+                bindings = self.fresh_bindings("partial")
+                database, owner, _, _ = bindings["core"]
+                self.query("postgres", self.admin, self.admin_password,
+                           f"CREATE DATABASE {database} OWNER {owner} TEMPLATE template0 "
+                           f"ALLOW_CONNECTIONS {'true' if enabled else 'false'}")
+                catalog = ("SELECT oid::text || ':' || datdba::text || ':' || "
+                           "datallowconn::text || ':' || coalesce(datacl::text,'NULL') "
+                           f"FROM pg_database WHERE datname='{database}'")
+                before = self.query("postgres", self.admin, self.admin_password, catalog)
+                self.assertTrue(before)
+                result = self.create_databases(bindings, success=False)
+                self.assertIn("refuses an existing service database", result.stderr)
+                self.assertEqual(self.query("postgres", self.admin, self.admin_password, catalog), before)
+                self.assertEqual(self.query("postgres", self.admin, self.admin_password,
+                    f"SELECT count(*) FROM pg_database WHERE datname='{bindings['kfe'][0]}'"), "0")
+
     def test_concurrent_initial_provisioners_have_one_winner_and_no_adoption(self):
         bindings = self.fresh_bindings("race")
         with ThreadPoolExecutor(max_workers=2) as workers:

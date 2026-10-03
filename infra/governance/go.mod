@@ -3,6 +3,7 @@ module kerosene.local/release-governance
 go 1.23.0
 
 require github.com/cometbft/cometbft v0.38.17
+require github.com/lib/pq v1.10.9
 
 require (
 	github.com/DataDog/zstd v1.4.5 // indirect

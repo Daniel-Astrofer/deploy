@@ -57,7 +57,7 @@ func verifyConsensus(anchor TrustAnchor, proof ConsensusProof, releaseDigest str
 	if anchor.TrustingPeriodSeconds <= 0 || anchor.TrustingPeriodSeconds > 14*24*3600 {
 		return nil, errors.New("trust period must be explicitly bounded to <=14 days")
 	}
-	if proof.Schema != "kerosene.release-consensus-proof/v1" || len(proof.Blocks) < 2 || len(proof.Blocks) > 4096 || !hashRE.MatchString(releaseDigest) {
+	if proof.Schema != "kerosene.release-consensus-proof/v1" || len(proof.Blocks) < 2 || len(proof.Blocks) > 4096 || !hashRE.MatchString(releaseDigest) || sequence == 0 || sequence > maxExactJSONInteger {
 		return nil, errors.New("invalid proof bounds or domain")
 	}
 	trusted, err := parseLight(anchor.LightBlock, anchor.Policy.NetworkID)

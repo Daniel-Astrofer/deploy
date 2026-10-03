@@ -741,6 +741,10 @@ def execute(stack, artifact, summary, args, checkpoint):
         verify_empty_installation(stack, kubectl)
         if not args.dry_run and initial_database_plan(stack, artifact, summary) is None:
             raise stack.ApplyBlockedError("initial installation requires an approved database plan")
+        if not args.dry_run:
+            # Update maintenance requires an existing KFE. Do not silently use
+            # that protocol for bootstrap, or skip it without initial admission.
+            raise stack.ApplyBlockedError("initial installation requires independently verified Bank initial admission; bootstrap executor is not integrated")
     verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
     if not args.dry_run:
         receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,61 @@ func TestProposalCannotSelfAuthorize(t *testing.T) {
 	}
 }
 
+func TestGovernanceContractBounds(t *testing.T) {
+	policy, keys := testPolicy(t)
+	policy.Epoch = maxExactJSONInteger
+	if err := validatePolicy(policy); err != nil {
+		t.Fatal("maximum exact epoch rejected", err)
+	}
+	for _, epoch := range []uint64{0, maxExactJSONInteger + 1, ^uint64(0)} {
+		policy.Epoch = epoch
+		if validatePolicy(policy) == nil {
+			t.Fatal("out-of-contract epoch accepted", epoch)
+		}
+	}
+	policy.Epoch = 1
+	for len(policy.Members) < 65 {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		policy.Members[fmt.Sprintf("validator-%d", len(policy.Members)+1)] = base64.StdEncoding.EncodeToString(pub)
+		policy.Threshold = 2*len(policy.Members)/3 + 1
+		if len(policy.Members) == 64 && validatePolicy(policy) != nil {
+			t.Fatal("64-member policy rejected")
+		}
+	}
+	if validatePolicy(policy) == nil {
+		t.Fatal("65-member policy accepted")
+	}
+	policy, keys = testPolicy(t)
+	for _, sequence := range []uint64{0, maxExactJSONInteger + 1, ^uint64(0)} {
+		_, err := verifyConsensus(TrustAnchor{Policy: policy, TrustingPeriodSeconds: 60},
+			ConsensusProof{Schema: "kerosene.release-consensus-proof/v1", Blocks: []json.RawMessage{nil, nil}},
+			"sha256:"+strings.Repeat("a", 64), sequence, time.Now())
+		if err == nil || err.Error() != "invalid proof bounds or domain" {
+			t.Fatal("out-of-contract expected sequence reached proof parsing", sequence, err)
+		}
+	}
+	// This synthetic terminal state tests the boundary without allocating an
+	// impossible number of approvals. No restart/chain qualification is implied.
+	last := Approval{Sequence: maxExactJSONInteger - 1}
+	a := Approval{Schema: ApprovalSchema, Epoch: 1, NetworkID: policy.NetworkID,
+		Sequence: maxExactJSONInteger, ReleaseDigest: "sha256:" + strings.Repeat("a", 64),
+		PreviousApprovalDigest: approvalDigest(last)}
+	if err := validateProposal(State{Policy: policy, Approvals: []Approval{last}}, proposal(keys, a)); err != nil {
+		t.Fatal("last exact sequence rejected", err)
+	}
+	for _, terminal := range []uint64{maxExactJSONInteger, ^uint64(0)} {
+		last.Sequence = terminal
+		a.Sequence = terminal + 1
+		a.PreviousApprovalDigest = approvalDigest(last)
+		if validateProposal(State{Policy: policy, Approvals: []Approval{last}}, proposal(keys, a)) == nil {
+			t.Fatal("sequence exhaustion or overflow admitted")
+		}
+	}
+}
+
 func signedBlock(t *testing.T, height int64, stamp time.Time, vals *ctypes.ValidatorSet, keys map[string]ccrypto.PrivKey, appHash []byte, txs ctypes.Txs, previous *ctypes.LightBlock, signers int) *ctypes.LightBlock {
 	t.Helper()
 	header := &ctypes.Header{Version: version.Consensus{Block: 11, App: 1}, ChainID: "bank-release-governance", Height: height, Time: stamp, ValidatorsHash: vals.Hash(), NextValidatorsHash: vals.Hash(), AppHash: appHash, DataHash: txs.Hash(), ProposerAddress: vals.Validators[0].Address}
@@ -167,12 +223,39 @@ func TestRealConsensusSignaturesAndCommittedAppState(t *testing.T) {
 	if verified.Height != 2 || verified.Sequence != 1 {
 		t.Fatal("wrong verified decision")
 	}
+	admission := CellAdmission{Schema: "kerosene.cell-admission/v1", NetworkID: policy.NetworkID, Epoch: policy.Epoch,
+		CellID: "cell-example", ClusterUID: "80cf8d2f-172d-4d43-ba99-1734b32184b1", OperatorID: "operator-example", ChangeID: "change-example",
+		ApprovalDigest: verified.ApprovalDigest, Nonce: strings.Repeat("c", 64), IssuedAt: uint64(now.Unix()), ExpiresAt: uint64(now.Unix()) + 60}
+	signAdmission := func(payload CellAdmission) []byte {
+		message, _ := json.Marshal(payload)
+		envelope := CellAdmissionEnvelope{Admission: payload}
+		for _, member := range []string{"validator-1", "validator-2", "validator-3"} {
+			envelope.Signatures = append(envelope.Signatures, ProposalSignature{member, base64.StdEncoding.EncodeToString(ed25519.Sign(authorizers[member], message))})
+		}
+		raw, _ := json.Marshal(envelope)
+		return raw
+	}
+	binding := AdmissionBinding{CellID: admission.CellID, ClusterUID: admission.ClusterUID, OperatorID: admission.OperatorID, ChangeID: admission.ChangeID,
+		ApprovalDigest: "sha256:" + strings.Repeat("f", 64)}
+	combined, err := verifyOrderedCellAdmission(anchor, proof, a.ReleaseDigest, 1, signAdmission(admission), binding, now)
+	if err != nil || combined.InstallAuthorized || combined.NonceConsumed {
+		t.Fatal("read-only combined verification failed", err)
+	}
+	admission.ApprovalDigest = binding.ApprovalDigest
+	if _, err := verifyOrderedCellAdmission(anchor, proof, a.ReleaseDigest, 1, signAdmission(admission), binding, now); err == nil {
+		t.Fatal("caller-selected approval digest bypassed consensus binding")
+	}
+	admission.ApprovalDigest = verified.ApprovalDigest
+	testOrderedAdmissionConsumptionPostgres(t, anchor, proof, a.ReleaseDigest, signAdmission(admission), binding, now)
 	if _, err := verifyConsensus(anchor, proof, "sha256:"+strings.Repeat("b", 64), 1, now); err == nil {
 		t.Fatal("wrong release accepted")
 	}
 	original := proof.State
 	state.Approvals[0].ReleaseDigest = "sha256:" + strings.Repeat("b", 64)
 	proof.State = stateBytes(state)
+	if _, err := verifyOrderedCellAdmission(anchor, proof, a.ReleaseDigest, 1, signAdmission(admission), binding, now); err == nil {
+		t.Fatal("signed admission bypassed invalid consensus state")
+	}
 	if _, err := verifyConsensus(anchor, proof, a.ReleaseDigest, 1, now); err == nil {
 		t.Fatal("uncommitted app state")
 	}

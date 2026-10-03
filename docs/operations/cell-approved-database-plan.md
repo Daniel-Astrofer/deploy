@@ -46,6 +46,15 @@ initial installation requires the approved plan before Admin installation or
 resource writes, even if other execution capability checks are mocked in tests.
 Dry-run remains inspection, not installation proof.
 
+Initial installation is explicitly refused before Admin or Kubernetes writes
+until a separate Bank-authorized initial-admission executor is integrated. It
+must not fall through to update maintenance: there is no existing KFE to drain
+on an empty cluster. Removing the general capability blockers alone cannot
+enable bootstrap. The initial protocol must bind the approved release, Cell and
+cluster identity, fresh inventory and operator attribution, and keep financial
+startup/signers disabled until provisioning and independent readiness checks
+finish. Update/recovery continue to require their existing maintenance protocol.
+
 No SQL runs as a result of validation or preflight. The lifecycle executor still
 lacks qualified initial admission, credential issuance, migration scheduling,
 tested recovery and whole-Cell acceptance. All existing live execution blockers

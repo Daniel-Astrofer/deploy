@@ -176,6 +176,13 @@ receipt masquerading as a BFT commit.
 
 ## Failure, cleanup and recovery
 
+The application and offline verifier enforce the Contracts numeric domain:
+epoch and approval sequence are 1 through 9007199254740991, with 4 through
+64 distinct policy members. Sequence exhaustion is rejected before increment,
+including uint64 overflow. Restart refuses an out-of-domain policy; do not edit
+persisted consensus state to bypass this check. A legacy policy outside these
+limits requires explicit governance migration, not automatic normalization.
+
 Failed runs exit nonzero and print tails of only their own synthetic process
 logs. Teardown signals and waits for the exact `Popen` children created by
 that invocation, stopping Comet before its ABCI app. It does not use `pkill`,

@@ -16,7 +16,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fail(fmt.Errorf("use serve or verify"))
+		fail(fmt.Errorf("use serve, verify or verify-admission"))
 	}
 	flags := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	policyPath := flags.String("policy", "", "operator-provisioned static governance proposer policy")
@@ -26,11 +26,16 @@ func main() {
 	proofPath := flags.String("proof", "", "untrusted offline contiguous consensus proof")
 	releaseDigest := flags.String("release-digest", "", "canonical release lock SHA256")
 	sequence := flags.Uint64("sequence", 0, "expected release sequence")
+	admissionPath := flags.String("admission", "", "untrusted quorum-signed initial admission envelope")
+	cellID := flags.String("cell-id", "", "expected Cell identity")
+	clusterUID := flags.String("cluster-uid", "", "independently observed live kube-system UID")
+	operatorID := flags.String("operator-id", "", "independently authenticated operator identity")
+	changeID := flags.String("change-id", "", "audited change identity")
 	if err := flags.Parse(os.Args[2:]); err != nil {
 		fail(err)
 	}
 	switch os.Args[1] {
-	case "verify":
+	case "verify", "verify-admission":
 		raw, err := boundedRead(*anchorPath)
 		if err != nil {
 			fail(err)
@@ -46,6 +51,21 @@ func main() {
 		var proof ConsensusProof
 		if err := strictDecode(raw, &proof); err != nil {
 			fail(err)
+		}
+		if os.Args[1] == "verify-admission" {
+			raw, err := boundedRead(*admissionPath)
+			if err != nil {
+				fail(err)
+			}
+			result, err := verifyOrderedCellAdmission(anchor, proof, *releaseDigest, *sequence, raw,
+				AdmissionBinding{CellID: *cellID, ClusterUID: *clusterUID, OperatorID: *operatorID, ChangeID: *changeID}, time.Now())
+			if err != nil {
+				fail(err)
+			}
+			if err := json.NewEncoder(os.Stdout).Encode(result); err != nil {
+				fail(err)
+			}
+			return
 		}
 		result, err := verifyConsensus(anchor, proof, *releaseDigest, *sequence, time.Now())
 		if err != nil {
