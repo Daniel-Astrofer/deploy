@@ -14,6 +14,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 STACK = Path(__file__).resolve().parents[1] / "stack"
@@ -340,11 +341,38 @@ class PackageTest(LocalTest):
         self.assertEqual(first["configurationVerification"], "verified-installed-lifecycle")
         self.assertEqual(first["archive"]["type"], "file")
         self.assertEqual(first["status"], "unsigned-candidate")
+        with tarfile.open(self.root / "computed/candidate.tar", "r:") as bundle:
+            provenance = json.load(bundle.extractfile("provenance.json"))
+        tools = provenance["predicate"]["tools"]
+        self.assertEqual(tools["admin_install.py"], archive.file_record(STACK / "admin_install.py")["digest"])
         self.selection["services"]["admin"]["configDigest"] = expected
         self.assertEqual(first, self.assemble("verified"))
         self.selection["services"]["admin"]["configDigest"] = "sha256:" + "0" * 64
         with self.assertRaisesRegex(archive.ArchiveError, "configuration digest mismatch"):
             self.assemble("rejected")
+
+    def test_foreign_cached_controller_dependency_is_rejected_before_loading(self):
+        for module in ["lifecycle", "admin_install"]:
+            with self.subTest(module=module), patch.dict(sys.modules, {module: SimpleNamespace(__file__="/foreign/candidate/" + module + ".py")}), patch.object(package.importlib.machinery.SourceFileLoader, "exec_module") as load:
+                with self.assertRaisesRegex(archive.ArchiveError, "cached controller dependency"):
+                    self.assemble("foreign-" + module)
+                load.assert_not_called()
+                self.assertFalse((self.root / ("foreign-" + module)).exists())
+
+    def test_controller_dependency_change_during_validation_rejects_candidate(self):
+        original = package.file_record
+        reads = 0
+        def changing(path, *args, **kwargs):
+            nonlocal reads
+            record = original(path, *args, **kwargs)
+            if Path(path) == STACK / "admin_install.py":
+                reads += 1
+                if reads > 1:
+                    record = {**record, "digest": "sha256:" + "0" * 64}
+            return record
+        with patch.object(package, "file_record", side_effect=changing), self.assertRaisesRegex(archive.ArchiveError, "changed during"):
+            self.assemble("changed-controller")
+        self.assertFalse((self.root / "changed-controller").exists())
 
     def test_installed_lifecycle_rejects_unsafe_candidate_resources(self):
         for kind in ("Secret", "ClusterRole", "Job"):

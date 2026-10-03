@@ -201,7 +201,7 @@ promised. The provenance records both Python tool hashes and the Git version.
   "resources": [],
   "admin": {
     "image": "registry.example.invalid/admin@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "config": {"synthetic": true}
+    "config": {"apiBaseUrl": "https://synthetic-core.invalid"}
   }
 }
 ```
@@ -220,7 +220,13 @@ image equals the service image, admin: the admin object only for admin}` using
 its canonical JSON rules. No copy of that formula is defined in the packager.
 The shared verification also enforces the runtime-image allowlist, inline
 Secret prohibition and dangerous cluster-RBAC rejection. Installed controller
-and lifecycle hashes are recorded in provenance. If lifecycle is absent,
+and lifecycle hashes are recorded in provenance, together with the installed
+`admin_install.py` dependency. Dependency files must be regular non-symlink
+files from the controller installation; cached Python modules from another
+checkout are rejected before controller loading. Their file digests are read
+before and after configuration validation; a change rejects candidate assembly.
+These are local tool-material records, not signed build attestations or a
+sandbox against another process controlling the operator account. If lifecycle is absent,
 every service must provide `configDigest`; assembly remains possible but
 `configurationVerification` explicitly records `unverified-lifecycle-unavailable`.
 That output still requires the executor's full validation before use.

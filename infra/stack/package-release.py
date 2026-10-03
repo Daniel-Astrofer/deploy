@@ -200,8 +200,19 @@ def lifecycle_configuration(raw, deployment, services):
             raise ArchiveError("computing configDigest requires the installed lifecycle.py")
         return services, "unverified-lifecycle-unavailable", {}
     stack_path = Path(__file__).parents[1] / "kerosene-stack"
-    if lifecycle_path.is_symlink() or stack_path.is_symlink() or not stack_path.is_file():
-        raise ArchiveError("installed lifecycle/controller must be regular local files")
+    admin_path = lifecycle_path.with_name("admin_install.py")
+    controller_paths = {"kerosene-stack": stack_path, "lifecycle.py": lifecycle_path,
+                        "admin_install.py": admin_path}
+    for path in controller_paths.values():
+        if path.is_symlink() or not path.is_file():
+            raise ArchiveError("installed controller and dependencies must be regular local files")
+    # Python reuses imported module names. Refuse a module from a different
+    # checkout before loading the controller, not after calling its validator.
+    for module_name, path in (("lifecycle", lifecycle_path), ("admin_install", admin_path)):
+        cached = sys.modules.get(module_name)
+        if cached is not None and Path(getattr(cached, "__file__", "")).resolve() != path.resolve():
+            raise ArchiveError("cached controller dependency is not the installed module: " + module_name)
+    controller_tools = {name: file_record(path)["digest"] for name, path in controller_paths.items()}
     loader = importlib.machinery.SourceFileLoader("candidate_installed_stack", str(stack_path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     stack = importlib.util.module_from_spec(spec)
@@ -210,6 +221,8 @@ def lifecycle_configuration(raw, deployment, services):
     lifecycle = stack.lifecycle
     if Path(lifecycle.__file__).resolve() != lifecycle_path.resolve():
         raise ArchiveError("lifecycle module did not load from the installed controller directory")
+    if Path(lifecycle.admin_install.__file__).resolve() != admin_path.resolve():
+        raise ArchiveError("Admin installer did not load from the installed controller directory")
     selected = {name: dict(service) for name, service in services.items()}
     try:
         for name, service in selected.items():
@@ -223,9 +236,9 @@ def lifecycle_configuration(raw, deployment, services):
             lifecycle.verify_deployment(stack, {"services": selected}, {"services": selected}, str(path))
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise ArchiveError("installed lifecycle rejected candidate configuration: " + str(exc)) from exc
-    return selected, "verified-installed-lifecycle", {
-        "lifecycle.py": file_record(lifecycle_path)["digest"],
-        "kerosene-stack": file_record(stack_path)["digest"]}
+    if controller_tools != {name: file_record(path)["digest"] for name, path in controller_paths.items()}:
+        raise ArchiveError("installed controller dependency changed during candidate validation")
+    return selected, "verified-installed-lifecycle", controller_tools
 
 
 def deterministic_tar(tree, destination):
