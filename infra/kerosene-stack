@@ -1222,9 +1222,16 @@ def validate_roster(path_text: str, summary: dict[str, Any]) -> dict[str, bytes]
     if len(members) != summary["bft"]["members"]:
         fail("$.roster.members", "member count does not match the release BFT membership")
     decoded: dict[str, bytes] = {}
+    seen_keys: set[bytes] = set()
     for member_id, public_key in members.items():
         require_identifier(member_id, "$.roster.members.<member>")
-        decoded[member_id] = decode_base64(public_key, f"$.roster.members.{member_id}")
+        key = decode_base64(public_key, f"$.roster.members.{member_id}")
+        if len(key) != 44 or not key.startswith(TUF_ED25519_SPKI_PREFIX):
+            fail("$.roster.members", "requires canonical Ed25519 SPKI public keys")
+        if key in seen_keys:
+            fail("$.roster.members", "distinct members must have distinct public keys")
+        seen_keys.add(key)
+        decoded[member_id] = key
     return decoded
 
 
@@ -1238,6 +1245,8 @@ def verify_signature_set(
 ) -> int:
     if type(signatures) is not list:
         fail(path, "signatures must be an array")
+    if len(set(roster.values())) != len(roster):
+        fail(path, "trusted signature roster contains duplicate public keys")
     seen: set[str] = set()
     for index, value in enumerate(signatures):
         signature = require_keys(

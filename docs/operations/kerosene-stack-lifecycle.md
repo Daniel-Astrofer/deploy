@@ -106,6 +106,13 @@ fresh independently signed Bank aggregate, independently approved snapshot
 request and signed tested restore receipt. TUF state preserves delegated-role
 high-water marks and rejects same-version signed-metadata equivocation.
 
+Validator rosters require canonical Ed25519 SPKI keys and distinct key bytes
+for each member ID. The signature counter also rejects duplicate trusted keys,
+so aliases of one private key cannot satisfy a multi-member threshold. Distinct
+keys are necessary, but do not prove independent operators or failure domains.
+Existing duplicate-key rosters must be corrected through independent authority
+provisioning; the installer never repairs or replaces trusted keys automatically.
+
 Live application additionally requires an authenticated ADMIN KFE maintenance
 status over pinned mTLS references, exact change/operator attribution and
 quorum-approved tested recovery evidence bound to the migration digest. KFE

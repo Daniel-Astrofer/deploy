@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Local lifecycle/configuration validation tests; not a financial Cell E2E."""
 import copy
+import base64
 import datetime as dt
 import importlib.machinery
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -45,6 +47,49 @@ class DeploymentTest(unittest.TestCase):
 
     def test_exact_configuration(self):
         self.assertEqual(self.verify(), self.artifact)
+
+    def test_validator_roster_requires_independent_key_material(self):
+        keys = [stack.TUF_ED25519_SPKI_PREFIX + bytes([index]) * 32 for index in range(4)]
+        roster = {"schema": stack.ROSTER_SCHEMA, "networkId": self.summary["bft"]["networkId"],
+                  "members": {f"member-{index}": base64.b64encode(key).decode() for index, key in enumerate(keys)}}
+        path = self.root / "roster.json"
+        path.write_text(json.dumps(roster))
+        self.assertEqual(len(stack.validate_roster(str(path), self.summary)), 4)
+        roster["members"]["member-3"] = roster["members"]["member-0"]
+        path.write_text(json.dumps(roster))
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "distinct public keys"):
+            stack.validate_roster(str(path), self.summary)
+
+    def test_validator_roster_rejects_non_ed25519_or_noncanonical_keys(self):
+        prefix = stack.TUF_ED25519_SPKI_PREFIX
+        for key in [b"arbitrary", prefix + b"x" * 31, prefix + b"x" * 33, b"bad-prefix!!" + b"x" * 32]:
+            roster = {"schema": stack.ROSTER_SCHEMA, "networkId": self.summary["bft"]["networkId"],
+                      "members": {f"member-{index}": base64.b64encode(prefix + bytes([index]) * 32).decode() for index in range(4)}}
+            roster["members"]["member-0"] = base64.b64encode(key).decode()
+            self.path.write_text(json.dumps(roster))
+            with self.subTest(key=key), self.assertRaisesRegex(stack.ReleaseValidationError, "canonical Ed25519"):
+                stack.validate_roster(str(self.path), self.summary)
+
+    def test_signature_counter_cannot_count_aliases_of_one_key_as_quorum(self):
+        key = stack.TUF_ED25519_SPKI_PREFIX + b"x" * 32
+        with patch.object(stack, "verify_ed25519") as verify, self.assertRaisesRegex(stack.ReleaseValidationError, "duplicate public keys"):
+            stack.verify_signature_set(b"unit", [], {"first": key, "second": key, "third": key}, 3, "unit signatures")
+        verify.assert_not_called()
+
+    def test_real_signature_from_one_key_cannot_be_relabelled_as_three_validators(self):
+        private = self.root / "synthetic-test-key.pem"
+        payload = self.root / "payload"
+        signature = self.root / "signature"
+        payload.write_bytes(b"synthetic quorum anti-alias test")
+        subprocess.run(["openssl", "genpkey", "-algorithm", "Ed25519", "-out", str(private)], check=True, capture_output=True)
+        key = subprocess.run(["openssl", "pkey", "-in", str(private), "-pubout", "-outform", "DER"], check=True, capture_output=True).stdout
+        subprocess.run(["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(private), "-in", str(payload), "-out", str(signature)], check=True, capture_output=True)
+        record = {"memberId": "first", "publicKeyDerBase64": base64.b64encode(key).decode(),
+                  "signatureBase64": base64.b64encode(signature.read_bytes()).decode()}
+        self.assertEqual(stack.verify_signature_set(payload.read_bytes(), [record], {"first": key}, 1, "synthetic signatures"), 1)
+        aliases = [{**record, "memberId": member} for member in ["first", "second", "third"]]
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "duplicate public keys"):
+            stack.verify_signature_set(payload.read_bytes(), aliases, {member: key for member in ["first", "second", "third"]}, 3, "synthetic signatures")
 
     def test_initial_install_checks_both_bound_namespaces(self):
         replies = []
