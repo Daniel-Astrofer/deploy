@@ -649,6 +649,25 @@ def verify_running(kubectl, resource):
     return records
 
 
+def verify_managed_configmaps(stack, kubectl, artifact):
+    """Verify managed nonsecret configuration; never fetch Secret values."""
+    records = []
+    for resource in sorted((r for r in artifact["resources"] if r["kind"] == "ConfigMap"), key=identity):
+        ns, kind, name = identity(resource)
+        try:
+            live = json.loads(run(kubectl + ["-n", ns, "get", "configmap", name, "-o", "json"]))
+            if identity(live) != (ns, kind, name) or live.get("apiVersion") != "v1" or not live["metadata"].get("uid") or live["metadata"].get("deletionTimestamp"):
+                raise ValueError("changed identity")
+            approved = {key: resource.get(key, {}) for key in ("data", "binaryData")}
+            observed = {key: live.get(key, {}) for key in ("data", "binaryData")}
+            if observed != approved:
+                raise ValueError("changed configuration")
+            records.append({"namespace": ns, "name": name, "uid": live["metadata"]["uid"], "contentDigest": digest(observed)})
+        except (RuntimeError, ValueError, TypeError, KeyError, AttributeError, OSError, subprocess.TimeoutExpired):
+            raise stack.ApplyBlockedError("managed ConfigMap unavailable or differs from approved configuration") from None
+    return records
+
+
 def execute(stack, artifact, summary, args, checkpoint):
     if not args.dry_run:
         require_execution_capabilities(stack)
@@ -681,6 +700,9 @@ def execute(stack, artifact, summary, args, checkpoint):
         checkpoint("admin-installed", receipt)
     for resource in prerequisites:
         apply_resource(kubectl, resource, args.dry_run)
+    if not args.dry_run:
+        configuration_records = verify_managed_configmaps(stack, kubectl, artifact)
+        checkpoint("configuration-verified", {"configMaps": configuration_records})
     for phase in phases:
         # Core and KFE have reciprocal integration references. Submit the
         # entire phase before waiting, otherwise the first readiness gate can
@@ -705,6 +727,8 @@ def execute(stack, artifact, summary, args, checkpoint):
         # Recheck the bound cluster identity after rollout, then pin all smoke
         # subprocesses too. Legacy scripts alone used the ambient context.
         kubectl = kubectl_command(stack, config)
+        if verify_managed_configmaps(stack, kubectl, artifact) != configuration_records:
+            raise stack.ApplyBlockedError("managed ConfigMaps changed during Cell rollout")
         binding = ["--cell-binding", kubectl[0], config["cluster"]["kubeconfig"], config["cluster"]["context"]]
         for script in ("smoke-staging-vault.sh", "smoke-staging.sh"):
             run(["bash", str(root / "infra/kubernetes/scripts" / script), *binding])

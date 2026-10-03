@@ -380,6 +380,39 @@ class DeploymentTest(unittest.TestCase):
                 lifecycle.validate_maintenance(stack, changed, "change-one", now)
 
 
+class ManagedConfigurationTest(unittest.TestCase):
+    def fixture(self):
+        resource = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"namespace": "kerosene-staging", "name": "config"},
+            "data": {"setting": "approved"}, "binaryData": {"blob": "YQ=="}}
+        live = copy.deepcopy(resource)
+        live["metadata"]["uid"] = "config-uid"
+        return {"resources": [resource]}, live
+
+    def test_exact_content_records_identity_and_digest_without_values(self):
+        artifact, live = self.fixture()
+        with patch.object(lifecycle, "run", return_value=json.dumps(live).encode()) as run:
+            records = lifecycle.verify_managed_configmaps(stack, ["/bound/kubectl"], artifact)
+        self.assertEqual(records[0]["uid"], "config-uid")
+        self.assertNotIn("approved", json.dumps(records))
+        run.assert_called_once_with(["/bound/kubectl", "-n", "kerosene-staging", "get", "configmap", "config", "-o", "json"])
+
+    def test_modified_text_binary_or_identity_blocks_without_echoing_values(self):
+        for mutation in ("data", "binaryData", "name", "uid", "deletion"):
+            artifact, live = self.fixture()
+            if mutation in ("data", "binaryData"): live[mutation] = {"private-marker": "private-value"}
+            elif mutation == "uid": live["metadata"].pop("uid")
+            elif mutation == "deletion": live["metadata"]["deletionTimestamp"] = "now"
+            else: live["metadata"]["name"] = "foreign"
+            with self.subTest(mutation=mutation), patch.object(lifecycle, "run", return_value=json.dumps(live).encode()), self.assertRaises(stack.ApplyBlockedError) as error:
+                lifecycle.verify_managed_configmaps(stack, ["/bound/kubectl"], artifact)
+            self.assertNotIn("private", str(error.exception))
+
+    def test_secrets_are_never_collected(self):
+        with patch.object(lifecycle, "run") as run:
+            self.assertEqual(lifecycle.verify_managed_configmaps(stack, ["/bound/kubectl"], {"resources": [{"kind": "Secret"}]}), [])
+            run.assert_not_called()
+
+
 class RuntimeOwnershipTest(unittest.TestCase):
     def fixture(self, kind):
         image = "registry.example.invalid/service@sha256:" + "a" * 64
