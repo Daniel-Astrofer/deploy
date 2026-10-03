@@ -2,17 +2,24 @@
 
 `infra/kubernetes/overlays/staging-separated-databases` renders the existing
 complete Bank-plane staging runtime with an opt-in database wiring component.
-It changes only Core/KFE datasource Secret references. The independent Vault
+It changes Core/KFE datasource Secret references and separates PostgreSQL's
+privileged bootstrap credentials from both application identities. The independent Vault
 plane is unchanged and remains required for the complete Cell.
 
 | Workload | Externally provisioned Secret | Required keys |
 | --- | --- | --- |
 | Core (`server`) | `kerosene-core-db-secrets` | `jdbc-url`, `application-user`, `application-password` |
 | KFE (`kfe-service`) | `kerosene-kfe-db-secrets` | `jdbc-url`, `application-user`, `application-password` |
+| PostgreSQL bootstrap | `kerosene-postgres-bootstrap` | `bootstrap-user`, `bootstrap-password` |
 
 The Secrets belong in `kerosene-staging`; no credential values are generated or
 committed. Endpoints must identify different databases, possibly on one PostgreSQL
 cluster. Different Secret names alone do not prove different databases or roles.
+The official PostgreSQL image creates `POSTGRES_USER` as a privileged bootstrap
+identity on an empty data directory; never use that identity for Core or KFE.
+The new overlay leaves the existing data path and readiness probes unchanged.
+Changing these environment references does not rotate passwords or create roles
+in an initialized database; this is not an existing-volume transition mechanism.
 The installer must verify actual database identity and privilege separation,
 not decode credentials into logs or accept naming as evidence.
 
@@ -45,6 +52,12 @@ by this component, not silently disabled; migration/runtime-role compatibility
 must be tested before qualification. Historical compatibility objects still need
 explicit ownership cleanup. Database provisioning and these gates are not yet
 automated by this overlay.
+
+The atomic [runtime permission step](cell-database-runtime-privileges.md) now has
+real PostgreSQL/local-JAR tests for both services. It grants data access separately
+from migration ownership and verifies up-to-date Flyway works without DDL rights;
+it still requires explicit administration, external role provisioning and an
+approved database binding, and is not yet integrated into lifecycle execution.
 
 ## Existing installation and recovery
 

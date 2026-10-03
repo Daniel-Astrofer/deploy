@@ -12,6 +12,10 @@ and KFE with independent external datasource Secret references. It preserves
 existing defaults and supplies no credentials, database provisioning or legacy
 cutover. Secret-reference preflight covers both new bindings; this is not proof
 that their contents identify distinct databases or correctly scoped roles.
+The new-install overlay also separates PostgreSQL bootstrap credentials from
+application credentials. The [runtime privilege step](cell-database-runtime-privileges.md)
+has actual PostgreSQL/JAR verification but still requires external provisioning
+and approved administration; it is not invoked by the lifecycle executor yet.
 
 ## Bootstrap and operator workflow
 

@@ -34,7 +34,7 @@ def resources(overlay):
 
 
 class SeparateDatabasesTest(unittest.TestCase):
-    def test_render_changes_only_three_database_references_per_service(self):
+    def test_render_changes_only_service_bindings_and_postgres_bootstrap_credentials(self):
         baseline = resources("staging")
         separated = resources("staging-separated-databases")
         variables = {"SPRING_DATASOURCE_URL", "SPRING_DATASOURCE_USERNAME", "SPRING_DATASOURCE_PASSWORD"}
@@ -49,6 +49,17 @@ class SeparateDatabasesTest(unittest.TestCase):
                     reference["name"] = secret
                     changed.add(env["name"])
             self.assertEqual(changed, variables)
+        postgres = baseline[("StatefulSet", "kerosene-staging", "staging-postgres")]
+        container = next(c for c in postgres["spec"]["template"]["spec"]["containers"] if c["name"] == "postgres")
+        changed = set()
+        for env in container["env"]:
+            if env["name"] in ("POSTGRES_USER", "POSTGRES_PASSWORD"):
+                reference = env["valueFrom"]["secretKeyRef"]
+                self.assertEqual(reference["name"], "kerosene-db-secrets")
+                reference["name"] = "kerosene-postgres-bootstrap"
+                reference["key"] = "bootstrap-user" if env["name"] == "POSTGRES_USER" else "bootstrap-password"
+                changed.add(env["name"])
+        self.assertEqual(changed, {"POSTGRES_USER", "POSTGRES_PASSWORD"})
         self.assertEqual(separated, baseline)
         self.assertFalse(any(key[0] == "Secret" for key in separated))
 
@@ -74,6 +85,9 @@ class SeparateDatabasesTest(unittest.TestCase):
         required = {"jdbc-url", "application-user", "application-password"}
         self.assertEqual(references[("kerosene-staging", "kerosene-core-db-secrets")], required)
         self.assertEqual(references[("kerosene-staging", "kerosene-kfe-db-secrets")], required)
+        self.assertEqual(references[("kerosene-staging", "kerosene-postgres-bootstrap")],
+                         {"bootstrap-user", "bootstrap-password"})
+        self.assertNotIn(("kerosene-staging", "kerosene-db-secrets"), references)
 
 
 if __name__ == "__main__":

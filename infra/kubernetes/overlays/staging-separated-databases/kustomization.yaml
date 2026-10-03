@@ -4,3 +4,5 @@ resources:
   - ../staging
 components:
   - ../../components/separate-service-databases
+patches:
+  - path: postgres-bootstrap.yaml
