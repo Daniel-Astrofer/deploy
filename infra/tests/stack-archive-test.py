@@ -345,6 +345,8 @@ class PackageTest(LocalTest):
             provenance = json.load(bundle.extractfile("provenance.json"))
         tools = provenance["predicate"]["tools"]
         self.assertEqual(tools["admin_install.py"], archive.file_record(STACK / "admin_install.py")["digest"])
+        for name in ("create-service-databases.sql", "service-runtime-grants.sql"):
+            self.assertEqual(tools["postgres/" + name], archive.file_record(STACK.parent / "runtime/postgres" / name)["digest"])
         self.selection["services"]["admin"]["configDigest"] = expected
         self.assertEqual(first, self.assemble("verified"))
         self.selection["services"]["admin"]["configDigest"] = "sha256:" + "0" * 64
@@ -361,18 +363,22 @@ class PackageTest(LocalTest):
 
     def test_controller_dependency_change_during_validation_rejects_candidate(self):
         original = package.file_record
-        reads = 0
-        def changing(path, *args, **kwargs):
-            nonlocal reads
-            record = original(path, *args, **kwargs)
-            if Path(path) == STACK / "admin_install.py":
-                reads += 1
-                if reads > 1:
-                    record = {**record, "digest": "sha256:" + "0" * 64}
-            return record
-        with patch.object(package, "file_record", side_effect=changing), self.assertRaisesRegex(archive.ArchiveError, "changed during"):
-            self.assemble("changed-controller")
-        self.assertFalse((self.root / "changed-controller").exists())
+        targets = [STACK / "admin_install.py", STACK.parent / "runtime/postgres/create-service-databases.sql",
+                   STACK.parent / "runtime/postgres/service-runtime-grants.sql"]
+        for index, target in enumerate(targets):
+            reads = 0
+            def changing(path, *args, **kwargs):
+                nonlocal reads
+                record = original(path, *args, **kwargs)
+                if Path(path) == target:
+                    reads += 1
+                    if reads > 1:
+                        record = {**record, "digest": "sha256:" + "0" * 64}
+                return record
+            output = "changed-controller-" + str(index)
+            with self.subTest(target=target.name), patch.object(package, "file_record", side_effect=changing), self.assertRaisesRegex(archive.ArchiveError, "changed during"):
+                self.assemble(output)
+            self.assertFalse((self.root / output).exists())
 
     def test_installed_lifecycle_rejects_unsafe_candidate_resources(self):
         for kind in ("Secret", "ClusterRole", "Job"):

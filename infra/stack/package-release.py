@@ -202,7 +202,9 @@ def lifecycle_configuration(raw, deployment, services):
     stack_path = Path(__file__).parents[1] / "kerosene-stack"
     admin_path = lifecycle_path.with_name("admin_install.py")
     controller_paths = {"kerosene-stack": stack_path, "lifecycle.py": lifecycle_path,
-                        "admin_install.py": admin_path}
+                        "admin_install.py": admin_path,
+                        "postgres/create-service-databases.sql": stack_path.parent / "runtime/postgres/create-service-databases.sql",
+                        "postgres/service-runtime-grants.sql": stack_path.parent / "runtime/postgres/service-runtime-grants.sql"}
     for path in controller_paths.values():
         if path.is_symlink() or not path.is_file():
             raise ArchiveError("installed controller and dependencies must be regular local files")

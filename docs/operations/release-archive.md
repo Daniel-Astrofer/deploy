@@ -221,7 +221,8 @@ its canonical JSON rules. No copy of that formula is defined in the packager.
 The shared verification also enforces the runtime-image allowlist, inline
 Secret prohibition and dangerous cluster-RBAC rejection. Installed controller
 and lifecycle hashes are recorded in provenance, together with the installed
-`admin_install.py` dependency. Dependency files must be regular non-symlink
+`admin_install.py` dependency and both installed PostgreSQL primitives
+(`create-service-databases.sql`, `service-runtime-grants.sql`). Dependency files must be regular non-symlink
 files from the controller installation; cached Python modules from another
 checkout are rejected before controller loading. Their file digests are read
 before and after configuration validation; a change rejects candidate assembly.

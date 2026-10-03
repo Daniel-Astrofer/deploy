@@ -16,6 +16,10 @@ The new-install overlay also separates PostgreSQL bootstrap credentials from
 application credentials. The [runtime privilege step](cell-database-runtime-privileges.md)
 has actual PostgreSQL/JAR verification but still requires external provisioning
 and approved administration; it is not invoked by the lifecycle executor yet.
+The [approved initial database plan](cell-approved-database-plan.md) now binds
+database/role/Secret/workload metadata and installed SQL hashes to component
+configuration digests. Preflight includes its migration credential references;
+actual installation requires a plan, but no SQL is executed by its validation.
 
 ## Bootstrap and operator workflow
 

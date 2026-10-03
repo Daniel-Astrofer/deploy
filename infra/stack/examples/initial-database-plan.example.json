@@ -1,0 +1,30 @@
+{
+  "schema": "kerosene.cell.initial-databases/v1",
+  "mode": "initial",
+  "scriptDigests": {
+    "create-service-databases.sql": "sha256:fe87a7913e6b69ac304b9185ead856b0a1c5f71e6dc312d8e7496d41e10dbef1",
+    "service-runtime-grants.sql": "sha256:5e29f3842b851c731e18858305f58420bf0dde4426d671fe2883353376a41979"
+  },
+  "postgres": {
+    "workload": {"kind": "StatefulSet", "name": "staging-postgres", "container": "postgres"},
+    "bootstrapSecret": {"name": "kerosene-postgres-bootstrap", "usernameKey": "bootstrap-user", "passwordKey": "bootstrap-password"}
+  },
+  "services": {
+    "core": {
+      "database": "kerosene_core",
+      "migrationRole": "kerosene_core_migration",
+      "runtimeRole": "kerosene_core_runtime",
+      "workload": {"kind": "Deployment", "name": "server", "container": "server"},
+      "migrationSecret": {"name": "kerosene-core-migration-secrets", "urlKey": "jdbc-url", "usernameKey": "migration-user", "passwordKey": "migration-password"},
+      "runtimeSecret": {"name": "kerosene-core-db-secrets", "urlKey": "jdbc-url", "usernameKey": "application-user", "passwordKey": "application-password"}
+    },
+    "kfe": {
+      "database": "kerosene_kfe",
+      "migrationRole": "kerosene_kfe_migration",
+      "runtimeRole": "kerosene_kfe_runtime",
+      "workload": {"kind": "Deployment", "name": "kfe-service", "container": "kfe-service"},
+      "migrationSecret": {"name": "kerosene-kfe-migration-secrets", "urlKey": "jdbc-url", "usernameKey": "migration-user", "passwordKey": "migration-password"},
+      "runtimeSecret": {"name": "kerosene-kfe-db-secrets", "urlKey": "jdbc-url", "usernameKey": "application-user", "passwordKey": "application-password"}
+    }
+  }
+}

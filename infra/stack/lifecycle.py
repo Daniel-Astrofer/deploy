@@ -9,6 +9,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import ssl
@@ -22,6 +23,8 @@ SCHEMA = "kerosene.stack.deployment/v1"
 NAMESPACES = {"kerosene-staging", "kerosene-staging-vault"}
 WORKLOADS = {"Deployment", "StatefulSet"}
 KINDS = WORKLOADS | {"Namespace", "ConfigMap", "Service", "ServiceAccount", "NetworkPolicy", "PersistentVolumeClaim", "PodDisruptionBudget", "HorizontalPodAutoscaler"}
+DATABASE_PLAN_NAME = "kerosene-cell-database-plan"
+DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql")
 
 # These are implementation capabilities, never caller-supplied declarations.
 # Remove a blocker only with the corresponding implementation and integration
@@ -138,6 +141,7 @@ def verify_deployment(stack, release, summary, path):
         if digest(component_config(artifact, service["image"], name)) != service["configDigest"]:
             raise stack.ApplyBlockedError(f"approved configuration digest mismatch: {name}")
     workload_phases(stack, artifact, summary)
+    initial_database_plan(stack, artifact, summary)
     try:
         required_secret_references(stack, artifact)
     except (TypeError, AttributeError, KeyError) as error:
@@ -221,9 +225,113 @@ def required_secret_references(stack, artifact):
                     add(namespace, reference, "name", [item.get("key") for item in reference.get("items", [])])
         for reference in pod.get("imagePullSecrets", []):
             add(namespace, reference, "name")
+    plan = initial_database_plan(stack, artifact)
+    if plan is not None:
+        for reference in [plan["postgres"]["bootstrapSecret"]] + [service[key] for service in plan["services"].values()
+                                                               for key in ("migrationSecret", "runtimeSecret")]:
+            add("kerosene-staging", reference, "name", [value for key, value in reference.items() if key != "name"])
     if len(references) > 1024:
         raise stack.ApplyBlockedError("external Secret reference limit exceeded")
     return references
+
+
+def initial_database_plan(stack, artifact, summary=None):
+    """Inert approved configuration only; never executes SQL or reads credentials.
+
+    ConfigMaps are already included in every component configDigest. The reserved
+    plan therefore cannot be substituted independently of the approved release.
+    Legacy manifests remain inspectable without a plan, not install-qualified.
+    """
+    candidates = [r for r in artifact["resources"] if r.get("metadata", {}).get("name") == DATABASE_PLAN_NAME]
+    if not candidates:
+        return None
+    def keys(value, required):
+        return stack.require_keys(value, "initial database plan", required)
+    def sql_name(value):
+        if not isinstance(value, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", value) or value in ("postgres", "template0", "template1"):
+            raise ValueError("invalid SQL identity")
+    def secret(value, url=False):
+        keys(value, ("name", "usernameKey", "passwordKey", *(('urlKey',) if url else ())))
+        stack.require_identifier(value["name"], "database Secret name")
+        for name, key in value.items():
+            if name != "name" and (not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,253}", key)):
+                raise ValueError("invalid Secret key")
+        if len(set(value[key] for key in value if key != "name")) != len(value) - 1:
+            raise ValueError("aliased credential keys")
+    def workload(binding, component):
+        keys(binding, ("kind", "name", "container"))
+        if binding["kind"] not in WORKLOADS:
+            raise ValueError("invalid workload kind")
+        for key in ("name", "container"):
+            stack.require_identifier(binding[key], "database workload identity")
+        matches = [r for r in artifact["resources"] if identity(r) == ("kerosene-staging", binding["kind"], binding["name"])]
+        if len(matches) != 1:
+            raise ValueError("ambiguous database workload")
+        pod = matches[0]["spec"]["template"]["spec"]
+        found = [c for c in pod["containers"] if c["name"] == binding["container"]]
+        if len(found) != 1 or (summary is not None and found[0]["image"] != summary["services"][component]["image"]):
+            raise ValueError("database workload is not the approved component")
+        env = found[0].get("env", [])
+        if len({e["name"] for e in env}) != len(env):
+            raise ValueError("ambiguous database environment")
+        return {e["name"]: e for e in env}
+    def binding_matches(env, variable, reference, key):
+        value = keys(env[variable], ("name", "valueFrom"))
+        source = keys(value["valueFrom"], ("secretKeyRef",))["secretKeyRef"]
+        stack.require_keys(source, "database environment Secret", ("name", "key"), ("optional",))
+        if source.get("optional", False) is not False or source["name"] != reference["name"] or source["key"] != reference[key]:
+            raise ValueError("database environment contradicts plan")
+    try:
+        if len(candidates) != 1:
+            raise ValueError("duplicate plan")
+        resource = candidates[0]
+        if resource["kind"] != "ConfigMap" or resource["metadata"].get("namespace") != "kerosene-staging":
+            raise ValueError("foreign plan namespace/kind")
+        data = keys(resource["data"], ("plan.json",))["plan.json"]
+        if not isinstance(data, str) or len(data.encode("utf-8")) > 32768:
+            raise ValueError("unbounded plan")
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate plan field")
+                result[key] = value
+            return result
+        plan = json.loads(data, object_pairs_hook=unique,
+                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite plan")))
+        keys(plan, ("schema", "mode", "postgres", "services", "scriptDigests"))
+        if plan["schema"] != "kerosene.cell.initial-databases/v1" or plan["mode"] != "initial":
+            raise ValueError("unsupported database plan")
+        keys(plan["scriptDigests"], DATABASE_SCRIPTS)
+        for name in DATABASE_SCRIPTS:
+            path = Path(__file__).resolve().parents[1] / "runtime/postgres" / name
+            raw = stack.read_regular_file_bytes(path, "installed database primitive", 256 * 1024)
+            if plan["scriptDigests"][name] != "sha256:" + hashlib.sha256(raw).hexdigest():
+                raise ValueError("installed database primitive digest differs")
+        postgres = keys(plan["postgres"], ("workload", "bootstrapSecret"))
+        secret(postgres["bootstrapSecret"])
+        env = workload(postgres["workload"], "postgres")
+        binding_matches(env, "POSTGRES_USER", postgres["bootstrapSecret"], "usernameKey")
+        binding_matches(env, "POSTGRES_PASSWORD", postgres["bootstrapSecret"], "passwordKey")
+        keys(plan["services"], ("core", "kfe"))
+        databases, roles, secrets = [], [], [postgres["bootstrapSecret"]["name"]]
+        for name, service in plan["services"].items():
+            keys(service, ("database", "migrationRole", "runtimeRole", "workload", "migrationSecret", "runtimeSecret"))
+            for key in ("database", "migrationRole", "runtimeRole"):
+                sql_name(service[key])
+            databases.append(service["database"])
+            roles.extend([service["migrationRole"], service["runtimeRole"]])
+            for key in ("migrationSecret", "runtimeSecret"):
+                secret(service[key], url=True)
+                secrets.append(service[key]["name"])
+            env = workload(service["workload"], name)
+            for variable, key in (("SPRING_DATASOURCE_URL", "urlKey"), ("SPRING_DATASOURCE_USERNAME", "usernameKey"), ("SPRING_DATASOURCE_PASSWORD", "passwordKey")):
+                binding_matches(env, variable, service["runtimeSecret"], key)
+        if len(set(databases)) != 2 or len(set(roles)) != 4 or len(set(secrets)) != 5:
+            raise ValueError("database, role or credential aliases")
+        return plan
+    except (ValueError, TypeError, AttributeError, KeyError, RecursionError, stack.ReleaseValidationError) as error:
+        raise stack.ApplyBlockedError("invalid approved initial database plan") from error
 
 
 def verify_external_secrets(stack, kubectl, references):
@@ -348,6 +456,8 @@ def execute(stack, artifact, summary, args, checkpoint):
         raise stack.ApplyBlockedError("HPA requires a separately approved freeze/restore policy during Cell update")
     if getattr(args, "command", None) == "install":
         verify_empty_installation(stack, kubectl)
+        if not args.dry_run and initial_database_plan(stack, artifact, summary) is None:
+            raise stack.ApplyBlockedError("initial installation requires an approved database plan")
     verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
     if not args.dry_run:
         receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],
