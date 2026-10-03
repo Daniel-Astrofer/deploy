@@ -37,7 +37,7 @@ EXECUTION_BLOCKERS = (
     "vault-live-rebuild-provenance-not-qualified",
     "migration-executor-live-recovery-not-qualified",
     "node-vault-live-quorum-rollout-not-qualified",
-    "admin-artifact-installation-not-qualified",
+    "admin-oci-live-installation-not-qualified",
     "complete-cell-live-acceptance-not-qualified",
 )
 
@@ -923,7 +923,8 @@ def execute(stack, artifact, summary, args, checkpoint):
         verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
     if not args.dry_run:
         receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],
-                                       stack.canonical_digest(args._release), run)
+                                       stack.canonical_digest(args._release), run,
+                                       getattr(args, "admin_oci_archive", None))
         checkpoint("admin-installed", receipt)
     for resource in prerequisites:
         apply_resource(kubectl, resource, args.dry_run)

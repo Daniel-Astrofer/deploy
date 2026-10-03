@@ -2318,6 +2318,8 @@ def command_update(args: argparse.Namespace) -> int:
         args.consensus_proof = args.consensus_proof or str(bundle / "consensus-proof.json")
         args.initial_admission = args.initial_admission or str(bundle / "cell-admission.json")
         args.vault_compatibility_attestation = args.vault_compatibility_attestation or str(bundle / "vault-compatibility-attestation.json")
+        if not args.admin_oci_archive and (bundle / "admin-image.oci.tar").is_file():
+            args.admin_oci_archive = str(bundle / "admin-image.oci.tar")
     if not args.release:
         raise ReleaseValidationError("--release or --bundle-dir is required")
     if args.command == "install":
@@ -2490,6 +2492,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     update.add_argument("--state-dir", help="directory for the atomic update state record")
     update.add_argument("--deployment-manifest", help="exact approved JSON deployment artifact; each configuration digest must match release lock")
+    update.add_argument("--admin-oci-archive", help="offline OCI Image Layout tar containing the exact approved Admin image manifest")
     update.add_argument("--change-id", help="audited operator change identifier")
     update.add_argument("--operator-id", help="local operator attribution, not a substitute for API authentication")
     update.add_argument("--consensus-proof", help="v3 real CometBFT ordered approval and application-state proof")

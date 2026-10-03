@@ -45,6 +45,46 @@ def archive(entries=None):
     return output.getvalue()
 
 
+def oci_layout_archive(path, entries=None, compressed=False):
+    entries = entries or [("opt/kerosene-jctl/bin/kerosene-jctl", b"#!/bin/sh\nexit 0\n"),
+                          ("opt/kerosene-jctl/lib/test.jar", b"synthetic-not-a-real-jar")]
+    layer = io.BytesIO()
+    with tarfile.open(fileobj=layer, mode="w") as handle:
+        for name, data in entries:
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            handle.addfile(member, io.BytesIO(data))
+    layer_raw = layer.getvalue()
+    layer_blob = admin.gzip.compress(layer_raw, mtime=0) if compressed else layer_raw
+    layer_digest = hashlib.sha256(layer_blob).hexdigest()
+    diff_id = hashlib.sha256(layer_raw).hexdigest()
+    architecture = {"x86_64": "amd64", "aarch64": "arm64"}.get(admin.platform.machine(), admin.platform.machine())
+    config_raw = json.dumps({"architecture": architecture, "os": "linux",
+                             "rootfs": {"type": "layers", "diff_ids": ["sha256:" + diff_id]}},
+                            separators=(",", ":")).encode()
+    config_digest = hashlib.sha256(config_raw).hexdigest()
+    manifest_raw = json.dumps({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                               "config": {"mediaType": "application/vnd.oci.image.config.v1+json",
+                                          "digest": "sha256:" + config_digest, "size": len(config_raw)},
+                               "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip" if compressed else "application/vnd.oci.image.layer.v1.tar",
+                                           "digest": "sha256:" + layer_digest, "size": len(layer_blob)}]},
+                              separators=(",", ":")).encode()
+    manifest_digest = hashlib.sha256(manifest_raw).hexdigest()
+    index_raw = json.dumps({"schemaVersion": 2, "manifests": [{
+        "mediaType": "application/vnd.oci.image.manifest.v1+json",
+        "digest": "sha256:" + manifest_digest, "size": len(manifest_raw)}]}, separators=(",", ":")).encode()
+    blobs = {"oci-layout": b'{"imageLayoutVersion":"1.0.0"}', "index.json": index_raw,
+             "blobs/sha256/" + config_digest: config_raw,
+             "blobs/sha256/" + layer_digest: layer_blob,
+             "blobs/sha256/" + manifest_digest: manifest_raw}
+    with tarfile.open(path, mode="w") as handle:
+        for name, data in blobs.items():
+            member = tarfile.TarInfo(name)
+            member.size = len(data)
+            handle.addfile(member, io.BytesIO(data))
+    return "registry.example.invalid/kerosene/admin@sha256:" + manifest_digest
+
+
 class InstallationTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -88,6 +128,29 @@ class InstallationTest(unittest.TestCase):
         for path in [self.target(), self.target() / "bin", self.target() / "lib", self.target() / "installation.json"]:
             self.assertEqual(stat.S_IMODE(path.stat().st_mode) & 0o077, 0)
         self.assertEqual(list(self.target().parent.glob(".admin-stage-*")), [])
+
+    def test_installs_exact_offline_oci_layout_without_docker(self):
+        oci = self.cell / "admin-image.oci.tar"
+        self.summary["services"]["admin"]["image"] = oci_layout_archive(oci, compressed=True)
+        with patch.dict(os.environ, {}, clear=True), patch.object(admin.shutil, "which", side_effect=lambda name: "/trusted/" + name):
+            receipt = admin.install(stack, self.cell, "cell-test", self.summary, self.config, UPDATE,
+                                    self.run_tool, str(oci))
+        self.assertEqual(receipt["image"], self.summary["services"]["admin"]["image"])
+        self.assertFalse(any("inspect" in call or "create" in call for call in self.calls))
+        self.assertEqual(admin.verify_installation(stack, self.target(), receipt), self.target() / "bin/kerosene-jctl")
+
+    def test_offline_oci_rejects_manifest_layer_and_path_tampering(self):
+        oci = self.cell / "admin-image.oci.tar"
+        image = oci_layout_archive(oci)
+        wrong = image[:-1] + ("0" if image[-1] != "0" else "1")
+        with self.assertRaisesRegex(RuntimeError, "approved Admin manifest"):
+            admin.oci_admin_distribution(stack, oci, wrong)
+        bad = self.cell / "bad-path.oci.tar"
+        bad_image = oci_layout_archive(bad, [("opt/kerosene-jctl/bin/kerosene-jctl", b"x"),
+                                             ("opt/kerosene-jctl/lib/test.jar", b"x"),
+                                             ("opt/kerosene-jctl/secrets/token", b"secret")])
+        with self.assertRaisesRegex(RuntimeError, "invalid entry"):
+            admin.oci_admin_distribution(stack, bad, bad_image)
 
     def test_same_target_recovery_rechecks_bytes_without_creating_another_container(self):
         first = self.install()
@@ -379,7 +442,22 @@ class InstallationTest(unittest.TestCase):
         self.journal(receipt)
         with patch.object(stack.lifecycle, "load_config", return_value={"cellId": "cell-test", "environment": "staging-cell"}), patch.object(stack.lifecycle, "verify_bootstrap_trust"):
             result = stack.lifecycle.command_admin(stack, SimpleNamespace(cell_dir=str(self.cell), state_dir=None, target="core", admin_args=["--", "--help"]))
-        self.assertEqual(result, 0)
+            self.assertEqual(result, 0)
+
+    @unittest.skipUnless(os.environ.get("JCTL_ADMIN_INSTALL_TEST_DIST"), "explicit built Admin distribution required")
+    def test_actual_built_admin_distribution_installs_from_offline_oci(self):
+        distribution = Path(os.environ["JCTL_ADMIN_INSTALL_TEST_DIST"])
+        entries = [("opt/kerosene-jctl/" + str(path.relative_to(distribution)), path.read_bytes())
+                   for path in sorted(distribution.rglob("*")) if path.is_file()]
+        oci = self.cell / "actual-admin-image.oci.tar"
+        self.summary["services"]["admin"]["image"] = oci_layout_archive(oci, entries, compressed=True)
+        with patch.dict(os.environ, {}, clear=True), patch.object(admin.shutil, "which", side_effect=lambda name: "/trusted/" + name):
+            receipt = admin.install(stack, self.cell, "cell-test", self.summary, self.config, UPDATE,
+                                    self.run_tool, str(oci))
+        launcher = admin.verify_installation(stack, self.target(), receipt)
+        completed = subprocess.run([str(launcher), "--help"], capture_output=True, check=False, timeout=30)
+        self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
+        self.journal(receipt)
         with patch.object(stack.lifecycle, "load_config", return_value={"cellId": "cell-test", "environment": "staging-cell"}), patch.object(stack.lifecycle, "verify_bootstrap_trust"):
             result = stack.lifecycle.command_admin(stack, SimpleNamespace(cell_dir=str(self.cell), state_dir=None, target="kfe", admin_args=["--", "kfe", "maintenance", "--help"]))
         self.assertEqual(result, 0)

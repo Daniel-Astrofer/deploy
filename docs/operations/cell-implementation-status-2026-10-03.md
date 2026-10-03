@@ -253,7 +253,7 @@ No runtime manifest, signer, cluster, retained snapshots or custody state change
    provenance, independently authorized signatures and durable Vault/mirror fetching
    with Byzantine-safe availability. The prior offline publisher is not a build or
    distribution/reconciliation service.
-5. **Installation/update execution:** qualify the integrated Admin OCI installation, ordered migrations
+5. **Installation/update execution:** qualify the integrated offline Admin OCI installation, ordered migrations
    with tested data recovery and the integrated replica-by-replica Node/Vault
    protocol on a real cluster. It validates independent persistent identities,
    requires the complete group ready around each mutation and applies one

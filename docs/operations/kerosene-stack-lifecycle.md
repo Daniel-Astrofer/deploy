@@ -95,6 +95,8 @@ authorized release or executable installation script.
 `--bundle-dir` supplies inert evidence file locations; missing evidence never
 becomes a bypass. Use `--help` for the exact required flags. Legacy v1/v2
 signature receipts remain usable for inspection/dry-run, not real application.
+When present, `BUNDLE/admin-image.oci.tar` is selected automatically; an
+explicit `--admin-oci-archive` may be used when the archive is stored elsewhere.
 
 First installation additionally rechecks absence of any deployment journal
 under the canonical update lock. Manifest execution probes both bound Cell
@@ -240,9 +242,13 @@ Status explicitly identifies its source as `local-journal-not-live-attestation`.
 
 ## Installed operator artifact
 
-The integrated executor extracts `/opt/kerosene-jctl` from an already cached,
-approved OCI digest using a created-but-never-started container. It pins creation
-to the inspected local image ID, disables networking, bounds transfer/extraction,
+The integrated executor extracts `/opt/kerosene-jctl` from `admin-image.oci.tar`
+in the offline bundle, or from an already cached approved OCI digest using a
+created-but-never-started container. The offline path verifies the exact release
+manifest digest, config and layer digests, platform and uncompressed `diff_ids`,
+applies bounded OCI whiteout semantics and accepts only the launcher/JAR
+distribution. The cached-image fallback pins creation to the inspected local
+image ID, disables networking, bounds transfer/extraction,
 rejects links/devices/path traversal, verifies file hashes and atomically installs
 an owner-only distribution under `CELL/admin/installations/RELEASE_DIGEST`.
 It requires a provisioned Java 21+ runtime; it does not pull or build a fallback.
@@ -276,8 +282,8 @@ signer activation is implied by restoring an operator executable.
 
 Local tests exercise the actual built pinned jctl distribution for both Core
 and KFE help, plus mocked OCI extraction/identity checks and failure journaling.
-Actual Docker OCI extraction and complete Cell installation are still not
-qualified; `admin-artifact-installation-not-qualified` remains a live-apply gate.
+Actual signed-bundle OCI installation and complete Cell execution are still not
+qualified; `admin-oci-live-installation-not-qualified` remains a live-apply gate.
 
 ## Remaining live execution qualification
 
@@ -292,7 +298,7 @@ implementation capabilities exist and their integration tests pass:
    Vault release threshold, and UID/resourceVersion update preconditions. The
    `node-vault-live-quorum-rollout-not-qualified` blocker remains until this is
    exercised against the real two-plane Node and three-member Vault topology.
-4. Live OCI qualification of the integrated Admin artifact installation.
+4. Live signed-bundle qualification of the integrated offline Admin OCI installation.
 5. Live qualification of the integrated complete-Cell verifier contract. Its
    bootstrap-pinned executable must bind the Cell, cluster UID, release,
    sequence, change and operator; prove every release component plus rollout,
