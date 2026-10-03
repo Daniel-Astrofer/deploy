@@ -185,12 +185,33 @@ class DeploymentTest(unittest.TestCase):
                 patch.object(lifecycle.ssl, "create_default_context", return_value=tls), \
                 patch.object(lifecycle.urllib.request, "build_opener", return_value=opener):
             evidence = lifecycle.consume_initial_admission(stack, config, summary, args)
+            recovered = lifecycle.consume_initial_admission(stack, config, summary, args, "inspect-recovery")
         self.assertTrue(evidence["nonceConsumed"])
         self.assertFalse(evidence["bankInstallAuthorized"])
-        sent = json.loads(opener.open.call_args.args[0].data)
+        sent = json.loads(opener.open.call_args_list[0].args[0].data)
         self.assertEqual(sent["releaseLockCanonicalDigest"], summary["_canonicalDigest"])
-        self.assertEqual(opener.open.call_args.args[0].full_url, "https://bank.example:8443/v1/cell/admissions/consume")
-        tls.load_cert_chain.assert_called_once()
+        self.assertEqual(opener.open.call_args_list[0].args[0].full_url, "https://bank.example:8443/v1/cell/admissions/consume")
+        self.assertEqual(recovered["operation"], "inspect-recovery")
+        self.assertEqual(opener.open.call_args_list[1].args[0].full_url, "https://bank.example:8443/v1/cell/admissions/inspect-recovery")
+        self.assertEqual(tls.load_cert_chain.call_count, 2)
+
+    def test_initial_admission_recovery_requires_exact_prewrite_failure(self):
+        digest = "sha256:" + "c" * 64
+        summary = {"_canonicalDigest": digest, "sequence": 3}
+        args = SimpleNamespace(environment="staging-cell", change_id="change-a", operator_id="operator-a",
+                               resume_update_id=digest)
+        state = {"schema": "kerosene.stack.update-state/v1", "updateId": digest, "sequence": 3,
+                 "environment": "staging-cell", "changeId": "change-a", "operatorId": "operator-a",
+                 "status": "failed", "phase": "failed", "manualRecoveryRequired": True,
+                 "failure": "Bank initial admission failed or is uncertain; inspect recovery before retry",
+                 "events": [{"phase": phase} for phase in ("snapshot-accepted", "rollout-started", "failed")]}
+        evidence = lifecycle.verify_initial_admission_recovery_state(stack, state, summary, args)
+        self.assertEqual(evidence["updateId"], digest)
+        for phase in ("initial-admission-consumed", "admin-installed", "before:kerosene-staging/Deployment/core"):
+            changed = copy.deepcopy(state)
+            changed["events"].insert(-1, {"phase": phase})
+            with self.subTest(phase=phase), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.verify_initial_admission_recovery_state(stack, changed, summary, args)
 
     def test_initial_admission_rejects_binding_mismatch_before_network(self):
         path = self.root / "admission.json"

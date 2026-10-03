@@ -738,14 +738,18 @@ def execute(stack, artifact, summary, args, checkpoint):
     # Validate all unsupported policies before the first Kubernetes write.
     if any(r["kind"] == "HorizontalPodAutoscaler" for r in prerequisites):
         raise stack.ApplyBlockedError("HPA requires a separately approved freeze/restore policy during Cell update")
-    if getattr(args, "command", None) == "install":
+    initial_install = (getattr(args, "command", None) == "install" or
+                       (getattr(args, "command", None) == "recover" and
+                        getattr(args, "recover_initial_install", False)))
+    if initial_install:
         verify_empty_installation(stack, kubectl)
         if not args.dry_run and initial_database_plan(stack, artifact, summary) is None:
             raise stack.ApplyBlockedError("initial installation requires an approved database plan")
         verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
         if not args.dry_run:
-            admission = consume_initial_admission(stack, config, summary, args)
-            checkpoint("initial-admission-consumed", admission)
+            operation = "inspect-recovery" if getattr(args, "recover_initial_install", False) else "consume"
+            admission = consume_initial_admission(stack, config, summary, args, operation)
+            checkpoint("initial-admission-recovered" if operation == "inspect-recovery" else "initial-admission-consumed", admission)
     else:
         verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
     if not args.dry_run:
@@ -847,7 +851,29 @@ def verify_consensus(stack, directory, config, proof, release_digest, summary):
     return evidence
 
 
-def consume_initial_admission(stack, config, summary, args):
+def verify_initial_admission_recovery_state(stack, previous, summary, args):
+    if not isinstance(previous, dict) or previous.get("schema") != "kerosene.stack.update-state/v1":
+        raise stack.ApplyBlockedError("initial admission recovery requires the retained failed installation journal")
+    expected = {"updateId": summary["_canonicalDigest"], "sequence": summary["sequence"],
+                "environment": args.environment, "changeId": args.change_id,
+                "operatorId": args.operator_id, "status": "failed", "phase": "failed",
+                "manualRecoveryRequired": True}
+    if any(previous.get(key) != value for key, value in expected.items()):
+        raise stack.ApplyBlockedError("initial admission recovery journal does not bind this exact failed installation")
+    if args.resume_update_id != summary["_canonicalDigest"]:
+        raise stack.ApplyBlockedError("initial admission recovery requires the exact --resume-update-id")
+    events = previous.get("events")
+    if (not isinstance(events, list) or [event.get("phase") if isinstance(event, dict) else None for event in events]
+            != ["snapshot-accepted", "rollout-started", "failed"] or
+            previous.get("failure") != "Bank initial admission failed or is uncertain; inspect recovery before retry"):
+        raise stack.ApplyBlockedError("journal does not prove a pre-write uncertain initial admission")
+    return {"updateId": summary["_canonicalDigest"], "changeId": args.change_id,
+            "operatorId": args.operator_id, "priorPhase": "failed"}
+
+
+def consume_initial_admission(stack, config, summary, args, operation="consume"):
+    if operation not in {"consume", "inspect-recovery"}:
+        raise stack.ApplyBlockedError("unsupported Bank initial admission operation")
     required = tuple(getattr(args, name, None) for name in
                      ("initial_admission", "admission_endpoint", "admission_ca",
                       "admission_cert", "admission_key", "consensus_proof",
@@ -897,23 +923,25 @@ def consume_initial_admission(stack, config, summary, args):
             context.load_cert_chain(cert_path, key_path)
     except (UnicodeDecodeError, ValueError, OSError, ssl.SSLError) as error:
         raise stack.ApplyBlockedError("protected Bank admission TLS identity is invalid") from error
-    url = urllib.parse.urlunsplit((endpoint.scheme, endpoint.netloc, "/v1/cell/admissions/consume", "", ""))
+    url = urllib.parse.urlunsplit((endpoint.scheme, endpoint.netloc,
+                                  "/v1/cell/admissions/" + operation, "", ""))
     http_request = urllib.request.Request(url, data=canonical(request), method="POST",
                                           headers={"Content-Type": "application/json", "Accept": "application/json"})
+    uncertain = "Bank initial admission failed or is uncertain; inspect recovery before retry"
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
-            raise stack.ApplyBlockedError("Bank admission redirect forbidden")
+            raise stack.ApplyBlockedError(uncertain)
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
                                          urllib.request.HTTPSHandler(context=context), NoRedirect())
     try:
         with opener.open(http_request, timeout=45) as response:
             if response.status != 200 or response.headers.get_content_type() != "application/json":
-                raise stack.ApplyBlockedError("Bank initial admission was not consumed")
+                raise stack.ApplyBlockedError(uncertain)
             raw = response.read(16385)
     except (OSError, urllib.error.URLError, urllib.error.HTTPError, ssl.SSLError) as error:
-        raise stack.ApplyBlockedError("Bank initial admission failed or is uncertain; inspect recovery before retry") from error
+        raise stack.ApplyBlockedError(uncertain) from error
     if len(raw) > 16384:
-        raise stack.ApplyBlockedError("Bank admission response exceeds the bounded contract")
+        raise stack.ApplyBlockedError(uncertain)
     def unique_fields(pairs):
         result = {}
         for key, value in pairs:
@@ -925,9 +953,9 @@ def consume_initial_admission(stack, config, summary, args):
         result = json.loads(raw, object_pairs_hook=unique_fields,
                             parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite Bank response")))
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
-        raise stack.ApplyBlockedError("Bank admission response is invalid") from error
+        raise stack.ApplyBlockedError(uncertain) from error
     if not isinstance(result, dict) or set(result) != {"schema", "admissionDigest", "consensus", "nonceConsumed", "installAuthorized"}:
-        raise stack.ApplyBlockedError("Bank admission response shape is invalid")
+        raise stack.ApplyBlockedError(uncertain)
     consensus = result.get("consensus")
     expected_consensus = {"schema": "kerosene.release-consensus-verification/v1",
                           "releaseLockCanonicalDigest": summary["_canonicalDigest"],
@@ -938,10 +966,11 @@ def consume_initial_admission(stack, config, summary, args):
             result["admissionDigest"] != admission_digest or result["nonceConsumed"] is not True or
             result["installAuthorized"] is not False or not isinstance(consensus, dict) or
             any(consensus.get(key) != value for key, value in expected_consensus.items())):
-        raise stack.ApplyBlockedError("Bank admission response does not bind this exact installation")
+        raise stack.ApplyBlockedError(uncertain)
     return {"schema": result["schema"], "admissionDigest": admission_digest,
             "nonceConsumed": True, "bankInstallAuthorized": False,
-            "cellId": config["cellId"], "clusterUid": cluster["systemNamespaceUid"]}
+            "cellId": config["cellId"], "clusterUid": cluster["systemNamespaceUid"],
+            "operation": operation}
 
 
 def verify_maintenance(stack, args):

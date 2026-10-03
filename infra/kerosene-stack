@@ -2033,10 +2033,16 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
 
     try:
         summary["_canonicalDigest"] = canonical_digest(release)
+        previous = read_existing_update_state(args.state_dir)
+        initial_recovery = args.command == "recover" and args.recover_initial_install
+        if args.recover_initial_install and args.command != "recover":
+            raise ApplyBlockedError("--recover-initial-install is valid only with recover")
+        if initial_recovery:
+            lifecycle.verify_initial_admission_recovery_state(sys.modules[__name__], previous, summary, args)
         # The public command's early check is helpful feedback, but only this
         # check under update.lock prevents concurrent installs from both seeing
         # a missing journal before one of them commits the Cell.
-        if args.command == "install" and read_existing_update_state(args.state_dir) is not None:
+        if args.command == "install" and previous is not None:
             raise ApplyBlockedError("install refuses an existing deployment journal under the Cell update lock")
         guard_previous_update_state(args.state_dir, summary, args.environment, args.resume_update_id, args.change_id)
         if args.deployment_manifest:
@@ -2049,7 +2055,7 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
             lifecycle.require_execution_capabilities(sys.modules[__name__])
         tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
         receipt_result = verify_consensus_authorization(release, summary, args)
-        if not args.dry_run and args.command != "install":
+        if not args.dry_run and args.command != "install" and not initial_recovery:
             lifecycle.verify_maintenance(sys.modules[__name__], args)
         if not args.dry_run:
             lifecycle.verify_recovery_plan(sys.modules[__name__], release, summary, args)
@@ -2416,6 +2422,7 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--admission-ca", help="Bank admission TLS trust CA")
     update.add_argument("--admission-cert", help="operator mTLS certificate for Bank admission")
     update.add_argument("--admission-key", help="operator mTLS key reference; never stored in the journal")
+    update.add_argument("--recover-initial-install", action="store_true", help="recover only an uncertain pre-write initial admission using Bank inspection")
     update.add_argument("--maintenance-endpoint", help="HTTPS KFE maintenance status endpoint, rechecked at each runtime phase")
     update.add_argument("--maintenance-ca", help="KFE TLS trust CA")
     update.add_argument("--maintenance-cert", help="operator mTLS certificate")

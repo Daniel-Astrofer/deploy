@@ -107,8 +107,17 @@ JSON fields, and validates the returned admission digest plus consensus domain.
 The Bank deliberately returns `installAuthorized:false`: its role is durable
 quorum verification and one-time nonce consumption. The local controller may
 continue only after proving that exact result; a transport failure is uncertain
-and requires recovery inspection, never an automatic retry. Live full-Cell
-qualification and that controller recovery path remain incomplete.
+and is never retried as a new consumption.
+
+For that exact pre-write failure, rerun the same evidence with `recover`, the
+original `--change-id`, `--operator-id`, exact `--resume-update-id`, and
+`--recover-initial-install`. The controller accepts this mode only when the
+retained journal contains exactly `snapshot-accepted`, `rollout-started`, then
+the known uncertain-admission failure. It rechecks empty cluster inventory,
+database plan and external Secrets, then calls the Bank's read-only
+`inspect-recovery` route. Any admission/Admin/workload checkpoint refuses this
+special recovery mode and requires the broader recovery procedure. Live
+full-Cell qualification remains incomplete.
 
 ## Approved manifest and evidence
 

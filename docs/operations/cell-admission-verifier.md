@@ -103,6 +103,12 @@ now consumes initial admission through this endpoint after checking empty
 inventory, the approved database plan and required external Secrets. Do not
 interpret a successfully started admission listener as complete Cell acceptance.
 
+If the consume response is lost, the controller records manual recovery instead
+of retrying the nonce. Explicit `recover --recover-initial-install` is restricted
+to the same release/change/operator and an exact pre-write failure journal; it
+uses `inspect-recovery`, then records `initial-admission-recovered`. Evidence of
+any later Admin or workload phase excludes this narrow recovery path.
+
 The opt-in real PostgreSQL/TLS harness also exercises `runAdmissionService`, the
 command's execution path: protected profile/anchor/operator policy and PKI are
 loaded, the connected database/user are verified, and a real mTLS HTTP request
