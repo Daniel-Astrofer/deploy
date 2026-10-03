@@ -7,6 +7,12 @@ does not yet provide a qualified one-command live installer for the full Cell.
 Do not describe a successful plan, dry-run, readiness probe or archive import
 as a successful live installation.
 
+The opt-in [separate database wiring](cell-separated-databases.md) renders Core
+and KFE with independent external datasource Secret references. It preserves
+existing defaults and supplies no credentials, database provisioning or legacy
+cutover. Secret-reference preflight covers both new bindings; this is not proof
+that their contents identify distinct databases or correctly scoped roles.
+
 ## Bootstrap and operator workflow
 
 Provision public TUF root, roster, snapshot-provider public key and real
