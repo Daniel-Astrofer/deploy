@@ -29,3 +29,16 @@ The result protects existing release/publication/preflight interfaces after
 controller changes. It does not discharge initial admission, migration execution,
 tested recovery, independent Vault rebuild/compatibility, quorum-preserving
 Node/Vault rollout or complete operator/UI/service acceptance.
+
+## Real separated-database follow-up
+
+The existing loopback disposable PostgreSQL 17 fixture was verified running on
+port 32770. The explicitly opted-in `service-database-grants-postgres-test.py`
+passed 13 cases using actual local executable Core/KFE JARs. Fresh synthetic
+databases contain exactly 14 successful Core migrations through V14 and 59 KFE
+migrations through V58, no failed rows, and migration-role-owned Flyway history.
+Permission denials, transactional ACL rollback, concurrent provisioner exclusion
+and refusal to adopt existing databases were exercised against PostgreSQL.
+Synthetic databases/roles remain retained; no existing database was dropped.
+This is not automatic Cell migration execution, TLS/credential provisioning,
+legacy ownership conversion or tested data restore.

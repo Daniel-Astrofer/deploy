@@ -50,6 +50,19 @@ class DatabaseGrantsTest(unittest.TestCase):
                 raise RuntimeError(f"Synthetic {service} migration failed; no application was started")
             cls.grants(service)
 
+    def test_fresh_databases_contain_complete_successful_owned_migration_history(self):
+        for service, count, version in (("core", 14, "14"), ("kfe", 59, "58")):
+            database, owner, runtime, _ = self.bindings[service]
+            with self.subTest(service=service):
+                self.assertEqual(self.query(database, runtime, self.password,
+                    "SELECT count(*) FROM public.flyway_schema_history WHERE success"), str(count))
+                self.assertEqual(self.query(database, runtime, self.password,
+                    "SELECT count(*) FROM public.flyway_schema_history WHERE NOT success"), "0")
+                self.assertEqual(self.query(database, runtime, self.password,
+                    "SELECT version FROM public.flyway_schema_history ORDER BY installed_rank DESC LIMIT 1"), version)
+                self.assertEqual(self.query(database, self.admin, self.admin_password,
+                    "SELECT tableowner FROM pg_tables WHERE schemaname='public' AND tablename='flyway_schema_history'"), owner)
+
     @classmethod
     def environment(cls, password):
         env = {key: value for key, value in os.environ.items()
