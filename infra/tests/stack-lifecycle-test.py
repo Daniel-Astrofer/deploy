@@ -458,6 +458,21 @@ class RuntimeOwnershipTest(unittest.TestCase):
             with self.subTest(revision=revision), self.assertRaisesRegex(RuntimeError, "revision"):
                 self.verify(resource, live, rs, pod)
 
+    def test_replica_target_drift_is_not_hidden_by_ready_pods(self):
+        for kind in ("Deployment", "StatefulSet"):
+            for replicas in (0, 2, True, "1", None):
+                resource, live, rs, pod = self.fixture(kind)
+                live["spec"]["replicas"] = replicas
+                with self.subTest(kind=kind, replicas=replicas), self.assertRaisesRegex(RuntimeError, "replica target"):
+                    self.verify(resource, live, rs, pod)
+
+    def test_boolean_ready_counters_do_not_prove_one_replica(self):
+        for field in ("readyReplicas", "updatedReplicas"):
+            resource, live, rs, pod = self.fixture("Deployment")
+            live["status"][field] = True
+            with self.subTest(field=field), self.assertRaisesRegex(RuntimeError, "not all desired"):
+                self.verify(resource, live, rs, pod)
+
 
 if __name__ == "__main__":
     unittest.main()

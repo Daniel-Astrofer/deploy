@@ -126,6 +126,9 @@ Receipts include workload/pod UIDs and rollout revision. Deployment pods must be
 owned by ReplicaSets with the current Deployment revision; StatefulSets must
 have equal current/update revisions and matching pod revision labels. Ready
 pods from an older revision are rejected even when their image is unchanged.
+Live desired replica counts must still equal the approved positive integer;
+ready/updated counters must be actual integers, not JSON booleans. A scale change
+after approval cannot be masked by a smaller set of ready pods.
 This verifies ownership/revision, not full runtime configuration or financial/quorum readiness;
 those broader acceptance gates remain mandatory and unqualified.
 Unidentified/ambiguously identified images, missing runtime components and

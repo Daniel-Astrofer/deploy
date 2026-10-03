@@ -563,7 +563,7 @@ def verify_running(kubectl, resource):
     """Require observed generation, desired ready replicas and named live images.
 
     imageID may be an OCI platform manifest digest rather than the image's
-    index digest; Kubernetes spec equality + a nonempty runtime imageID is
+    index digest; named image/ownership/revision checks + runtime imageID are
     recorded, not falsely presented as a registry provenance verification.
     """
     ns, kind, name = identity(resource)
@@ -572,10 +572,12 @@ def verify_running(kubectl, resource):
         raise RuntimeError("live workload identity is missing or changed")
     workload_uid = live["metadata"]["uid"]
     expected = resource["spec"]["replicas"]
+    if type(expected) is not int or expected < 1 or type(live["spec"].get("replicas")) is not int or live["spec"]["replicas"] != expected:
+        raise RuntimeError("live replica target differs from approved workload")
     status = live.get("status", {})
     if status.get("observedGeneration", 0) < live["metadata"].get("generation", 1):
         raise RuntimeError(f"controller has not observed {kind}/{name}")
-    if status.get("readyReplicas", 0) != expected or status.get("updatedReplicas", 0) != expected:
+    if any(type(status.get(key)) is not int or status[key] != expected for key in ("readyReplicas", "updatedReplicas")):
         raise RuntimeError(f"not all desired replicas are updated and ready for {kind}/{name}")
     selector = live["spec"]["selector"].get("matchLabels", {})
     if not selector or live["spec"]["selector"].get("matchExpressions"):
