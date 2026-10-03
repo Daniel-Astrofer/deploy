@@ -2297,6 +2297,7 @@ def command_plan(args: argparse.Namespace) -> int:
 
 
 def command_update(args: argparse.Namespace) -> int:
+    lifecycle.resolve_operation_directory(sys.modules[__name__], args)
     if args.cell_dir:
         config = lifecycle.load_config(sys.modules[__name__], args.cell_dir)
         lifecycle.verify_bootstrap_trust(sys.modules[__name__], args.cell_dir, config)
@@ -2461,6 +2462,7 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--release", help="path to a release-lock JSON document")
     update.add_argument("--cell-dir", help="protected Cell directory created by init; supplies public anchors and state defaults")
     update.add_argument("--bundle-dir", help="prepared offline release data directory; never executes contained source code")
+    update.add_argument("--operation-dir", help="owner-only conventional directory containing operational credential references and attribution")
     update.add_argument("--output", help="optional path for an atomically written JSON plan")
     update.add_argument("--json", action="store_true", help="emit machine-readable output")
     update.add_argument("--apply", action="store_true", help="execute the staging-cell rollout after all evidence gates pass")

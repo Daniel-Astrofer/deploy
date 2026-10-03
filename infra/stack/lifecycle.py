@@ -1337,7 +1337,100 @@ def verify_complete_cell_acceptance(stack, config, cell_dir, summary, args):
             "operatorResumePerformed": False}
 
 
+def resolve_bootstrap_directory(stack, args):
+    """Expand one protected conventional bootstrap directory into init inputs."""
+    if not args.bootstrap_dir:
+        required = ("cell_id", "tuf_trusted_root", "validator_roster", "vault_roster", "snapshot_provider_key")
+        missing = ["--" + name.replace("_", "-") for name in required if not getattr(args, name)]
+        if missing:
+            raise stack.ReleaseValidationError("init is missing explicit inputs: " + ", ".join(missing))
+        return args
+    explicit = ("cell_id", "tuf_trusted_root", "validator_roster", "vault_roster", "snapshot_provider_key",
+                "consensus_anchor", "consensus_verifier", "acceptance_verifier", "kubeconfig", "kube_context")
+    if any(getattr(args, name) for name in explicit):
+        raise stack.ReleaseValidationError("--bootstrap-dir cannot be mixed with individual bootstrap inputs")
+    root = Path(args.bootstrap_dir).absolute()
+    try:
+        info = root.lstat()
+    except OSError as error:
+        raise stack.ReleaseValidationError("bootstrap directory is unavailable") from error
+    import stat
+    if root.is_symlink() or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise stack.ReleaseValidationError("bootstrap directory must be owner-only, local and not a symlink")
+    conventional = {"tuf_trusted_root": "tuf-root.json", "validator_roster": "validator-roster.json",
+                    "vault_roster": "vault-roster.json", "snapshot_provider_key": "snapshot-provider.pub",
+                    "consensus_anchor": "consensus-anchor.json", "consensus_verifier": "kerosene-release-consensus",
+                    "acceptance_verifier": "kerosene-cell-acceptance", "kubeconfig": "kubeconfig"}
+    for name in (*conventional.values(), "cell-id", "kube-context"):
+        path = root / name
+        try:
+            file_info = path.lstat()
+        except OSError as error:
+            raise stack.ReleaseValidationError("bootstrap directory is incomplete: " + name) from error
+        if (path.is_symlink() or not stat.S_ISREG(file_info.st_mode) or file_info.st_uid != os.getuid() or
+                file_info.st_mode & 0o077):
+            raise stack.ReleaseValidationError("bootstrap file must be owner-only, regular and not a symlink: " + name)
+    for field, name in conventional.items():
+        setattr(args, field, str(root / name))
+    def text(name, label):
+        try:
+            value = stack.read_regular_file_bytes(root / name, label, 1024).decode("ascii").strip()
+        except UnicodeDecodeError as error:
+            raise stack.ReleaseValidationError(label + " must be ASCII") from error
+        if not value or any(char.isspace() for char in value):
+            raise stack.ReleaseValidationError(label + " must contain one nonempty token")
+        return value
+    args.cell_id = text("cell-id", "bootstrap Cell ID")
+    args.kube_context = text("kube-context", "bootstrap Kubernetes context")
+    return args
+
+
+def resolve_operation_directory(stack, args):
+    """Expand private operator references without copying them into Cell state."""
+    if not getattr(args, "operation_dir", None):
+        return args
+    fields = {"change_id": "change-id", "operator_id": "operator-id",
+              "admission_endpoint": "admission-endpoint", "admission_ca": "admission-ca.pem",
+              "admission_cert": "admission-cert.pem", "admission_key": "admission-key.pem",
+              "maintenance_endpoint": "maintenance-endpoint", "maintenance_ca": "maintenance-ca.pem",
+              "maintenance_cert": "maintenance-cert.pem", "maintenance_key": "maintenance-key.pem",
+              "maintenance_token_file": "maintenance-token", "recovery_evidence": "recovery-evidence.json"}
+    if any(getattr(args, field, None) for field in fields):
+        raise stack.ReleaseValidationError("--operation-dir cannot be mixed with individual operational inputs")
+    root = Path(args.operation_dir).absolute()
+    try:
+        info = root.lstat()
+    except OSError as error:
+        raise stack.ReleaseValidationError("operation directory is unavailable") from error
+    import stat
+    if root.is_symlink() or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise stack.ReleaseValidationError("operation directory must be owner-only, local and not a symlink")
+    for field, name in fields.items():
+        path = root / name
+        try:
+            file_info = path.lstat()
+        except OSError as error:
+            raise stack.ReleaseValidationError("operation directory is incomplete: " + name) from error
+        if (path.is_symlink() or not stat.S_ISREG(file_info.st_mode) or file_info.st_uid != os.getuid() or
+                file_info.st_mode & 0o077):
+            raise stack.ReleaseValidationError("operation file must be owner-only, regular and not a symlink: " + name)
+        if field in {"change_id", "operator_id", "admission_endpoint", "maintenance_endpoint"}:
+            try:
+                value = stack.read_regular_file_bytes(path, "operational " + field, 4096).decode("ascii").strip()
+            except UnicodeDecodeError as error:
+                raise stack.ReleaseValidationError("operational text references must be ASCII") from error
+            if not value or any(char in value for char in "\r\n\x00"):
+                raise stack.ReleaseValidationError("operational text reference is empty or multiline")
+            setattr(args, field, value)
+        else:
+            # The consumer opens and validates the exact protected file later;
+            # no key, token or credential value enters config or journal state.
+            setattr(args, field, str(path))
+    return args
+
+
 def command_init(stack, args):
+    args = resolve_bootstrap_directory(stack, args)
     target = Path(args.cell_dir).absolute()
     if target.exists():
         raise stack.ReleaseValidationError("init requires a new Cell directory; refuses overwriting identity or trust")
@@ -1439,11 +1532,12 @@ def add_commands(stack, subcommands):
     admin.set_defaults(handler=lambda args: command_admin(stack, args))
     init = subcommands.add_parser("init", help="initialize protected Cell identity and explicit out-of-band public trust anchors")
     init.add_argument("--cell-dir", required=True)
-    init.add_argument("--cell-id", required=True)
-    init.add_argument("--tuf-trusted-root", required=True)
-    init.add_argument("--validator-roster", required=True)
-    init.add_argument("--vault-roster", required=True)
-    init.add_argument("--snapshot-provider-key", required=True)
+    init.add_argument("--bootstrap-dir", help="owner-only conventional bootstrap directory; cannot be mixed with individual inputs")
+    init.add_argument("--cell-id")
+    init.add_argument("--tuf-trusted-root")
+    init.add_argument("--validator-roster")
+    init.add_argument("--vault-roster")
+    init.add_argument("--snapshot-provider-key")
     init.add_argument("--consensus-anchor", help="independently verified immutable Comet light block and governance policy")
     init.add_argument("--consensus-verifier", help="independently installed verifier executable, pinned by digest at bootstrap")
     init.add_argument("--acceptance-verifier", help="independently installed whole-Cell protocol verifier, pinned by digest at bootstrap")

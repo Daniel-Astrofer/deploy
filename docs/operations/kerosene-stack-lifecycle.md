@@ -31,6 +31,52 @@ verifiers and approve their binary digests. Private keys, sessions and Kubernete
 the release archive and update journal.
 
 ```sh
+chmod 700 /protected/bootstrap-a /protected/operation-a
+infra/kerosene-stack init --cell-dir /protected/cell-a \
+  --bootstrap-dir /protected/bootstrap-a
+infra/kerosene-stack preflight --cell-dir /protected/cell-a \
+  --release /media/release/deployment/release-lock.json \
+  --deployment-manifest /media/release/deployment/deployment.json
+infra/kerosene-stack install --cell-dir /protected/cell-a \
+  --bundle-dir /media/release/deployment \
+  --operation-dir /protected/operation-a \
+  --apply --confirm-release RELEASE_ID
+```
+
+The protected bootstrap directory uses exact conventional names:
+
+```text
+cell-id                         kube-context
+kubeconfig                      tuf-root.json
+validator-roster.json           vault-roster.json
+snapshot-provider.pub           consensus-anchor.json
+kerosene-release-consensus      kerosene-cell-acceptance
+```
+
+The two verifier files must be executable. The directory is owner-only and is
+never accepted together with individual bootstrap flags. `cell-id` and
+`kube-context` each contain one ASCII token. This is an out-of-band trust and
+cluster package, not part of the downloaded release bundle.
+
+The owner-only operation directory uses:
+
+```text
+change-id                       operator-id
+admission-endpoint              admission-ca.pem
+admission-cert.pem              admission-key.pem
+maintenance-endpoint            maintenance-ca.pem
+maintenance-cert.pem            maintenance-key.pem
+maintenance-token               recovery-evidence.json
+```
+
+Only attribution and endpoint text are read into process arguments. Credential
+files remain references and their contents are never copied to `cell.json`, the
+release bundle or update journal. Individual operational flags remain available
+for automation, but cannot be mixed with `--operation-dir`.
+
+The equivalent expanded bootstrap command remains supported:
+
+```sh
 infra/kerosene-stack init --cell-dir /protected/cell-a --cell-id cell-a \
   --tuf-trusted-root /protected/root.json \
   --validator-roster /protected/roster.json \

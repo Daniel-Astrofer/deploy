@@ -229,6 +229,13 @@ a locally built CLI distribution and diagnostic command integration are not
 automatic approved-OCI installation or complete-Cell deployment qualification.
 No runtime manifest, signer, cluster, retained snapshots or custody state changed.
 
+Operator ergonomics now has a fail-closed conventional path: one owner-only
+bootstrap directory initializes Cell/cluster/trust/verifier bindings, one public
+offline bundle supplies release evidence plus the exact Admin OCI, and one
+owner-only operation directory supplies attribution and credential file
+references. The intended flow is `init`, `preflight`, then `install`; expanded
+flags remain available without permitting mixed or ambiguous sources.
+
 ## Remaining work for the complete service
 
 1. **Complete KFE drain/recovery:** complete remaining provider/embedded inventory

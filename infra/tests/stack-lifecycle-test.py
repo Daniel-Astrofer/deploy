@@ -604,6 +604,63 @@ class DeploymentTest(unittest.TestCase):
         with self.assertRaisesRegex(stack.ApplyBlockedError, "explicit Kubernetes"):
             lifecycle.kubectl_command(stack, {})
 
+    def test_single_protected_bootstrap_directory_initializes_complete_cell_binding(self):
+        bootstrap = self.root / "bootstrap"
+        bootstrap.mkdir(mode=0o700)
+        files = {"cell-id": b"cell-a\n", "kube-context": b"staging-cell-a\n", "kubeconfig": b"synthetic-kubeconfig",
+                 "tuf-root.json": b"{}", "validator-roster.json": b"{}", "vault-roster.json": b"{}",
+                 "snapshot-provider.pub": b"synthetic-public-key", "consensus-anchor.json": b"{}",
+                 "kerosene-release-consensus": b"#!/bin/sh\nexit 1\n",
+                 "kerosene-cell-acceptance": b"#!/bin/sh\nexit 1\n"}
+        for name, raw in files.items():
+            path = bootstrap / name
+            path.write_bytes(raw)
+            path.chmod(0o700 if name.startswith("kerosene-") else 0o600)
+        cell = self.root / "cell-a"
+        args = stack.build_parser().parse_args(["init", "--cell-dir", str(cell), "--bootstrap-dir", str(bootstrap)])
+        with patch.object(stack, "parse_tuf_root"), patch.object(lifecycle, "run", return_value=b'{"metadata":{"uid":"cluster-uid"}}'), patch("builtins.print"):
+            lifecycle.command_init(stack, args)
+        config = stack.read_json_document(str(cell / "cell.json"), "Cell configuration")
+        self.assertEqual(config["cellId"], "cell-a")
+        self.assertEqual(config["cluster"]["context"], "staging-cell-a")
+        self.assertEqual(config["cluster"]["systemNamespaceUid"], "cluster-uid")
+        self.assertEqual(config["acceptanceVerifier"]["path"], str(bootstrap / "kerosene-cell-acceptance"))
+        self.assertEqual(config["consensusVerifier"]["path"], str(bootstrap / "kerosene-release-consensus"))
+        self.assertFalse(config["autoActivateVaultSigners"])
+        mixed = stack.build_parser().parse_args(["init", "--cell-dir", str(self.root / "other"),
+                                                 "--bootstrap-dir", str(bootstrap), "--cell-id", "other"])
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "cannot be mixed"):
+            lifecycle.resolve_bootstrap_directory(stack, mixed)
+        bootstrap.chmod(0o755)
+        unsafe = stack.build_parser().parse_args(["init", "--cell-dir", str(self.root / "unsafe"),
+                                                  "--bootstrap-dir", str(bootstrap)])
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "owner-only"):
+            lifecycle.resolve_bootstrap_directory(stack, unsafe)
+
+    def test_single_operation_directory_expands_private_references_without_reading_secrets(self):
+        operation = self.root / "operation"
+        operation.mkdir(mode=0o700)
+        text = {"change-id": "change-a", "operator-id": "operator-a",
+                "admission-endpoint": "https://bank.invalid", "maintenance-endpoint": "https://kfe.invalid/api/admin/kfe/maintenance/status"}
+        private = ("admission-ca.pem", "admission-cert.pem", "admission-key.pem", "maintenance-ca.pem",
+                   "maintenance-cert.pem", "maintenance-key.pem", "maintenance-token", "recovery-evidence.json")
+        for name, value in text.items():
+            (operation / name).write_text(value + "\n")
+            (operation / name).chmod(0o600)
+        for name in private:
+            (operation / name).write_text("private-reference-content")
+            (operation / name).chmod(0o600)
+        args = stack.build_parser().parse_args(["update", "--operation-dir", str(operation), "--release", "unit.json"])
+        lifecycle.resolve_operation_directory(stack, args)
+        self.assertEqual(args.change_id, "change-a")
+        self.assertEqual(args.operator_id, "operator-a")
+        self.assertEqual(args.maintenance_token_file, str(operation / "maintenance-token"))
+        self.assertNotIn("private-reference-content", vars(args).values())
+        mixed = stack.build_parser().parse_args(["update", "--operation-dir", str(operation), "--release", "unit.json",
+                                                 "--change-id", "different"])
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "cannot be mixed"):
+            lifecycle.resolve_operation_directory(stack, mixed)
+
     def test_absent_safety_capabilities_cannot_be_replaced_by_evidence(self):
         from types import SimpleNamespace
         with patch.object(lifecycle, "run") as run:
