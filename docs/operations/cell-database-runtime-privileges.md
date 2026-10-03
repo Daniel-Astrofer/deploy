@@ -5,6 +5,9 @@ step for a freshly provisioned, isolated Core or KFE database after approved
 migrations. It does not create roles, passwords or databases, adopt an existing
 installation, execute migrations or authorize a release. It is not yet invoked
 by the Cell lifecycle executor; migration/recovery execution blockers remain.
+Initial targets may be created using the separately reviewed
+[database creation primitive](cell-database-initial-provisioning.md); that step
+also leaves role/password provisioning external.
 
 Run from a separately provisioned privileged administration connection using
 protected libpq credentials, never a password-bearing URL/argv:

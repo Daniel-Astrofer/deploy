@@ -6,9 +6,11 @@ import re
 import subprocess
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL = ROOT / "runtime/postgres/service-runtime-grants.sql"
+CREATE_SQL = ROOT / "runtime/postgres/create-service-databases.sql"
 
 
 @unittest.skipUnless(os.environ.get("CELL_DATABASE_DISPOSABLE") == "true", "explicit disposable lab required")
@@ -31,10 +33,14 @@ class DatabaseGrantsTest(unittest.TestCase):
             cls.query("postgres", cls.admin, cls.admin_password,
                       f"CREATE ROLE {owner} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '{cls.password}'; "
                       f"CREATE ROLE {runtime} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '{cls.password}';")
-            cls.query("postgres", cls.admin, cls.admin_password, f"CREATE DATABASE {database} OWNER {owner}")
             jar = Path(os.environ[f"CELL_DATABASE_{service.upper()}_JAR"])
             if not jar.is_absolute() or jar.is_symlink() or not jar.is_file():
                 raise RuntimeError("Explicit regular local executable JAR is required")
+            cls.bindings[service] = (database, owner, runtime, jar)
+        cls.create_databases()
+        for service, (database, owner, runtime, jar) in cls.bindings.items():
+            # No runtime connection is admitted until migrations and grants finish.
+            cls.query(database, runtime, cls.password, "SELECT 1", success=False)
             env = cls.environment(cls.password)
             env.update(SPRING_DATASOURCE_URL=f"jdbc:postgresql://{cls.host}:{cls.port}/{database}",
                        SPRING_DATASOURCE_USERNAME=owner, SPRING_DATASOURCE_PASSWORD=cls.password)
@@ -42,7 +48,6 @@ class DatabaseGrantsTest(unittest.TestCase):
                                     env=env, capture_output=True, text=True, timeout=60)
             if result.returncode != 0:
                 raise RuntimeError(f"Synthetic {service} migration failed; no application was started")
-            cls.bindings[service] = (database, owner, runtime, jar)
             cls.grants(service)
 
     @classmethod
@@ -78,6 +83,84 @@ class DatabaseGrantsTest(unittest.TestCase):
             raise AssertionError("Synthetic service grants failed: " + result.stderr)
         if not success and result.returncode == 0:
             raise AssertionError("Invalid service grants unexpectedly succeeded")
+
+    @classmethod
+    def create_databases(cls, bindings=None, success=True):
+        bindings = bindings or cls.bindings
+        command = ["psql", "-X", "-q", "--no-password", "-v", "ON_ERROR_STOP=1",
+                   "-h", cls.host, "-p", cls.port, "-U", cls.admin, "-d", "postgres"]
+        for service, (database, owner, runtime, _) in bindings.items():
+            for key, value in ((f"{service}_database", database), (f"{service}_migration_role", owner),
+                               (f"{service}_runtime_role", runtime)):
+                command.extend(["-v", f"{key}={value}"])
+        command.extend(["-f", str(CREATE_SQL)])
+        result = subprocess.run(command, env=cls.environment(cls.admin_password), capture_output=True, text=True, timeout=60)
+        if success and result.returncode != 0:
+            raise AssertionError("Fresh synthetic database provisioning failed: " + result.stderr)
+        if success is False and result.returncode == 0:
+            raise AssertionError("Invalid initial provisioning succeeded")
+        return result
+
+    @classmethod
+    def fresh_bindings(cls, label):
+        suffix = uuid.uuid4().hex[:16]
+        bindings = {}
+        for service in ("core", "kfe"):
+            owner = f"cell_{label}_{service}_owner_{suffix}"
+            runtime = f"cell_{label}_{service}_user_{suffix}"
+            database = f"cell_{label}_{service}_{suffix}"
+            cls.query("postgres", cls.admin, cls.admin_password,
+                      f"CREATE ROLE {owner} LOGIN NOINHERIT; CREATE ROLE {runtime} LOGIN NOINHERIT")
+            bindings[service] = (database, owner, runtime, None)
+        return bindings
+
+    def test_initial_provisioning_refuses_existing_databases_without_changing_history(self):
+        database, _, runtime, _ = self.bindings["core"]
+        before = self.query(database, runtime, self.password, "SELECT count(*) FROM public.flyway_schema_history")
+        result = self.create_databases(success=False)
+        self.assertIn("refuses an existing service database", result.stderr)
+        after = self.query(database, runtime, self.password, "SELECT count(*) FROM public.flyway_schema_history")
+        self.assertEqual(before, after)
+
+    def test_existing_second_database_prevents_creation_of_first_target(self):
+        bindings = self.fresh_bindings("collision")
+        self.query("postgres", self.admin, self.admin_password, f"CREATE DATABASE {bindings['kfe'][0]}")
+        result = self.create_databases(bindings, success=False)
+        self.assertIn("refuses an existing service database", result.stderr)
+        absent = self.query("postgres", self.admin, self.admin_password,
+                            f"SELECT count(*) FROM pg_database WHERE datname='{bindings['core'][0]}'")
+        self.assertEqual(absent, "0")
+
+    def test_concurrent_initial_provisioners_have_one_winner_and_no_adoption(self):
+        bindings = self.fresh_bindings("race")
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            results = list(workers.map(lambda _: self.create_databases(bindings, success=None), range(2)))
+        self.assertEqual(sum(result.returncode == 0 for result in results), 1)
+        rejected = next(result for result in results if result.returncode != 0)
+        self.assertIn("refuses an existing service database", rejected.stderr)
+        for database, owner, runtime, _ in bindings.values():
+            actual = self.query("postgres", self.admin, self.admin_password,
+                                f"SELECT r.rolname || ':' || d.datallowconn::text "
+                                f"FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba WHERE d.datname='{database}'")
+            self.assertEqual(actual, owner + ":true")
+            self.assertEqual(self.query("postgres", self.admin, self.admin_password,
+                                        f"SELECT has_database_privilege('{runtime}','{database}','CONNECT')"), "f")
+
+    def test_invalid_names_and_role_aliases_cannot_create_targets(self):
+        bindings = self.fresh_bindings("inputs")
+        original = bindings["core"]
+        for name in ("postgres", "BadCase", "x" * 64, "fresh'; DROP DATABASE postgres; --"):
+            invalid = dict(bindings)
+            invalid["core"] = (name, *original[1:])
+            result = self.create_databases(invalid, success=False)
+            self.assertIn("Invalid fresh service database or role name", result.stderr)
+        invalid = dict(bindings)
+        invalid["core"] = (original[0], original[1], original[1], original[3])
+        result = self.create_databases(invalid, success=False)
+        self.assertIn("all four roles must be distinct", result.stderr)
+        for database, _, _, _ in bindings.values():
+            self.assertEqual(self.query("postgres", self.admin, self.admin_password,
+                                        f"SELECT count(*) FROM pg_database WHERE datname='{database}'"), "0")
 
     def test_runtime_can_validate_and_run_up_to_date_flyway_without_ddl_rights(self):
         for service, (database, _, runtime, jar) in self.bindings.items():

@@ -45,6 +45,11 @@ grant only explicit owner-scoped runtime privileges. Execute each approved JAR's
 `--cell-migration=migrate` mode with its own migration credentials; then validate
 its history and JPA schema before services start with runtime credentials.
 
+The explicit [initial database creation primitive](cell-database-initial-provisioning.md)
+now creates private targets from pre-provisioned roles and refuses existing names.
+It is verified in the disposable PostgreSQL test but is not called automatically
+by this overlay or lifecycle executor; external role/credential issuance remains.
+
 Core requires its forward V14 schema migration; its older historical chain lacks
 content tables and notification fields. Do not satisfy missing schema by running
 KFE migrations against the Core database. Runtime Flyway settings are preserved
