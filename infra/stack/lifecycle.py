@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -161,6 +162,9 @@ def verify_vault_probe_configuration(stack, artifact):
             if command != ["/usr/local/bin/kerosene-vault", "--health-probe"]:
                 continue
             try:
+                probe = container["readinessProbe"]
+                if type(probe.get("timeoutSeconds")) is not int or probe["timeoutSeconds"] <= 4 or any(key in probe for key in ("httpGet", "tcpSocket", "grpc")):
+                    raise ValueError("invalid authenticated probe deadline or handler")
                 entries = [e for e in container.get("env", []) if e.get("name") == "VAULT_HEALTH_PROBE_URL"]
                 if len(entries) != 1 or set(entries[0]) != {"name", "valueFrom"}:
                     raise ValueError("unbound probe URL")
@@ -180,6 +184,16 @@ def verify_vault_probe_configuration(stack, artifact):
                 url = urllib.parse.urlsplit(raw)
                 if url.scheme != "https" or not url.hostname or url.username is not None or url.password is not None or url.path != "/v1/health" or url.query or url.fragment:
                     raise ValueError("invalid probe URL")
+                try:
+                    ipaddress.ip_address(url.hostname)
+                except ValueError:
+                    pass
+                else:
+                    raise ValueError("literal IP probe target")
+                if url.hostname.replace(".", "").isdigit() or re.fullmatch(r"0[xX][0-9a-fA-F]+", url.hostname):
+                    raise ValueError("numeric probe target")
+                if url.port is not None and not 0 < url.port <= 65535:
+                    raise ValueError("invalid probe port")
             except (ValueError, TypeError, AttributeError, KeyError):
                 raise stack.ApplyBlockedError("Vault authenticated readiness requires an approved nonoptional URL ConfigMap") from None
 

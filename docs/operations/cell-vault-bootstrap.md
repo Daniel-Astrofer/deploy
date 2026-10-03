@@ -50,6 +50,9 @@ The deployment validator rejects this exec probe unless its URL comes from a
 nonoptional same-namespace ConfigMap included in the approved deployment, with
 the referenced key present and an HTTPS `/v1/health` URL without credentials,
 query or fragment. Runtime hostname/certificate qualification is still required.
+The exec probe must have an integer timeout greater than four seconds and no
+second HTTP/TCP/gRPC handler. Literal IP and numeric host URLs, invalid ports
+and boolean/string timeouts are rejected before deployment.
 
 No existing overlay selects this component. Enable it only after qualifying the
 exact new image, mounted certificates and Kubernetes exec behavior. Old images

@@ -51,18 +51,23 @@ class DeploymentTest(unittest.TestCase):
     def test_vault_probe_requires_url_in_approved_configuration(self):
         vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault")
         container = vault["spec"]["template"]["spec"]["containers"][0]
-        container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}}
+        container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}, "timeoutSeconds": 6}
         container["env"] = [{"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "probe", "key": "url"}}}]
         with self.assertRaises(stack.ApplyBlockedError):
             lifecycle.verify_vault_probe_configuration(stack, self.artifact)
         config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"namespace": "kerosene-staging", "name": "probe"}, "data": {"url": "https://vault.example:7801/v1/health"}}
         self.artifact["resources"].append(config)
         lifecycle.verify_vault_probe_configuration(stack, self.artifact)
-        for url in ("http://vault.example/v1/health", "https://user@vault.example/v1/health", "https://vault.example/", "https://vault.example/v1/health?x=1"):
+        for url in ("http://vault.example/v1/health", "https://user@vault.example/v1/health", "https://vault.example/", "https://vault.example/v1/health?x=1", "https://192.0.2.1/v1/health", "https://[::1]/v1/health", "https://2130706433/v1/health", "https://vault.example:0/v1/health"):
             config["data"]["url"] = url
             with self.subTest(url=url), self.assertRaises(stack.ApplyBlockedError):
                 lifecycle.verify_vault_probe_configuration(stack, self.artifact)
         config["data"]["url"] = "https://vault.example:7801/v1/health"
+        for timeout in (None, True, 1, 4, "6"):
+            container["readinessProbe"]["timeoutSeconds"] = timeout
+            with self.subTest(timeout=timeout), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.verify_vault_probe_configuration(stack, self.artifact)
+        container["readinessProbe"]["timeoutSeconds"] = 6
         container["env"][0]["valueFrom"]["configMapKeyRef"]["optional"] = True
         with self.assertRaises(stack.ApplyBlockedError):
             lifecycle.verify_vault_probe_configuration(stack, self.artifact)
