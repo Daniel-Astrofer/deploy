@@ -11,6 +11,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"io"
 	"math/big"
@@ -113,6 +114,21 @@ func TestAdmissionRegistryRealTLS(t *testing.T) {
 				}
 				return path
 			}
+			grant := AdmissionOperatorGrant{SPKIPins: []string{pin}, Cells: []string{"cell-example"}, Operations: []string{"consume"}}
+			if scenario == "wrong-cell-scope" {
+				grant.Cells = []string{"other-cell"}
+			}
+			if scenario == "wrong-operation" {
+				grant.Operations = []string{"inspect-recovery"}
+			}
+			policyBytes, err := json.Marshal(AdmissionOperatorPolicy{Schema: "kerosene.bank-admission-operator-policy/v1", Operators: map[string]AdmissionOperatorGrant{"operator-example": grant}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			loadedPolicy, err := loadAdmissionOperatorPolicy(write("operator-policy.json", policyBytes), hashBytes(policyBytes))
+			if err != nil {
+				t.Fatal(err)
+			}
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
 				t.Fatal(err)
@@ -149,14 +165,7 @@ func TestAdmissionRegistryRealTLS(t *testing.T) {
 					return
 				}
 				state := secure.ConnectionState()
-				grant := AdmissionOperatorGrant{SPKIPins: []string{pin}, Cells: []string{"cell-example"}, Operations: []string{"consume"}}
-				if scenario == "wrong-cell-scope" {
-					grant.Cells = []string{"other-cell"}
-				}
-				if scenario == "wrong-operation" {
-					grant.Operations = []string{"inspect-recovery"}
-				}
-				identity, err := authorizeAdmissionOperator(&state, map[string]AdmissionOperatorGrant{"operator-example": grant}, "cell-example", "consume", time.Now())
+				identity, err := authorizeAdmissionOperator(&state, loadedPolicy.Operators, "cell-example", "consume", time.Now())
 				if err != nil || identity != "operator-example" {
 					result <- false
 					return

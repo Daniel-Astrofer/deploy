@@ -60,26 +60,9 @@ func authorizeAdmissionOperator(state *tls.ConnectionState, policy map[string]Ad
 	if !nameRE.MatchString(cellID) || (operation != "consume" && operation != "inspect-recovery") {
 		return "", errors.New("invalid administrative admission scope")
 	}
-	pins := map[string][]string{}
-	for identity, grant := range policy {
-		if len(grant.Cells) == 0 || len(grant.Cells) > 64 || len(grant.Operations) == 0 || len(grant.Operations) > 2 {
-			return "", errors.New("invalid admission administrative policy")
-		}
-		seenCells := map[string]bool{}
-		seenOperations := map[string]bool{}
-		for _, cell := range grant.Cells {
-			if !nameRE.MatchString(cell) || seenCells[cell] {
-				return "", errors.New("invalid admission administrative policy")
-			}
-			seenCells[cell] = true
-		}
-		for _, op := range grant.Operations {
-			if (op != "consume" && op != "inspect-recovery") || seenOperations[op] {
-				return "", errors.New("invalid admission administrative policy")
-			}
-			seenOperations[op] = true
-		}
-		pins[identity] = grant.SPKIPins
+	pins, err := admissionOperatorPolicyPins(policy)
+	if err != nil {
+		return "", err
 	}
 	identity, err := admissionOperatorIdentity(state, pins, now)
 	if err != nil {
@@ -101,4 +84,42 @@ func authorizeAdmissionOperator(state *tls.ConnectionState, policy map[string]Ad
 		return "", errors.New("operator is not authorized for this Cell admission operation")
 	}
 	return identity, nil
+}
+
+func admissionOperatorPolicyPins(policy map[string]AdmissionOperatorGrant) (map[string][]string, error) {
+	if len(policy) == 0 || len(policy) > 64 {
+		return nil, errors.New("invalid admission administrative policy")
+	}
+	pins := map[string][]string{}
+	seenPins := map[string]bool{}
+	for identity, grant := range policy {
+		if !nameRE.MatchString(identity) || len(grant.SPKIPins) == 0 || len(grant.SPKIPins) > 64 {
+			return nil, errors.New("invalid admission administrative policy")
+		}
+		for _, pin := range grant.SPKIPins {
+			if !hashRE.MatchString(pin) || seenPins[pin] {
+				return nil, errors.New("ambiguous admission administrative policy")
+			}
+			seenPins[pin] = true
+		}
+		if len(grant.Cells) == 0 || len(grant.Cells) > 64 || len(grant.Operations) == 0 || len(grant.Operations) > 2 {
+			return nil, errors.New("invalid admission administrative policy")
+		}
+		seenCells := map[string]bool{}
+		seenOperations := map[string]bool{}
+		for _, cell := range grant.Cells {
+			if !nameRE.MatchString(cell) || seenCells[cell] {
+				return nil, errors.New("invalid admission administrative policy")
+			}
+			seenCells[cell] = true
+		}
+		for _, op := range grant.Operations {
+			if (op != "consume" && op != "inspect-recovery") || seenOperations[op] {
+				return nil, errors.New("invalid admission administrative policy")
+			}
+			seenOperations[op] = true
+		}
+		pins[identity] = grant.SPKIPins
+	}
+	return pins, nil
 }

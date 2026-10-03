@@ -53,9 +53,21 @@ unknown operations and ambiguous identity policies are refused. A valid pinned
 certificate alone cannot act on another Cell or consume using a recovery-only
 grant. TLS tests enforce these restrictions after an actual handshake. Initial
 admission cannot rely on the absent target Cell's Core for authorization; this
-policy belongs to an independently provisioned Bank service. No policy loader,
-HTTP endpoint or install integration is enabled yet, and update/resume rights
+policy belongs to an independently provisioned Bank service. No HTTP endpoint
+or install integration is enabled yet, and update/resume rights
 are not implied by these initial-admission grants.
+
+`loadAdmissionOperatorPolicy` reads a bounded protected regular file with schema
+`kerosene.bank-admission-operator-policy/v1` and exactly `schema` / `operators`.
+Each operator has exactly `spkiPins`, `cells`, `operations`; structural fields and
+all scopes must validate before use. The file's exact-byte SHA-256 digest must be
+independently provisioned with the service. Duplicate JSON keys, unknown fields,
+empty/ambiguous policy, shared-writable files and digest changes are refused.
+Neither a caller-supplied hash nor a hash computed merely to trust a candidate
+file is an authority. The TLS fixture loads a pinned policy before authentication.
+Policy loader plumbing into a production service remains pending; no auto-reload
+or policy-write endpoint exists. Rotation requires externally reviewed provisioning
+and explicit service restart, not admission request contents.
 
 `openAdmissionRegistry` prepares a bounded-pool connector with mandatory
 `sslmode=verify-full`, explicit CA and client certificate/key, fixed connection
