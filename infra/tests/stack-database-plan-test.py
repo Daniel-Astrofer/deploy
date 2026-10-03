@@ -101,7 +101,7 @@ class DatabasePlanTest(unittest.TestCase):
     def test_missing_plan_preserves_legacy_inspection_without_claiming_execution(self):
         self.artifact["resources"].remove(self.configmap)
         self.assertIsNone(lifecycle.initial_database_plan(stack, self.artifact))
-        self.assertIn("migration-executor-and-tested-recovery-not-integrated", lifecycle.EXECUTION_BLOCKERS)
+        self.assertIn("migration-executor-live-recovery-not-qualified", lifecycle.EXECUTION_BLOCKERS)
 
     def test_aliases_and_invalid_sql_names_rejected(self):
         original = copy.deepcopy(self.plan)
@@ -306,6 +306,69 @@ class DatabasePlanTest(unittest.TestCase):
         self.refresh()
         changed = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update)
         self.assertNotEqual(first[0]["metadata"]["name"], changed[0]["metadata"]["name"])
+
+    def test_migration_executor_runs_migrate_then_validate_and_rechecks_identity(self):
+        self.refresh()
+        update = "sha256:" + "a" * 64
+        jobs = [job for operation in ("migrate", "validate")
+                for job in lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update, operation)]
+        fixtures = {}
+        for index, job in enumerate(jobs, 1):
+            uid = f"00000000-0000-0000-0000-{index:012d}"
+            pod_uid = f"10000000-0000-0000-0000-{index:012d}"
+            pod_name = job["metadata"]["name"] + "-pod"
+            live_job = {"metadata": {"name": job["metadata"]["name"], "namespace": "kerosene-staging",
+                "uid": uid, "annotations": copy.deepcopy(job["metadata"]["annotations"])},
+                "status": {"succeeded": 1, "conditions": [{"type": "Complete", "status": "True"}]}}
+            pod = {"metadata": {"name": pod_name, "namespace": "kerosene-staging", "uid": pod_uid,
+                "ownerReferences": [{"apiVersion": "batch/v1", "kind": "Job", "name": job["metadata"]["name"],
+                                      "uid": uid, "controller": True}]},
+                "spec": copy.deepcopy(job["spec"]["template"]["spec"]),
+                "status": {"phase": "Succeeded", "containerStatuses": [{"name": "migration", "restartCount": 0,
+                    "imageID": "containerd://sha256:" + f"{index:x}" * 64,
+                    "state": {"terminated": {"exitCode": 0}}}]}}
+            fixtures[job["metadata"]["name"]] = (live_job, pod)
+        job_reads = {name: 0 for name in fixtures}
+        def command(argv, **_):
+            if "job" in argv and "--ignore-not-found" in argv:
+                return b""
+            if "job" in argv:
+                name = argv[argv.index("job") + 1]
+                job_reads[name] += 1
+                return json.dumps(fixtures[name][0]).encode()
+            if "pods" in argv:
+                uid = argv[argv.index("-l") + 1].split("=", 1)[1]
+                pod = next(value[1] for value in fixtures.values()
+                           if value[0]["metadata"]["uid"] == uid)
+                return json.dumps({"items": [pod]}).encode()
+            if "pod" in argv:
+                name = argv[argv.index("pod") + 1]
+                pod = next(value[1] for value in fixtures.values() if value[1]["metadata"]["name"] == name)
+                return json.dumps(pod).encode()
+            raise AssertionError(argv)
+        applied = []
+        with patch.object(lifecycle, "run", side_effect=command), \
+                patch.object(lifecycle, "apply_resource", side_effect=lambda _, job, dry: applied.append(job)), \
+                patch.object(lifecycle.probe_process, "run_probe", return_value=b"") as wait:
+            result = lifecycle.execute_initial_database_migrations(stack, ["/bound/kubectl"], self.artifact,
+                                                                    self.fixture.summary, update)
+        self.assertEqual([job["spec"]["template"]["spec"]["containers"][0]["args"][0] for job in applied],
+                         ["--cell-migration=migrate", "--cell-migration=migrate",
+                          "--cell-migration=validate", "--cell-migration=validate"])
+        self.assertEqual(len(result["jobs"]), 4)
+        self.assertEqual(wait.call_count, 4)
+        self.assertTrue(all(count == 2 for count in job_reads.values()))
+
+    def test_migration_executor_refuses_preexisting_job_without_writes(self):
+        self.refresh()
+        with patch.object(lifecycle, "run", return_value=b'{"kind":"Job"}'), \
+                patch.object(lifecycle, "apply_resource") as apply, \
+                patch.object(lifecycle.probe_process, "run_probe") as wait, \
+                self.assertRaisesRegex(stack.ApplyBlockedError, "already exists"):
+            lifecycle.execute_initial_database_migrations(stack, ["/bound/kubectl"], self.artifact,
+                self.fixture.summary, "sha256:" + "a" * 64)
+        apply.assert_not_called()
+        wait.assert_not_called()
 
     def test_wrong_workload_image_and_environment_contradictions_rejected(self):
         target = next(r for r in self.artifact["resources"] if r["kind"] == "Deployment" and r["metadata"]["name"] == "core")

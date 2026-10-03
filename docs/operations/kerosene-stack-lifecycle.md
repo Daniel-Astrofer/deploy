@@ -119,6 +119,18 @@ database plan and external Secrets, then calls the Bank's read-only
 special recovery mode and requires the broader recovery procedure. Live
 full-Cell qualification remains incomplete.
 
+For initial installation, PostgreSQL must become Ready before application
+schemas are touched. Immediately before the Core/KFE phase, the controller
+creates deterministic migration-credential Jobs in `kerosene-staging`: first
+`migrate` for Core and KFE, then `validate` for both. It refuses pre-existing Job
+names, uses no retries, waits within the Job deadline, accepts exactly one
+successful owned Pod, and rechecks Job/Pod UIDs, command, Secret references,
+security context, runtime image ID and terminal state. Jobs are retained for
+diagnosis and never automatically deleted or repaired. Core/KFE workloads are
+not submitted unless all four observations pass. Real Kubernetes/JAR failure and
+operator recovery qualification is still pending, so
+`migration-executor-live-recovery-not-qualified` remains an execution blocker.
+
 ## Approved manifest and evidence
 
 The new `--deployment-manifest` is JSON with schema

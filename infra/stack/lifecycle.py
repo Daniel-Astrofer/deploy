@@ -34,7 +34,7 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 # test; signed evidence cannot implement an absent runtime safety mechanism.
 EXECUTION_BLOCKERS = (
     "vault-independent-compatibility-gate-not-integrated",
-    "migration-executor-and-tested-recovery-not-integrated",
+    "migration-executor-live-recovery-not-qualified",
     "node-vault-replica-quorum-rollout-not-qualified",
     "admin-artifact-installation-not-qualified",
     "complete-cell-acceptance-not-qualified",
@@ -473,7 +473,7 @@ def verify_database_capabilities_output(stack, component, raw):
         raise stack.ApplyBlockedError("invalid database capabilities output") from error
 
 
-def verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid):
+def verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid, operation="capabilities"):
     """Bind a terminal probe observation to controller-recorded UIDs.
 
     This records runtime imageID, not registry/index provenance or CNI proof.
@@ -506,7 +506,9 @@ def verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid):
             raise ValueError("unexpected container count")
         container = actual[0]
         target = expected["containers"][0]
-        if target["args"] != ["--cell-migration=capabilities"] or target.get("env"):
+        if operation not in ("capabilities", "migrate", "validate") or target["args"] != ["--cell-migration=" + operation]:
+            raise ValueError("unexpected migration operation")
+        if operation == "capabilities" and target.get("env"):
             raise ValueError("not a credential-free probe")
         for key, value in target.items():
             if container.get(key, [] if key == "env" else None) != value:
@@ -528,7 +530,8 @@ def verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid):
             raise ValueError("missing runtime image identity")
         return {"jobUid": job_uid, "podUid": pod_uid, "podName": meta["name"],
                 "namespace": meta["namespace"], "image": target["image"], "imageID": image_id,
-                "podSpecDigest": digest(spec)}
+                "podSpecDigest": digest(spec), "operation": operation,
+                "component": job["metadata"]["labels"]["kerosene.io/migration-component"]}
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         raise stack.ApplyBlockedError("database capability pod is not the expected successful probe") from None
 
@@ -548,6 +551,54 @@ def collect_database_capabilities_output(stack, kubectl, component, namespace, p
     except probe_process.ProbeProcessError:
         raise stack.ApplyBlockedError("database probe log collection failed") from None
     return verify_database_capabilities_output(stack, component, raw)
+
+
+def execute_initial_database_migrations(stack, kubectl, artifact, summary, update_id):
+    """Run controller-owned migrate then validate Jobs; retain every Job."""
+    records = []
+    for operation in ("migrate", "validate"):
+        for job in initial_database_migration_jobs(stack, artifact, summary, update_id, operation):
+            namespace, name = job["metadata"]["namespace"], job["metadata"]["name"]
+            existing = run(kubectl + ["-n", namespace, "get", "job", name,
+                                      "--ignore-not-found", "-o", "json"])
+            if existing.strip():
+                raise stack.ApplyBlockedError("database migration Job already exists; explicit recovery is required")
+            apply_resource(kubectl, job, False)
+            try:
+                probe_process.run_probe(kubectl + ["-n", namespace, "wait", "--for=condition=complete",
+                    "job/" + name, "--timeout=305s"], timeout=310)
+                live_job = json.loads(run(kubectl + ["-n", namespace, "get", "job", name, "-o", "json"]))
+                metadata, status = live_job["metadata"], live_job["status"]
+                job_uid = metadata["uid"]
+                if (metadata.get("name") != name or metadata.get("namespace") != namespace or
+                        metadata.get("deletionTimestamp") or
+                        metadata.get("annotations", {}).get("kerosene.io/update-id") != update_id or
+                        not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", job_uid) or
+                        status.get("succeeded") != 1 or status.get("failed", 0) != 0 or status.get("active", 0) != 0 or
+                        not any(condition.get("type") == "Complete" and condition.get("status") == "True"
+                                for condition in status.get("conditions", []))):
+                    raise ValueError("unexpected completed Job")
+                raw_pods = run(kubectl + ["-n", namespace, "get", "pods", "-l",
+                    "batch.kubernetes.io/controller-uid=" + job_uid, "-o", "json"])
+                pod_list = json.loads(raw_pods)
+                if not isinstance(pod_list, dict) or not isinstance(pod_list.get("items"), list) or len(pod_list["items"]) != 1:
+                    raise ValueError("ambiguous migration Pod")
+                pod = pod_list["items"][0]
+                pod_uid = pod.get("metadata", {}).get("uid")
+                record = verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid, operation)
+                final_job = json.loads(run(kubectl + ["-n", namespace, "get", "job", name, "-o", "json"]))
+                final_pod = json.loads(run(kubectl + ["-n", namespace, "get", "pod", record["podName"], "-o", "json"]))
+                if final_job.get("metadata", {}).get("uid") != job_uid:
+                    raise ValueError("migration Job identity changed")
+                final_record = verify_database_capability_terminal_pod(stack, job, job_uid, final_pod, pod_uid, operation)
+                if final_record != record:
+                    raise ValueError("migration Pod changed after observation")
+                records.append(record)
+            except (probe_process.ProbeProcessError, RuntimeError, ValueError, KeyError, TypeError,
+                    json.JSONDecodeError, stack.ApplyBlockedError) as error:
+                raise stack.ApplyBlockedError("database migration did not complete with the expected retained Job") from error
+    return {"schema": "kerosene.cell.database-migration-execution/v1",
+            "updateId": update_id, "jobs": records}
 
 
 def verify_external_secrets(stack, kubectl, references):
@@ -761,9 +812,16 @@ def execute(stack, artifact, summary, args, checkpoint):
     if not args.dry_run:
         configuration_records = verify_managed_configmaps(stack, kubectl, artifact)
         checkpoint("configuration-verified", {"configMaps": configuration_records})
+    migrations_executed = False
+    application_images = {summary["services"][name]["image"] for name in ("core", "kfe")}
     for phase in phases:
         if not args.dry_run and verify_managed_configmaps(stack, kubectl, artifact) != configuration_records:
             raise stack.ApplyBlockedError("managed ConfigMaps changed before the next Cell phase")
+        if (initial_install and not args.dry_run and not migrations_executed and
+                any(container.get("image") in application_images for resource in phase for container in containers(resource))):
+            migration = execute_initial_database_migrations(stack, kubectl, artifact, summary, summary["_canonicalDigest"])
+            checkpoint("initial-database-migrations-validated", migration)
+            migrations_executed = True
         # Core and KFE have reciprocal integration references. Submit the
         # entire phase before waiting, otherwise the first readiness gate can
         # deadlock bootstrap by waiting for a service not yet created.
@@ -780,6 +838,8 @@ def execute(stack, artifact, summary, args, checkpoint):
             ns, kind, name = identity(resource)
             run(kubectl + ["-n", ns, "rollout", "status", f"{kind.lower()}/{name}", "--timeout=110s"])
             checkpoint("ready:" + label, {"runtime": verify_running(kubectl, resource)})
+    if initial_install and not args.dry_run and not migrations_executed:
+        raise stack.ApplyBlockedError("initial database migrations were not reached before application workloads")
     if not args.dry_run:
         # Existing operational gates execute from installed controller, not
         # executable content supplied in source/archive artifacts.
