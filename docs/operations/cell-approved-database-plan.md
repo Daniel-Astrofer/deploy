@@ -106,6 +106,15 @@ outside automatic Cell execution: the future executor must bind and recheck
 cluster/pod UID, PodSpec, terminal status, image identity and isolation.
 The installed transport module is included in candidate controller-tool digests;
 foreign cached modules or changes during candidate validation are rejected.
+`verify_database_capability_terminal_pod` checks a supplied live observation
+against recorded Job/pod UIDs, namespace, controller ownership, approved
+container configuration, token/host restrictions, security/storage fields,
+successful termination and zero restarts. It records the actual runtime
+`imageID` and PodSpec digest; it does not equate a platform imageID with an OCI
+index digest. This is not a live API collector or a complete PodSpec/CNI
+qualification. The executor must verify the live Job, validate admission changes
+and other PodSpec fields, and recheck identities around log collection before
+accepting any result. UIDs supplied without a trusted journal are not proof.
 Retain failed probe evidence; do not automatically delete namespaces or adopt
 leftover workloads. Explicit recovery must verify ownership and actual resources.
 

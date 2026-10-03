@@ -424,6 +424,66 @@ def verify_database_capabilities_output(stack, component, raw):
         raise stack.ApplyBlockedError("invalid database capabilities output") from error
 
 
+def verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid):
+    """Bind a terminal probe observation to controller-recorded UIDs.
+
+    This records runtime imageID, not registry/index provenance or CNI proof.
+    The executor must check the live Job and re-read the pod around log collection.
+    """
+    try:
+        if any(not isinstance(uid, str) or not uid or len(uid) > 128 for uid in (job_uid, pod_uid)):
+            raise ValueError("missing recorded identity")
+        meta, spec, status = pod["metadata"], pod["spec"], pod["status"]
+        expected = job["spec"]["template"]["spec"]
+        if meta["uid"] != pod_uid or meta["namespace"] != job["metadata"]["namespace"] or meta.get("deletionTimestamp"):
+            raise ValueError("pod identity changed")
+        owners = [owner for owner in meta.get("ownerReferences", []) if owner.get("controller") is True]
+        if len(owners) != 1 or any(owners[0].get(key) != value for key, value in
+                (("apiVersion", "batch/v1"), ("kind", "Job"), ("name", job["metadata"]["name"]), ("uid", job_uid))):
+            raise ValueError("foreign controller")
+        if status.get("phase") != "Succeeded" or spec.get("restartPolicy") != "Never":
+            raise ValueError("probe not successfully terminal")
+        for field in ("automountServiceAccountToken", "enableServiceLinks", "hostNetwork", "hostPID", "hostIPC"):
+            if spec.get(field, False) is not False:
+                raise ValueError("unsafe pod namespaces or injection")
+        if spec.get("automountServiceAccountToken") is not False or spec.get("enableServiceLinks") is not False:
+            raise ValueError("missing explicit isolation")
+        if any(spec.get(field) for field in ("initContainers", "ephemeralContainers", "imagePullSecrets")):
+            raise ValueError("unexpected container or secret")
+        if spec.get("securityContext") != expected["securityContext"] or spec.get("volumes") != expected["volumes"]:
+            raise ValueError("changed security or storage")
+        actual = spec["containers"]
+        if len(actual) != 1 or len(expected["containers"]) != 1:
+            raise ValueError("unexpected container count")
+        container = actual[0]
+        target = expected["containers"][0]
+        if target["args"] != ["--cell-migration=capabilities"] or target.get("env"):
+            raise ValueError("not a credential-free probe")
+        for key, value in target.items():
+            if container.get(key, [] if key == "env" else None) != value:
+                raise ValueError("changed probe command or configuration")
+        allowed_defaults = {"terminationMessagePath", "terminationMessagePolicy"}
+        if set(container) - set(target) - allowed_defaults:
+            raise ValueError("extra container configuration")
+        states = status["containerStatuses"]
+        if len(states) != 1 or states[0]["name"] != target["name"] or type(states[0].get("restartCount")) is not int or states[0]["restartCount"] != 0:
+            raise ValueError("unexpected runtime container or restart")
+        state = states[0]
+        if state.get("lastState") or set(state["state"]) != {"terminated"}:
+            raise ValueError("ambiguous termination")
+        terminated = state["state"]["terminated"]
+        if type(terminated.get("exitCode")) is not int or terminated["exitCode"] != 0 or terminated.get("signal", 0) != 0:
+            raise ValueError("failed termination")
+        image_id = state.get("imageID")
+        if not isinstance(image_id, str) or not image_id or len(image_id) > 1024:
+            raise ValueError("missing runtime image identity")
+        return {"jobUid": job_uid, "podUid": pod_uid, "podName": meta["name"],
+                "namespace": meta["namespace"], "image": target["image"], "imageID": image_id,
+                "podSpecDigest": digest(spec)}
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        raise stack.ApplyBlockedError("database capability pod is not the expected successful probe") from None
+
+
 def collect_database_capabilities_output(stack, kubectl, component, namespace, pod_name):
     """Read one controller-selected pod's bounded stdout; not completion proof.
 

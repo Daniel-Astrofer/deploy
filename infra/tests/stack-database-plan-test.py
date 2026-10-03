@@ -223,6 +223,51 @@ class DatabasePlanTest(unittest.TestCase):
         with self.assertRaises(stack.ApplyBlockedError):
             lifecycle.verify_database_capabilities_output(stack, "vault", raw)
 
+    def terminal_probe_fixture(self):
+        self.refresh()
+        job = lifecycle.initial_database_capability_resources(stack, self.artifact, self.fixture.summary, "sha256:" + "a" * 64)[2]
+        pod = {"metadata": {"name": "probe-pod", "uid": "pod-uid", "namespace": job["metadata"]["namespace"],
+            "ownerReferences": [{"apiVersion": "batch/v1", "kind": "Job", "name": job["metadata"]["name"], "uid": "job-uid", "controller": True}]},
+            "spec": copy.deepcopy(job["spec"]["template"]["spec"]),
+            "status": {"phase": "Succeeded", "containerStatuses": [{"name": "migration", "restartCount": 0,
+                "imageID": "containerd://sha256:" + "c" * 64, "state": {"terminated": {"exitCode": 0}}}]}}
+        return job, pod
+
+    def test_terminal_probe_binds_recorded_uids_and_records_runtime_image(self):
+        job, pod = self.terminal_probe_fixture()
+        pod["spec"]["containers"][0].pop("env")  # Kubernetes omits empty env.
+        record = lifecycle.verify_database_capability_terminal_pod(stack, job, "job-uid", pod, "pod-uid")
+        self.assertEqual(record["imageID"], pod["status"]["containerStatuses"][0]["imageID"])
+        self.assertEqual(record["podSpecDigest"], lifecycle.digest(pod["spec"]))
+        self.assertEqual(record["podUid"], "pod-uid")
+
+    def test_terminal_probe_rejects_identity_failure_restart_and_injected_configuration(self):
+        job, original = self.terminal_probe_fixture()
+        cases = [("metadata", "uid", "replacement"), ("metadata", "namespace", "foreign"),
+            ("metadata", "deletionTimestamp", "now"), ("status", "phase", "Running"),
+            ("spec", "hostNetwork", True), ("spec", "automountServiceAccountToken", True),
+            ("spec", "enableServiceLinks", True), ("spec", "volumes", []),
+            ("spec", "ephemeralContainers", [{"name": "debug"}])]
+        for parent, key, value in cases:
+            pod = copy.deepcopy(original)
+            pod[parent][key] = value
+            with self.subTest(key=key), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.verify_database_capability_terminal_pod(stack, job, "job-uid", pod, "pod-uid")
+        for mutation in ("owner", "exit", "restart", "imageID", "image", "envFrom", "args", "sidecar"):
+            pod = copy.deepcopy(original)
+            state = pod["status"]["containerStatuses"][0]
+            container = pod["spec"]["containers"][0]
+            if mutation == "owner": pod["metadata"]["ownerReferences"][0]["uid"] = "replacement"
+            elif mutation == "exit": state["state"]["terminated"]["exitCode"] = 1
+            elif mutation == "restart": state["restartCount"] = 1
+            elif mutation == "imageID": state["imageID"] = ""
+            elif mutation == "image": container["image"] = "foreign"
+            elif mutation == "envFrom": container["envFrom"] = [{"secretRef": {"name": "forbidden"}}]
+            elif mutation == "args": container["args"] = ["--cell-migration=migrate"]
+            else: pod["spec"]["containers"].append(copy.deepcopy(container))
+            with self.subTest(mutation=mutation), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.verify_database_capability_terminal_pod(stack, job, "job-uid", pod, "pod-uid")
+
     def test_probe_collection_uses_one_named_container_and_bounded_transport(self):
         namespace = "cell-probe-" + "a" * 40
         expected = {"schema": "kerosene.cell.migration-capabilities/v1", "component": "core", "operations": ["validate", "migrate"]}
