@@ -60,9 +60,21 @@ HTTP listener, proof verification and real restricted-role PostgreSQL consumptio
 missing client certificates, duplicated JSON and altered operator are refused;
 consumption succeeds once, replay is refused, and exact recovery inspection
 returns the retained digest. The listener is a disposable test server. Production
-listener/configuration, read/header deadlines, audit, live cluster revalidation
+listener/configuration wiring, audit, live cluster revalidation
 and controller integration remain pending; no public service is started by the
 CLI or tests outside the explicit lab.
+
+`newAdmissionServer` prepares (but does not bind) the server with fixed mandatory
+client-certificate verification, explicit client CA/server certificate, TLS >=1.2,
+no dynamic certificate/configuration callback, bounded headers and read/write/idle
+timeouts. It snapshots operator policies, Cell bindings and trusted consensus
+anchor before requests; later mutations of caller-owned maps cannot change
+authorization. HTTP/2 and session tickets are disabled in this initial boundary.
+The lab uses this configuration for real HTTP mTLS/SQL qualification and verifies
+that caller-side policy changes do not alter the active snapshot. Weak TLS modes
+are refused before anchor validation. A transport error logger is mandatory;
+production configuration loader, protected PKI references, service command,
+audited operation events and cluster revalidation still need integration.
 
 `admissionOperatorIdentity` derives transport identity from the actual completed
 mandatory-mTLS listener state, verified certificate chain, current certificate

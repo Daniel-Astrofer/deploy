@@ -53,9 +53,21 @@ func testAdmissionHTTPConsumption(t *testing.T, db *sql.DB, anchor TrustAnchor, 
 		Operators: map[string]AdmissionOperatorGrant{binding.OperatorID: {SPKIPins: []string{pin}, Cells: []string{binding.CellID}, Operations: []string{"consume", "inspect-recovery"}}}}
 	pool := x509.NewCertPool()
 	pool.AppendCertsFromPEM(ca.pem)
-	server := httptest.NewUnstartedServer(handler)
-	server.Config.ErrorLog = log.New(io.Discard, "", 0)
-	server.TLS = &tls.Config{Certificates: []tls.Certificate{serverCert}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12}
+	prepared, err := newAdmissionServer("127.0.0.1:0", handler,
+		&tls.Config{Certificates: []tls.Certificate{serverCert}, ClientCAs: pool, ClientAuth: tls.RequireAndVerifyClientCert, MinVersion: tls.VersionTLS12}, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal("secure admission server configuration refused", err)
+	}
+	if prepared.ReadHeaderTimeout <= 0 || prepared.ReadTimeout <= 0 || prepared.WriteTimeout <= 0 || prepared.MaxHeaderBytes != 16384 ||
+		prepared.TLSConfig.ClientAuth != tls.RequireAndVerifyClientCert || !prepared.TLSConfig.SessionTicketsDisabled {
+		t.Fatal("admission server limits missing")
+	}
+	// Caller-side policy mutations must not change the running server snapshot.
+	delete(handler.Operators, binding.OperatorID)
+	handler.Cells[binding.CellID] = "untrusted-replacement"
+	server := httptest.NewUnstartedServer(prepared.Handler)
+	server.Config = prepared
+	server.TLS = prepared.TLSConfig
 	server.StartTLS()
 	defer server.Close()
 	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, ServerName: "localhost", Certificates: []tls.Certificate{clientCert}, MinVersion: tls.VersionTLS12}}
