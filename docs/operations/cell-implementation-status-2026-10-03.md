@@ -7,7 +7,7 @@ the [October 2 checkpoint](cell-implementation-status-2026-10-02.md); unchanged
 component evidence there is historical, not a newly rerun full-Cell test.
 
 KFE work remains on isolated `feat/complete-cell-operations`, current commit
-`d866416` (continues `0c46542` and `074e08a`). Deploy remains on
+`e45e3f2` (continues `d866416`, `0c46542` and `074e08a`). Deploy remains on
 `feat/staging-volumesnapshot-attestation-request`; this Deploy wave changes
 documentation only. Dirty primary checkouts were untouched. No production update,
 real custody/provider action, release authority provisioning or signer activation.
@@ -80,7 +80,7 @@ liquidity advisory-lock/terminal concurrency and the complete submit context are
 not inferred from these results. KFE STATUS and the indexed bounded runbooks
 record those limits.
 
-## Upstream/provider continuation — current accepted result
+## Earlier upstream/provider continuation
 
 Two disjoint agents added direct Vault and remote-adapter boundaries while the
 coordinator protected settlement/quorum, integrated fixtures and added actual
@@ -98,7 +98,7 @@ PostgreSQL evidence. Both agents are closed; primary checkouts remain untouched.
   local financial commit. Already admitted synchronous work can finish across
   drain, but fresh calls are rejected. No reconciliation/force-clear API is added.
 
-Current final `check bootJar`: **1,776 tests, zero failures/errors/skips**, including
+That wave's final `check bootJar`: **1,776 tests, zero failures/errors/skips**, including
 all current source/tests. New suites contain 47 settlement, 20 Vault provider and
 204 remote effect cases, plus two new full-schema PostgreSQL cases. The actual
 PostgreSQL suites now total 28 cases (14 generic/publisher and 14 full-schema).
@@ -114,6 +114,38 @@ delivery evidence. The payload/contract mismatch remains separately unqualified,
 alongside the previously recorded conflict/refund concern. Successful test
 classification is not a financial-policy or notification-delivery repair.
 
+## Current admission diagnostic continuation
+
+KFE now provides exact authenticated ADMIN GET/HEAD
+`/api/admin/kfe/maintenance/admissions`, available during drain without new
+admission or resolution. It returns unresolved metadata and parent provenance,
+with read-only REPEATABLE_READ snapshots, timestamp/UUID keyset pagination,
+default 50/max 100 entries, canonical bounded position cursors and no-store
+responses. Errors are fixed 400/503 without SQL/connection details. IDs and
+cursors are not completion credentials; diagnosticOnly remains true.
+
+The independent query never locks maintenance control for writing or modifies
+financial/admission state. No schema migration, proof inference, force-clear,
+resume or replay runner is introduced. Output is bounded and transaction timeout
+is five seconds; large-backlog index/sort performance is not load-qualified.
+Snapshots are coherent per page, not across requests; empty pages do not prove
+that all pending effects were inspected or resolved.
+
+Current pinned Gradle `check bootJar`: **1,828 tests, zero failures/errors/skips**,
+including 25 query, 14 controller/filter+MVC and ten extra perimeter cases. Three
+additional real full-schema PostgreSQL cases prove timestamp-tie pagination and
+parent lineage, no admission/clearance during actual drain and one MVCC snapshot
+under interleaved independently committed resolution. The real PostgreSQL suites
+now total 31 cases: 14 generic/publisher and 17 full-schema. This is diagnostics,
+not operator UI/jctl integration, provider finality or complete-service recovery.
+
+One bounded agent implemented the controller; another performed a read-only
+consumer audit. Both are closed, coordinator owns integration/verification.
+The audit found no conflict-notification route or adapter override in inspected
+isolated Core sources. The producer's -1 DTO defect is therefore not the only
+delivery gap. Changing it to 0 alone would not provide an authenticated receiver,
+event semantics or proof of refund; no financial policy was rewritten.
+
 ## Remaining work for the complete service
 
 1. **Complete KFE drain/recovery:** complete remaining provider/embedded inventory
@@ -124,7 +156,9 @@ classification is not a financial-policy or notification-delivery repair.
    Protected leaves do not certify all callers. Preserve the three unknown counts
    until complete inventory/race/restart evidence. Independently qualify the
    previously documented conflict/refund concern; no financial-policy fix claimed.
-   Resolve the separately documented outbound-conflicted notification mismatch.
+   Resolve the separately documented outbound-conflicted producer/consumer
+   mismatch. Admission diagnostics now help inspection, but cannot substitute
+   for exact financial correlation and authenticated completion/recovery proofs.
 2. **Authoritative Bank compatibility:** implement target build/runtime/provenance,
    migration/recovery decisions and mandatory-mTLS deployment qualification. The
    current real producer's unknown/incompatible result and signed Node transport
