@@ -34,3 +34,22 @@ must remain enabled. Do not apply a future probe to an old image that lacks it.
 
 No live Vault deployment, certificate ceremony, custody mutation or signer
 activation was performed. These findings keep full-Cell execution blocked.
+
+## Opt-in manifest preparation
+
+`infra/kubernetes/components/vault-authenticated-readiness` prepares the fixed
+exec probe `/usr/local/bin/kerosene-vault --health-probe` for the single `vault`
+Deployment. It removes the HTTP/TCP readiness handler, uses a six-second kubelet
+timeout (longer than the command's four-second request timeout), and reads
+`VAULT_HEALTH_PROBE_URL` from required ConfigMap `vault-health-probe`, key
+`local-health-url`. Include that ConfigMap in the approved deployment with a DNS
+hostname present in the server certificate and `/v1/health` at the correct port.
+The command connects to loopback while verifying that hostname; IP URLs fail.
+Existing mounted client cert/key/CA paths are reused, never provisioned here.
+
+No existing overlay selects this component. Enable it only after qualifying the
+exact new image, mounted certificates and Kubernetes exec behavior. Old images
+may not implement the command. The render regression proves only the intended
+manifest changes; no live exec/readiness qualification or Cell acceptance is
+claimed. Recovery restores the previously approved manifest/image explicitly,
+without changing mTLS requirements or automatically activating signers.
