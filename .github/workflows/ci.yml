@@ -134,6 +134,7 @@ jobs:
       - name: Run deployment and SPIRE manifest gates
         run: |
           python3 -B infra/kubernetes/tests/separate-service-databases-test.py -v
+          python3 -B infra/tests/vault-readiness-component-test.py -v
           bash infra/kubernetes/tests/staging-canonical-runtime-test.sh
           bash infra/kubernetes/tests/staging-live-image-digest-test.sh
           bash infra/kubernetes/tests/staging-volumesnapshot-attestation-request-test.sh

@@ -2,6 +2,7 @@
 """Render-only readiness contract, never image/runtime qualification."""
 from pathlib import Path
 import subprocess
+import shutil
 import tempfile
 import unittest
 import yaml
@@ -11,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class VaultReadinessComponentTest(unittest.TestCase):
     def render(self, target):
-        result = subprocess.run(["kustomize", "build", str(target)], check=True, capture_output=True, timeout=30)
+        command = ["kustomize", "build"] if shutil.which("kustomize") else ["kubectl", "kustomize"]
+        result = subprocess.run(command + [str(target)], check=True, capture_output=True, timeout=30)
         return list(yaml.safe_load_all(result.stdout))
 
     def test_component_changes_only_vault_readiness_and_explicit_url_reference(self):
@@ -24,8 +26,10 @@ class VaultReadinessComponentTest(unittest.TestCase):
                 "resources: [../staging-vault]\ncomponents: [../../components/vault-authenticated-readiness]\n")
             changed = self.render(directory)
         self.assertEqual(len(original), len(changed))
+        matched = 0
         for old, new in zip(original, changed):
             if old["kind"] == "Deployment" and old["metadata"]["name"] == "vault":
+                matched += 1
                 container = new["spec"]["template"]["spec"]["containers"][0]
                 probe = container["readinessProbe"]
                 self.assertNotIn("httpGet", probe)
@@ -37,6 +41,7 @@ class VaultReadinessComponentTest(unittest.TestCase):
                 container["env"].remove(entry)
                 container["readinessProbe"] = old["spec"]["template"]["spec"]["containers"][0]["readinessProbe"]
             self.assertEqual(old, new)
+        self.assertEqual(matched, 1, "render must exercise exactly one Vault Deployment")
 
 
 if __name__ == "__main__":
