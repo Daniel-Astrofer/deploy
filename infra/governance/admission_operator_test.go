@@ -22,6 +22,25 @@ func TestAdmissionOperatorRequiresVerifiedPinnedUniqueIdentity(t *testing.T) {
 	pin := "sha256:" + hex.EncodeToString(hash[:])
 	state := tls.ConnectionState{HandshakeComplete: true, PeerCertificates: []*x509.Certificate{cert}, VerifiedChains: [][]*x509.Certificate{{cert, ca.cert}}}
 	pins := map[string][]string{"operator-example": {pin}}
+	policy := map[string]AdmissionOperatorGrant{"operator-example": {SPKIPins: []string{pin}, Cells: []string{"cell-example"}, Operations: []string{"consume"}}}
+	if identity, err := authorizeAdmissionOperator(&state, policy, "cell-example", "consume", time.Now()); err != nil || identity != "operator-example" {
+		t.Fatal("authorized administrator rejected", err)
+	}
+	for _, scope := range [][2]string{{"other-cell", "consume"}, {"cell-example", "inspect-recovery"}, {"cell-example", "update"}} {
+		if _, err := authorizeAdmissionOperator(&state, policy, scope[0], scope[1], time.Now()); err == nil {
+			t.Fatal("ungranted administrative scope accepted")
+		}
+	}
+	for _, grant := range []AdmissionOperatorGrant{
+		{SPKIPins: []string{pin}, Cells: []string{"*"}, Operations: []string{"consume"}},
+		{SPKIPins: []string{pin}, Cells: []string{"cell-example", "cell-example"}, Operations: []string{"consume"}},
+		{SPKIPins: []string{pin}, Cells: []string{"cell-example"}, Operations: []string{"consume", "consume"}},
+		{SPKIPins: []string{pin}, Cells: []string{"cell-example"}, Operations: []string{"automatic-resume"}},
+	} {
+		if _, err := authorizeAdmissionOperator(&state, map[string]AdmissionOperatorGrant{"operator-example": grant}, "cell-example", "consume", time.Now()); err == nil {
+			t.Fatal("invalid administrative policy accepted")
+		}
+	}
 	if identity, err := admissionOperatorIdentity(&state, pins, time.Now()); err != nil || identity != "operator-example" {
 		t.Fatal("pinned operator rejected", err)
 	}

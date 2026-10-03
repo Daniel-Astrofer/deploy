@@ -79,7 +79,7 @@ func registryLeaf(t *testing.T, ca registryTestCA, host string, client bool) ([]
 // Minimal PostgreSQL wire peer ONLY to qualify TLS transport, not database SQL.
 func TestAdmissionRegistryRealTLS(t *testing.T) {
 	serverCA, clientCA, foreignCA := registryCA(t), registryCA(t), registryCA(t)
-	for _, scenario := range []string{"valid", "wrong-server-ca", "wrong-hostname", "untrusted-client", "unpinned-client", "tls-refused"} {
+	for _, scenario := range []string{"valid", "wrong-server-ca", "wrong-hostname", "untrusted-client", "unpinned-client", "wrong-cell-scope", "wrong-operation", "tls-refused"} {
 		t.Run(scenario, func(t *testing.T) {
 			dir := t.TempDir()
 			host := "localhost"
@@ -149,7 +149,14 @@ func TestAdmissionRegistryRealTLS(t *testing.T) {
 					return
 				}
 				state := secure.ConnectionState()
-				identity, err := admissionOperatorIdentity(&state, map[string][]string{"operator-example": {pin}}, time.Now())
+				grant := AdmissionOperatorGrant{SPKIPins: []string{pin}, Cells: []string{"cell-example"}, Operations: []string{"consume"}}
+				if scenario == "wrong-cell-scope" {
+					grant.Cells = []string{"other-cell"}
+				}
+				if scenario == "wrong-operation" {
+					grant.Operations = []string{"inspect-recovery"}
+				}
+				identity, err := authorizeAdmissionOperator(&state, map[string]AdmissionOperatorGrant{"operator-example": grant}, "cell-example", "consume", time.Now())
 				if err != nil || identity != "operator-example" {
 					result <- false
 					return

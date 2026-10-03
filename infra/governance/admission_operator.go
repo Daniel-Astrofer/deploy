@@ -46,3 +46,59 @@ func admissionOperatorIdentity(state *tls.ConnectionState, pins map[string][]str
 	}
 	return identity, nil
 }
+
+// Independently provisioned Bank administrative policy. Never decoded from an
+// admission/request; initial bootstrap must not depend on its absent Core.
+type AdmissionOperatorGrant struct {
+	SPKIPins   []string `json:"spkiPins"`
+	Cells      []string `json:"cells"`
+	Operations []string `json:"operations"`
+}
+
+func authorizeAdmissionOperator(state *tls.ConnectionState, policy map[string]AdmissionOperatorGrant,
+	cellID, operation string, now time.Time) (string, error) {
+	if !nameRE.MatchString(cellID) || (operation != "consume" && operation != "inspect-recovery") {
+		return "", errors.New("invalid administrative admission scope")
+	}
+	pins := map[string][]string{}
+	for identity, grant := range policy {
+		if len(grant.Cells) == 0 || len(grant.Cells) > 64 || len(grant.Operations) == 0 || len(grant.Operations) > 2 {
+			return "", errors.New("invalid admission administrative policy")
+		}
+		seenCells := map[string]bool{}
+		seenOperations := map[string]bool{}
+		for _, cell := range grant.Cells {
+			if !nameRE.MatchString(cell) || seenCells[cell] {
+				return "", errors.New("invalid admission administrative policy")
+			}
+			seenCells[cell] = true
+		}
+		for _, op := range grant.Operations {
+			if (op != "consume" && op != "inspect-recovery") || seenOperations[op] {
+				return "", errors.New("invalid admission administrative policy")
+			}
+			seenOperations[op] = true
+		}
+		pins[identity] = grant.SPKIPins
+	}
+	identity, err := admissionOperatorIdentity(state, pins, now)
+	if err != nil {
+		return "", err
+	}
+	grant := policy[identity]
+	cellAllowed, operationAllowed := false, false
+	for _, cell := range grant.Cells {
+		if cell == cellID {
+			cellAllowed = true
+		}
+	}
+	for _, op := range grant.Operations {
+		if op == operation {
+			operationAllowed = true
+		}
+	}
+	if !cellAllowed || !operationAllowed {
+		return "", errors.New("operator is not authorized for this Cell admission operation")
+	}
+	return identity, nil
+}

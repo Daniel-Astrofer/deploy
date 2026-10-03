@@ -46,6 +46,17 @@ role/session authorization: the future service must enforce existing operator
 authorization and bind this identity to the admission's operator before effects.
 No HTTP endpoint or caller-selected pin policy is enabled by this helper.
 
+`authorizeAdmissionOperator` adds independently provisioned Bank administrative
+grants on top of that transport identity: exact Cell allowlists and explicit
+`consume` / `inspect-recovery` operation allowlists. Wildcards, duplicate scopes,
+unknown operations and ambiguous identity policies are refused. A valid pinned
+certificate alone cannot act on another Cell or consume using a recovery-only
+grant. TLS tests enforce these restrictions after an actual handshake. Initial
+admission cannot rely on the absent target Cell's Core for authorization; this
+policy belongs to an independently provisioned Bank service. No policy loader,
+HTTP endpoint or install integration is enabled yet, and update/resume rights
+are not implied by these initial-admission grants.
+
 `openAdmissionRegistry` prepares a bounded-pool connector with mandatory
 `sslmode=verify-full`, explicit CA and client certificate/key, fixed connection
 and SQL/lock timeouts and protected password reference. It accepts typed host,
