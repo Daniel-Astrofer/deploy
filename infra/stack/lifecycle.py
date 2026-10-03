@@ -156,6 +156,30 @@ def apply_resource(kubectl, resource, dry_run=False):
     run(argv, input_bytes=canonical(resource))
 
 
+def verify_empty_installation(stack, kubectl):
+    """Initial install cannot adopt an existing Cell or persistent state.
+
+    An absent local journal does not prove an empty bound cluster. Existing
+    identities may be provisioned out of band, but workloads and PVCs require
+    explicit recovery, never a fresh-install overwrite.
+    """
+    for namespace in sorted(NAMESPACES):
+        raw = run(kubectl + ["get", "namespace", namespace, "--ignore-not-found", "-o", "json"])
+        if not raw.strip():
+            continue
+        try:
+            observed = json.loads(raw)
+            if observed.get("kind") != "Namespace" or observed.get("metadata", {}).get("name") != namespace:
+                raise ValueError("namespace identity mismatch")
+            resources = json.loads(run(kubectl + ["-n", namespace, "get", "deployments,statefulsets,pods,persistentvolumeclaims", "-o", "json"]))
+            if not isinstance(resources, dict) or not isinstance(resources.get("items"), list):
+                raise ValueError("invalid inventory")
+        except (ValueError, AttributeError) as error:
+            raise stack.ApplyBlockedError("initial-install cluster inventory is invalid") from error
+        if resources["items"]:
+            raise stack.ApplyBlockedError("initial install refuses existing workloads or persistent volumes; use explicit recovery")
+
+
 def workload_phases(stack, artifact, summary):
     """Plan infrastructure before consumers, without serializing cyclic apps.
 
@@ -258,6 +282,8 @@ def execute(stack, artifact, summary, args, checkpoint):
     # Validate all unsupported policies before the first Kubernetes write.
     if any(r["kind"] == "HorizontalPodAutoscaler" for r in prerequisites):
         raise stack.ApplyBlockedError("HPA requires a separately approved freeze/restore policy during Cell update")
+    if getattr(args, "command", None) == "install":
+        verify_empty_installation(stack, kubectl)
     if not args.dry_run:
         receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],
                                        stack.canonical_digest(args._release), run)

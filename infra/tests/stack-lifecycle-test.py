@@ -46,6 +46,49 @@ class DeploymentTest(unittest.TestCase):
     def test_exact_configuration(self):
         self.assertEqual(self.verify(), self.artifact)
 
+    def test_initial_install_checks_both_bound_namespaces(self):
+        replies = []
+        for namespace in sorted(lifecycle.NAMESPACES):
+            replies.extend([json.dumps({"kind": "Namespace", "metadata": {"name": namespace}}).encode(), b'{"items":[]}'])
+        prefix = ["/kubectl", "--kubeconfig", "/cell.conf", "--context", "cell-a"]
+        with patch.object(lifecycle, "run", side_effect=replies) as run:
+            lifecycle.verify_empty_installation(stack, prefix)
+            self.assertEqual(run.call_count, 4)
+            for call in run.call_args_list:
+                self.assertEqual(call.args[0][:5], prefix)
+
+    def test_initial_install_accepts_absent_namespaces_without_creating_them(self):
+        with patch.object(lifecycle, "run", return_value=b"") as run, patch.object(lifecycle, "apply_resource") as apply:
+            lifecycle.verify_empty_installation(stack, ["/bound-kubectl"])
+            self.assertEqual(run.call_count, 2)
+            apply.assert_not_called()
+
+    def test_initial_install_refuses_persisted_state_and_all_running_workloads(self):
+        namespace = sorted(lifecycle.NAMESPACES)[0]
+        for kind in ["Deployment", "StatefulSet", "Pod", "PersistentVolumeClaim"]:
+            replies = [json.dumps({"kind": "Namespace", "metadata": {"name": namespace}}).encode(), json.dumps({"items": [{"kind": kind}]}).encode()]
+            with self.subTest(kind=kind), patch.object(lifecycle, "run", side_effect=replies), self.assertRaisesRegex(stack.ApplyBlockedError, "existing workloads or persistent volumes"):
+                lifecycle.verify_empty_installation(stack, ["/bound-kubectl"])
+
+    def test_initial_install_does_not_treat_invalid_inventory_as_empty(self):
+        namespace = sorted(lifecycle.NAMESPACES)[0]
+        for inventory in [b"not-json", b"{}", b'{"items":null}', b'[]']:
+            replies = [json.dumps({"kind": "Namespace", "metadata": {"name": namespace}}).encode(), inventory]
+            with self.subTest(inventory=inventory), patch.object(lifecycle, "run", side_effect=replies), self.assertRaisesRegex(stack.ApplyBlockedError, "inventory is invalid"):
+                lifecycle.verify_empty_installation(stack, ["/bound-kubectl"])
+
+    def test_install_rechecks_journal_under_lock_before_authorization(self):
+        args = stack.build_parser().parse_args(["install", "--release", "unit.json", "--apply", "--state-dir", str(self.root)])
+        for field in ["consensus_proof", "validator_roster", "bank_observer_report", "snapshot_attestation_request", "snapshot_receipt", "snapshot_provider_key"]:
+            setattr(args, field, "unit-not-authority")
+        stack.write_update_state(str(self.root), {"schema": "kerosene.stack.update-state/v1", "status": "committed"})
+        summary = {"releaseSchemaVersion": 3, "sequence": 2}
+        with patch.object(stack, "verify_tuf_authorization") as authorization, patch.object(stack, "run_staging_cell_deploy") as deploy:
+            self.assertEqual(stack.apply_locked_release({}, summary, args), stack.EXIT_CANNOT_APPLY)
+            authorization.assert_not_called()
+            deploy.assert_not_called()
+        self.assertEqual(stack.read_existing_update_state(str(self.root))["status"], "committed")
+
     def test_complete_cell_dependency_phases_independent_of_manifest_order(self):
         self.artifact["resources"].reverse()
         groups = lifecycle.workload_phases(stack, self.artifact, self.summary)

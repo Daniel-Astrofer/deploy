@@ -46,6 +46,23 @@ authorized release or executable installation script.
 becomes a bypass. Use `--help` for the exact required flags. Legacy v1/v2
 signature receipts remain usable for inspection/dry-run, not real application.
 
+First installation additionally rechecks absence of any deployment journal
+under the canonical update lock. Manifest execution probes both bound Cell
+namespaces: any existing Deployment, StatefulSet, Pod or PVC blocks initial
+installation and requires explicit recovery. Missing namespaces are allowed;
+invalid/failed inventory reads are not proof of absence. This protects persisted
+identities/data from adoption after a lost journal, and prevents concurrent
+first-install commands from both relying on an earlier empty-journal check.
+No resources or volumes are deleted by these checks. The inventory is not a
+distributed lock against other cluster administrators; admission and exclusive
+operational control still need full-Cell qualification.
+
+The first-install admission/recovery contract remains incomplete: the shared
+pipeline still requires live KFE maintenance and snapshot/recovery evidence
+designed for updates. These requirements are not waived merely because the
+cluster inventory is empty. Initial installation must obtain a separately
+qualified no-existing-financial-state bootstrap path before live apply is usable.
+
 ## Approved manifest and evidence
 
 The new `--deployment-manifest` is JSON with schema

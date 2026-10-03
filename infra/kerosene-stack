@@ -2024,6 +2024,11 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
 
     try:
         summary["_canonicalDigest"] = canonical_digest(release)
+        # The public command's early check is helpful feedback, but only this
+        # check under update.lock prevents concurrent installs from both seeing
+        # a missing journal before one of them commits the Cell.
+        if args.command == "install" and read_existing_update_state(args.state_dir) is not None:
+            raise ApplyBlockedError("install refuses an existing deployment journal under the Cell update lock")
         guard_previous_update_state(args.state_dir, summary, args.environment, args.resume_update_id, args.change_id)
         if args.deployment_manifest:
             lifecycle.verify_deployment(sys.modules[__name__], release, summary, args.deployment_manifest)
