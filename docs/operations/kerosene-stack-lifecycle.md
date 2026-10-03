@@ -119,6 +119,12 @@ their initial submission. Every preceding phase must become Kubernetes-ready
 before the next is submitted. This is an ordering policy, not proof of RPC,
 financial readiness or consensus health. Multiple Node/Vault workloads remain
 in the inventory; this does not implement their replica-by-replica update.
+Runtime checks additionally require a non-deleting workload UID and pod ownership
+by that StatefulSet, or by a ReplicaSet controlled by that Deployment UID.
+A ready pod with matching labels/images but foreign ownership is not accepted.
+Receipts include workload and pod UIDs. This verifies ownership, not the active
+ReplicaSet revision, full runtime configuration or financial/quorum readiness;
+those broader acceptance gates remain mandatory and unqualified.
 Unidentified/ambiguously identified images, missing runtime components and
 cross-phase colocated containers (including init containers) are unsupported
 and block execution before resource writes, rather than silently choosing an

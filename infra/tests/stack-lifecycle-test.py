@@ -380,5 +380,59 @@ class DeploymentTest(unittest.TestCase):
                 lifecycle.validate_maintenance(stack, changed, "change-one", now)
 
 
+class RuntimeOwnershipTest(unittest.TestCase):
+    def fixture(self, kind):
+        image = "registry.example.invalid/service@sha256:" + "a" * 64
+        resource = {"kind": kind, "metadata": {"namespace": "kerosene-staging", "name": "service"},
+            "spec": {"replicas": 1, "template": {"spec": {"containers": [{"name": "service", "image": image}]}}}}
+        live = copy.deepcopy(resource)
+        live["metadata"].update(uid="workload-uid", generation=1)
+        live["spec"]["selector"] = {"matchLabels": {"app": "service"}}
+        live["status"] = {"observedGeneration": 1, "readyReplicas": 1, "updatedReplicas": 1}
+        rs = {"metadata": {"uid": "replicaset-uid", "namespace": "kerosene-staging",
+            "ownerReferences": [{"kind": "Deployment", "uid": "workload-uid", "controller": True}]}}
+        pod = {"metadata": {"uid": "pod-uid", "namespace": "kerosene-staging", "ownerReferences": [{
+            "kind": "ReplicaSet" if kind == "Deployment" else "StatefulSet",
+            "uid": "replicaset-uid" if kind == "Deployment" else "workload-uid", "controller": True}]},
+            "spec": copy.deepcopy(resource["spec"]["template"]["spec"]), "status": {
+            "conditions": [{"type": "Ready", "status": "True"}], "containerStatuses": [{"name": "service", "imageID": image}]}}
+        return resource, live, rs, pod
+
+    def verify(self, resource, live, rs, pod):
+        responses = [live]
+        if resource["kind"] == "Deployment": responses.append({"items": [rs]})
+        responses.append({"items": [pod]})
+        with patch.object(lifecycle, "run", side_effect=[json.dumps(r).encode() for r in responses]):
+            return lifecycle.verify_running(["/bound/kubectl"], resource)
+
+    def test_deployment_and_statefulset_record_owned_runtime(self):
+        for kind in ("Deployment", "StatefulSet"):
+            with self.subTest(kind=kind):
+                self.assertEqual(self.verify(*self.fixture(kind))[0]["workloadUid"], "workload-uid")
+
+    def test_ready_foreign_pods_are_rejected_even_with_approved_image(self):
+        for kind in ("Deployment", "StatefulSet"):
+            for mutation in ("uid", "controller", "namespace"):
+                resource, live, rs, pod = self.fixture(kind)
+                if mutation == "namespace": pod["metadata"]["namespace"] = "foreign"
+                elif mutation == "uid": pod["metadata"]["ownerReferences"][0]["uid"] = "foreign"
+                else: pod["metadata"]["ownerReferences"][0]["controller"] = False
+                with self.subTest(kind=kind, mutation=mutation), self.assertRaisesRegex(RuntimeError, "does not belong"):
+                    self.verify(resource, live, rs, pod)
+
+    def test_foreign_replicaset_cannot_claim_pod_for_deployment(self):
+        resource, live, rs, pod = self.fixture("Deployment")
+        rs["metadata"]["ownerReferences"][0]["uid"] = "another-deployment"
+        with self.assertRaisesRegex(RuntimeError, "does not belong"):
+            self.verify(resource, live, rs, pod)
+
+    def test_deleting_or_identity_changed_workload_is_rejected(self):
+        for mutation in ("uid", "name", "deletionTimestamp"):
+            resource, live, rs, pod = self.fixture("Deployment")
+            live["metadata"][mutation] = "" if mutation == "uid" else "changed"
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(RuntimeError, "workload identity"):
+                self.verify(resource, live, rs, pod)
+
+
 if __name__ == "__main__":
     unittest.main()
