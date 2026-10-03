@@ -399,6 +399,29 @@ def initial_database_capability_resources(stack, artifact, summary, update_id):
     return resources + jobs
 
 
+def verify_database_capabilities_output(stack, component, raw):
+    """Validate bounded untrusted probe stdout, not release/runtime evidence."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate field")
+            result[key] = value
+        return result
+    try:
+        if component not in ("core", "kfe") or type(raw) is not bytes or not 0 < len(raw) <= 4096:
+            raise ValueError("invalid probe input")
+        value = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+            parse_constant=lambda _: (_ for _ in ()).throw(ValueError("non-finite field")))
+        expected = {"schema": "kerosene.cell.migration-capabilities/v1",
+                    "component": component, "operations": ["validate", "migrate"]}
+        if value != expected:
+            raise ValueError("unsupported capabilities")
+        return value
+    except (ValueError, TypeError, UnicodeError, RecursionError) as error:
+        raise stack.ApplyBlockedError("invalid database capabilities output") from error
+
+
 def verify_external_secrets(stack, kubectl, references):
     # A template projects name and key names only; no credential value is
     # emitted, decoded, logged, journaled or included in an error.

@@ -198,6 +198,29 @@ class DatabasePlanTest(unittest.TestCase):
         for job in jobs:
             self.assertEqual(job["spec"]["template"]["spec"]["containers"][0]["env"], [])
 
+    def test_capabilities_output_requires_exact_bounded_component_contract(self):
+        for component in ("core", "kfe"):
+            expected = {"schema": "kerosene.cell.migration-capabilities/v1", "component": component, "operations": ["validate", "migrate"]}
+            raw = json.dumps(expected).encode() + b"\n"
+            self.assertEqual(lifecycle.verify_database_capabilities_output(stack, component, raw), expected)
+            for changed in (dict(expected, extra=True), dict(expected, component="vault"),
+                            dict(expected, schema="unknown"), dict(expected, operations=["migrate", "validate"]),
+                            dict(expected, operations=["validate", "migrate", "clean"])):
+                with self.subTest(changed=changed), self.assertRaises(stack.ApplyBlockedError):
+                    lifecycle.verify_database_capabilities_output(stack, component, json.dumps(changed).encode())
+
+    def test_capabilities_output_rejects_ambiguous_logs_without_echoing_them(self):
+        raw = b'{"schema":"kerosene.cell.migration-capabilities/v1","component":"core","operations":["validate","migrate"]}'
+        invalid = [b"", "not bytes", b"x" * 4097, b"\xff", b"[]", b"null", b"NaN",
+                   b"startup secret-marker\n" + raw, raw + raw,
+                   raw[:-1] + b',"component":"core"}', b"[" * 2000 + b"]" * 2000]
+        for value in invalid:
+            with self.subTest(value_type=type(value).__name__), self.assertRaises(stack.ApplyBlockedError) as error:
+                lifecycle.verify_database_capabilities_output(stack, "core", value)
+            self.assertEqual(str(error.exception), "invalid database capabilities output")
+        with self.assertRaises(stack.ApplyBlockedError):
+            lifecycle.verify_database_capabilities_output(stack, "vault", raw)
+
     def test_migration_job_identity_and_operation_are_not_operator_overrides(self):
         self.refresh()
         update = "sha256:" + "a" * 64

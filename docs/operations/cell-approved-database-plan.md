@@ -87,6 +87,13 @@ policy in staging would not remove DNS access. Before execution, refuse an
 existing probe namespace (including residual Jobs or permissive policies),
 verify live CNI enforcement and apply/verify isolation before creating pods.
 Namespace names and a deny manifest alone cannot establish that protection.
+`verify_database_capabilities_output` accepts at most 4096 bytes of UTF-8 stdout
+containing one exact capabilities object for the expected Core/KFE component.
+Duplicate/extra fields, startup logs, concatenated documents, unsupported
+operations, invalid encoding and non-finite JSON are rejected without echoing
+stdout. The collector must bound subprocess/log collection before calling it;
+this parser does not bound an already allocated input. It validates syntax and
+contract only, not pod UID, image identity, exit status or network isolation.
 Retain failed probe evidence; do not automatically delete namespaces or adopt
 leftover workloads. Explicit recovery must verify ownership and actual resources.
 
