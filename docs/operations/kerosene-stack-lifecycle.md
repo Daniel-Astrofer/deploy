@@ -122,8 +122,11 @@ in the inventory; this does not implement their replica-by-replica update.
 Runtime checks additionally require a non-deleting workload UID and pod ownership
 by that StatefulSet, or by a ReplicaSet controlled by that Deployment UID.
 A ready pod with matching labels/images but foreign ownership is not accepted.
-Receipts include workload and pod UIDs. This verifies ownership, not the active
-ReplicaSet revision, full runtime configuration or financial/quorum readiness;
+Receipts include workload/pod UIDs and rollout revision. Deployment pods must be
+owned by ReplicaSets with the current Deployment revision; StatefulSets must
+have equal current/update revisions and matching pod revision labels. Ready
+pods from an older revision are rejected even when their image is unchanged.
+This verifies ownership/revision, not full runtime configuration or financial/quorum readiness;
 those broader acceptance gates remain mandatory and unqualified.
 Unidentified/ambiguously identified images, missing runtime components and
 cross-phase colocated containers (including init containers) are unsupported

@@ -585,12 +585,19 @@ def verify_running(kubectl, resource):
         owners = [o for o in resource.get("metadata", {}).get("ownerReferences", []) if o.get("controller") is True]
         return len(owners) == 1 and owners[0].get("kind") == owner_kind and owners[0].get("uid") in owner_uids
     if kind == "Deployment":
+        revision = live["metadata"].get("annotations", {}).get("deployment.kubernetes.io/revision")
+        if not isinstance(revision, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", revision):
+            raise RuntimeError("Deployment lacks a current rollout revision")
         replicasets = json.loads(run(kubectl + ["-n", ns, "get", "replicasets", "-l", labels, "-o", "json"]))["items"]
         owner_uids = {r["metadata"]["uid"] for r in replicasets if r["metadata"].get("uid")
             and r["metadata"].get("namespace") == ns and not r["metadata"].get("deletionTimestamp")
-            and controller(r, "Deployment", {workload_uid})}
+            and controller(r, "Deployment", {workload_uid})
+            and r["metadata"].get("annotations", {}).get("deployment.kubernetes.io/revision") == revision}
         owner_kind = "ReplicaSet"
     else:
+        revision = status.get("updateRevision")
+        if not isinstance(revision, str) or not revision or status.get("currentRevision") != revision:
+            raise RuntimeError("StatefulSet rollout revision is incomplete")
         owner_uids, owner_kind = {workload_uid}, "StatefulSet"
     pods = json.loads(run(kubectl + ["-n", ns, "get", "pods", "-l", labels, "-o", "json"]))["items"]
     active = [p for p in pods if not p["metadata"].get("deletionTimestamp")]
@@ -601,6 +608,8 @@ def verify_running(kubectl, resource):
     for pod in active:
         if pod["metadata"].get("namespace") != ns or not pod["metadata"].get("uid") or not controller(pod, owner_kind, owner_uids):
             raise RuntimeError("live pod does not belong to the updated workload")
+        if kind == "StatefulSet" and pod["metadata"].get("labels", {}).get("controller-revision-hash") != revision:
+            raise RuntimeError("live pod belongs to an old StatefulSet revision")
         readiness = pod.get("status", {}).get("conditions", [])
         if not any(c.get("type") == "Ready" and c.get("status") == "True" for c in readiness):
             raise RuntimeError("live pod is not ready")
@@ -612,7 +621,7 @@ def verify_running(kubectl, resource):
         statuses = pod_status.get("containerStatuses", []) + pod_status.get("initContainerStatuses", [])
         if {s["name"] for s in statuses} != set(images) or any(not s.get("imageID") for s in statuses):
             raise RuntimeError("missing live runtime image identity")
-        records.append({"workloadUid": workload_uid, "podUid": pod["metadata"]["uid"], "images": [{"name": s["name"], "imageID": s["imageID"]} for s in statuses]})
+        records.append({"workloadUid": workload_uid, "revision": revision, "podUid": pod["metadata"]["uid"], "images": [{"name": s["name"], "imageID": s["imageID"]} for s in statuses]})
     return records
 
 

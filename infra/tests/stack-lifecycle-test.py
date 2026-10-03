@@ -387,11 +387,14 @@ class RuntimeOwnershipTest(unittest.TestCase):
             "spec": {"replicas": 1, "template": {"spec": {"containers": [{"name": "service", "image": image}]}}}}
         live = copy.deepcopy(resource)
         live["metadata"].update(uid="workload-uid", generation=1)
+        live["metadata"]["annotations"] = {"deployment.kubernetes.io/revision": "2"}
         live["spec"]["selector"] = {"matchLabels": {"app": "service"}}
         live["status"] = {"observedGeneration": 1, "readyReplicas": 1, "updatedReplicas": 1}
+        live["status"].update(currentRevision="service-revision", updateRevision="service-revision")
         rs = {"metadata": {"uid": "replicaset-uid", "namespace": "kerosene-staging",
+            "annotations": {"deployment.kubernetes.io/revision": "2"},
             "ownerReferences": [{"kind": "Deployment", "uid": "workload-uid", "controller": True}]}}
-        pod = {"metadata": {"uid": "pod-uid", "namespace": "kerosene-staging", "ownerReferences": [{
+        pod = {"metadata": {"uid": "pod-uid", "namespace": "kerosene-staging", "labels": {"controller-revision-hash": "service-revision"}, "ownerReferences": [{
             "kind": "ReplicaSet" if kind == "Deployment" else "StatefulSet",
             "uid": "replicaset-uid" if kind == "Deployment" else "workload-uid", "controller": True}]},
             "spec": copy.deepcopy(resource["spec"]["template"]["spec"]), "status": {
@@ -431,6 +434,28 @@ class RuntimeOwnershipTest(unittest.TestCase):
             resource, live, rs, pod = self.fixture("Deployment")
             live["metadata"][mutation] = "" if mutation == "uid" else "changed"
             with self.subTest(mutation=mutation), self.assertRaisesRegex(RuntimeError, "workload identity"):
+                self.verify(resource, live, rs, pod)
+
+    def test_ready_old_replicaset_is_not_current_rollout(self):
+        resource, live, rs, pod = self.fixture("Deployment")
+        rs["metadata"]["annotations"]["deployment.kubernetes.io/revision"] = "1"
+        with self.assertRaisesRegex(RuntimeError, "does not belong"):
+            self.verify(resource, live, rs, pod)
+
+    def test_statefulset_requires_completed_revision_and_current_pod(self):
+        for mutation in ("current", "pod", "missing"):
+            resource, live, rs, pod = self.fixture("StatefulSet")
+            if mutation == "current": live["status"]["currentRevision"] = "old"
+            elif mutation == "pod": pod["metadata"]["labels"]["controller-revision-hash"] = "old"
+            else: live["status"].pop("updateRevision")
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(RuntimeError, "revision"):
+                self.verify(resource, live, rs, pod)
+
+    def test_deployment_missing_or_malformed_revision_is_not_accepted(self):
+        for revision in (None, "0", "-1", 2, "2x"):
+            resource, live, rs, pod = self.fixture("Deployment")
+            live["metadata"]["annotations"]["deployment.kubernetes.io/revision"] = revision
+            with self.subTest(revision=revision), self.assertRaisesRegex(RuntimeError, "revision"):
                 self.verify(resource, live, rs, pod)
 
 
