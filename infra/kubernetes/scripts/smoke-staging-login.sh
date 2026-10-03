@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KUBECTL="${KUBECTL:-kubectl}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/smoke-cluster-binding.sh"
 NS="${KEROSENE_STAGING_NAMESPACE:-kerosene-staging}"
 PORT="${KEROSENE_STAGING_LOGIN_PORT:-18080}"
 TMP_DIR="$(mktemp -d)"
@@ -20,7 +21,7 @@ trap cleanup EXIT
 
 decode_secret() {
   local key="$1"
-  "$KUBECTL" -n "$NS" get secret staging-smoke-credentials \
+  "${KUBECTL_COMMAND[@]}" -n "$NS" get secret staging-smoke-credentials \
     -o "jsonpath={.data.${key}}" | base64 --decode
 }
 
@@ -31,7 +32,7 @@ password="$(decode_secret password)"
   exit 1
 }
 
-"$KUBECTL" -n "$NS" port-forward service/server "${PORT}:8080" >"$PF_LOG" 2>&1 &
+"${KUBECTL_COMMAND[@]}" -n "$NS" port-forward service/server "${PORT}:8080" >"$PF_LOG" 2>&1 &
 PF_PID=$!
 
 for _ in $(seq 1 30); do

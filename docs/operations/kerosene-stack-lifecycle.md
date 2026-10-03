@@ -152,6 +152,18 @@ implementation capabilities exist and their integration tests pass:
 2. Migration execution and actual tested recovery integrated into the phases.
 3. Node/Vault replica-by-replica rollout preserving real quorum and identities.
 4. Live OCI qualification of the integrated Admin artifact installation.
+5. Complete-Cell acceptance checks covering actual protocol/readiness, not just
+   the legacy single-Vault health and Core login scripts.
+
+The installed legacy smoke subprocesses now receive the bootstrap's explicit
+kubectl executable, kubeconfig and context, after rechecking cluster UID at the
+end of rollout. Bound probes reject inherited tool/namespace/port overrides.
+The default unbound scripts remain available only for their legacy manual use.
+These probes still use a loopback login and insecure TLS single-Vault health;
+they are not authenticated full-quorum, financial readiness or data-recovery
+qualification. Their checkpoint explicitly records `completeCellAcceptance=false`.
+The dedicated acceptance capability blocker prevents them from being promoted
+to complete-Cell success by removing an unrelated execution blocker.
 
 Also required for final Cell acceptance: authoritative complete-Cell compatibility
 checks behind the implemented signed Core Bank read producer,

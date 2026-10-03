@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-KUBECTL="${KUBECTL:-kubectl}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/smoke-cluster-binding.sh"
 NAMESPACE="${KEROSENE_STAGING_VAULT_NAMESPACE:-kerosene-staging-vault}"
 PORT="${KEROSENE_STAGING_VAULT_SMOKE_PORT:-17801}"
 LOG_FILE="$(mktemp "${TMPDIR:-/tmp}/kerosene-vault-port-forward.XXXXXX.log")"
@@ -20,7 +21,7 @@ command -v curl >/dev/null 2>&1 || {
   exit 127
 }
 
-"$KUBECTL" -n "$NAMESPACE" port-forward deployment/vault "${PORT}:7801" \
+"${KUBECTL_COMMAND[@]}" -n "$NAMESPACE" port-forward deployment/vault "${PORT}:7801" \
   >"$LOG_FILE" 2>&1 &
 PORT_FORWARD_PID=$!
 

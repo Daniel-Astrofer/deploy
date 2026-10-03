@@ -255,8 +255,10 @@ No runtime manifest, signer, cluster, retained snapshots or custody state change
    distribution/reconciliation service.
 5. **Installation/update execution:** qualify the integrated Admin OCI installation, ordered migrations
    with tested data recovery and replica-by-replica Node/Vault rollout preserving
-   quorum. All four explicit `infra/stack/lifecycle.py` execution blockers remain
-   present (Admin now reports integrated-but-not-qualified); do not remove them as flags.
+   quorum. The execution capability blockers remain present (Admin now reports
+   integrated-but-not-qualified); do not remove them as flags. A separate
+   complete-Cell acceptance blocker also prevents legacy smokes being mistaken
+   for whole-service qualification.
 6. **Real restore qualification:** resolve retained WFFC pilot binding failure,
    obtain authorized lab capacity, run the actual ten-volume restore CLI and
    qualify failure/recovery matrices including genuine LND state. No live final

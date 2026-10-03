@@ -40,6 +40,7 @@ jobs:
           python3 infra/tests/stack-archive-test.py
           python3 infra/tests/stack-lifecycle-test.py
           python3 -B infra/tests/stack-admin-install-test.py
+          python3 -B infra/tests/smoke-cluster-binding-test.py
           python3 -B infra/tests/stack-publication-test.py
           bash infra/tests/staging-snapshot-workflow-test.sh
 

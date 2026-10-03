@@ -107,8 +107,14 @@ class DeploymentTest(unittest.TestCase):
         events = []
         # Test orchestration only: capabilities and readiness are mocked. This
         # deliberately provides no qualification for live apply or quorum.
-        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value={"cellId": "unit"}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run"), patch.dict(lifecycle.os.environ, {}, clear=True):
+        config = {"cellId": "unit", "cluster": {"kubeconfig": "/protected/cell.conf", "context": "cell-a"}}
+        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value=config), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]) as binding, patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run") as run, patch.dict(lifecycle.os.environ, {}, clear=True):
             lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
+            self.assertEqual(binding.call_count, 2)
+            smokes = [call.args[0] for call in run.call_args_list if call.args[0][0] == "bash"]
+            self.assertEqual(len(smokes), 2)
+            for command in smokes:
+                self.assertEqual(command[-4:], ["--cell-binding", "/bound-kubectl", "/protected/cell.conf", "cell-a"])
         for name in ["core", "kfe"]:
             for consumer in ["core", "kfe"]:
                 self.assertLess(events.index(("apply", name)), events.index(("ready", consumer)))
@@ -122,6 +128,15 @@ class DeploymentTest(unittest.TestCase):
             with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components"):
                 lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=True, cell_dir="unit-only"), lambda *_: None)
             apply.assert_not_called()
+
+    def test_smoke_overrides_block_before_any_resource_write(self):
+        from types import SimpleNamespace
+        for variable in ["KEROSENE_STAGING_NAMESPACE", "KEROSENE_STAGING_VAULT_NAMESPACE",
+                         "KEROSENE_STAGING_LOGIN_PORT", "KEROSENE_STAGING_VAULT_SMOKE_PORT"]:
+            with self.subTest(variable=variable), patch.object(lifecycle, "load_config", return_value={}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]), patch.object(lifecycle, "apply_resource") as apply, patch.dict(lifecycle.os.environ, {variable: "unapproved"}, clear=True):
+                with self.assertRaisesRegex(stack.ApplyBlockedError, "override environment"):
+                    lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=True, cell_dir="unit-only"), lambda *_: None)
+                apply.assert_not_called()
 
     def test_v3_matches_actual_static_consensus_capabilities_and_integer_range(self):
         release = copy.deepcopy(self.release)

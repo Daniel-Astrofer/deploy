@@ -31,6 +31,7 @@ EXECUTION_BLOCKERS = (
     "migration-executor-and-tested-recovery-not-integrated",
     "node-vault-replica-quorum-rollout-not-qualified",
     "admin-artifact-installation-not-qualified",
+    "complete-cell-acceptance-not-qualified",
 )
 
 
@@ -245,7 +246,9 @@ def execute(stack, artifact, summary, args, checkpoint):
     verify_bootstrap_trust(stack, args.cell_dir, config)
     kubectl = kubectl_command(stack, config)
     # No inherited tool wrappers or gate bypasses in the approved path.
-    if any(os.environ.get(k) for k in ("KUBECTL", "KEROSENE_SKIP_STAGING_SMOKES", "KEROSENE_FORCE_CONFLICTS")):
+    if any(os.environ.get(k) for k in ("KUBECTL", "KEROSENE_SKIP_STAGING_SMOKES", "KEROSENE_FORCE_CONFLICTS",
+                                     "KEROSENE_STAGING_NAMESPACE", "KEROSENE_STAGING_VAULT_NAMESPACE",
+                                     "KEROSENE_STAGING_LOGIN_PORT", "KEROSENE_STAGING_VAULT_SMOKE_PORT")):
         raise stack.ApplyBlockedError("approved execution forbids tool/gate override environment variables")
     prerequisites = [r for r in artifact["resources"] if r["kind"] not in WORKLOADS]
     phases = workload_phases(stack, artifact, summary)
@@ -282,8 +285,13 @@ def execute(stack, artifact, summary, args, checkpoint):
         # Existing operational gates execute from installed controller, not
         # executable content supplied in source/archive artifacts.
         root = Path(stack.__file__).resolve().parents[1]
+        # Recheck the bound cluster identity after rollout, then pin all smoke
+        # subprocesses too. Legacy scripts alone used the ambient context.
+        kubectl = kubectl_command(stack, config)
+        binding = ["--cell-binding", kubectl[0], config["cluster"]["kubeconfig"], config["cluster"]["context"]]
         for script in ("smoke-staging-vault.sh", "smoke-staging.sh"):
-            run(["bash", str(root / "infra/kubernetes/scripts" / script)])
+            run(["bash", str(root / "infra/kubernetes/scripts" / script), *binding])
+        checkpoint("legacy-smokes-passed", {"completeCellAcceptance": False})
 
 
 def load_config(stack, directory):
