@@ -133,6 +133,50 @@ class DatabasePlanTest(unittest.TestCase):
         example = json.loads((ROOT / "stack/examples/initial-database-plan.example.json").read_text())
         self.assertEqual(example["scriptDigests"], self.plan["scriptDigests"])
 
+    def test_migration_jobs_are_inert_fixed_commands_with_only_migration_credentials(self):
+        self.refresh()
+        update = "sha256:" + "a" * 64
+        with patch.object(lifecycle, "run") as run:
+            jobs = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update)
+            run.assert_not_called()
+        self.assertEqual(len(jobs), 2)
+        for component, job in zip(("core", "kfe"), jobs):
+            self.assertLessEqual(len(job["metadata"]["name"]), 63)
+            self.assertEqual(job["metadata"]["annotations"]["kerosene.io/update-id"], update)
+            self.assertEqual(job["spec"]["backoffLimit"], 0)
+            self.assertNotIn("ttlSecondsAfterFinished", job["spec"])
+            pod = job["spec"]["template"]["spec"]
+            self.assertEqual(pod["restartPolicy"], "Never")
+            self.assertIs(pod["automountServiceAccountToken"], False)
+            self.assertNotIn("initContainers", pod)
+            container = pod["containers"][0]
+            self.assertEqual(container["image"], self.fixture.summary["services"][component]["image"])
+            self.assertEqual(container["command"], ["java", "-XX:+ExitOnOutOfMemoryError", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"])
+            self.assertEqual(container["args"], ["--cell-migration=migrate"])
+            self.assertEqual(len(container["env"]), 3)
+            self.assertTrue(all(entry["valueFrom"]["secretKeyRef"]["name"] == component + "-migration" for entry in container["env"]))
+            self.assertNotIn("ports", container)
+            self.assertNotIn("envFrom", container)
+            self.assertIs(container["securityContext"]["readOnlyRootFilesystem"], True)
+            self.assertEqual(job["spec"]["template"]["metadata"]["labels"]["app.kubernetes.io/name"], "cell-database-migration")
+
+    def test_migration_job_identity_and_operation_are_not_operator_overrides(self):
+        self.refresh()
+        update = "sha256:" + "a" * 64
+        first = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update)
+        self.assertEqual(first, lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update))
+        for operation in ("clean", "repair", "baseline", "resume", "migrate;sh"):
+            with self.subTest(operation=operation), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update, operation)
+        validate = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update, "validate")
+        self.assertNotEqual(first[0]["metadata"]["name"], validate[0]["metadata"]["name"])
+        other = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, "sha256:" + "b" * 64)
+        self.assertNotEqual(first[0]["metadata"]["name"], other[0]["metadata"]["name"])
+        self.plan["services"]["core"]["database"] = "changed_core_database"
+        self.refresh()
+        changed = lifecycle.initial_database_migration_jobs(stack, self.artifact, self.fixture.summary, update)
+        self.assertNotEqual(first[0]["metadata"]["name"], changed[0]["metadata"]["name"])
+
     def test_wrong_workload_image_and_environment_contradictions_rejected(self):
         target = next(r for r in self.artifact["resources"] if r["kind"] == "Deployment" and r["metadata"]["name"] == "core")
         container = target["spec"]["template"]["spec"]["containers"][0]

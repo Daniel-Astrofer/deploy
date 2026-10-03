@@ -334,6 +334,47 @@ def initial_database_plan(stack, artifact, summary=None):
         raise stack.ApplyBlockedError("invalid approved initial database plan") from error
 
 
+def initial_database_migration_jobs(stack, artifact, summary, update_id, operation="migrate"):
+    """Build inert controller-owned Jobs; never submit/start them here.
+
+    This fixed command bypasses image/application startup flags. Jobs use only
+    migration credentials and distinct labels, never runtime Service/PDB labels.
+    Scheduling, bound-target verification and recovery are still unqualified.
+    """
+    stack.require_digest(update_id, "database migration update identity")
+    if operation not in ("validate", "migrate"):
+        raise stack.ApplyBlockedError("unsupported database migration operation")
+    plan = initial_database_plan(stack, artifact, summary)
+    if plan is None:
+        raise stack.ApplyBlockedError("database migration Jobs require an approved initial plan")
+    plan_digest = digest(plan)
+    jobs = []
+    for component in ("core", "kfe"):
+        reference = plan["services"][component]["migrationSecret"]
+        image = summary["services"][component]["image"]
+        key = digest({"updateId": update_id, "planDigest": plan_digest, "component": component, "operation": operation})[7:47]
+        labels = {"app.kubernetes.io/name": "cell-database-migration", "kerosene.io/migration-component": component}
+        jobs.append({"apiVersion": "batch/v1", "kind": "Job", "metadata": {
+            "name": f"cell-db-{component}-{operation}-{key}", "namespace": "kerosene-staging", "labels": labels,
+            "annotations": {"kerosene.io/update-id": update_id, "kerosene.io/database-plan-digest": plan_digest}},
+            "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 300, "template": {
+                "metadata": {"labels": labels}, "spec": {
+                    "restartPolicy": "Never", "automountServiceAccountToken": False,
+                    "securityContext": {"runAsNonRoot": True, "runAsUser": 65532, "runAsGroup": 65532,
+                                        "fsGroup": 65532, "seccompProfile": {"type": "RuntimeDefault"}},
+                    "containers": [{"name": "migration", "image": image, "imagePullPolicy": "IfNotPresent",
+                        "command": ["java", "-XX:+ExitOnOutOfMemoryError", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"],
+                        "args": ["--cell-migration=" + operation],
+                        "env": [{"name": variable, "valueFrom": {"secretKeyRef": {"name": reference["name"], "key": reference[field]}}}
+                                for variable, field in (("SPRING_DATASOURCE_URL", "urlKey"), ("SPRING_DATASOURCE_USERNAME", "usernameKey"), ("SPRING_DATASOURCE_PASSWORD", "passwordKey"))],
+                        "resources": {"requests": {"cpu": "100m", "memory": "256Mi"}, "limits": {"cpu": "1", "memory": "1Gi"}},
+                        "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
+                                            "capabilities": {"drop": ["ALL"]}},
+                        "volumeMounts": [{"name": "temporary", "mountPath": "/tmp"}]}],
+                    "volumes": [{"name": "temporary", "emptyDir": {"sizeLimit": "64Mi"}}]}}}})
+    return jobs
+
+
 def verify_external_secrets(stack, kubectl, references):
     # A template projects name and key names only; no credential value is
     # emitted, decoded, logged, journaled or included in an error.

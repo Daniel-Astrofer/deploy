@@ -59,3 +59,32 @@ durable evidence **before** admitting Core/KFE startup. It must retain partial
 targets and require explicit recovery rather than drop/adopt/re-enable them.
 Existing installations need a separately tested history/data transition. Neither
 plan validation nor a valid script digest activates signers or proves recovery.
+
+## Migration Job preparation
+
+`initial_database_migration_jobs` now builds inert Core/KFE Job specifications
+from the validated plan and approved image identities. It does not submit them.
+The fixed Java command runs `/app/app.jar` with exactly one migration argument;
+no shell, arbitrary hook, image startup script or workload command is reused.
+Only three datasource variables from the service's migration Secret are supplied.
+Runtime/custody configuration, ports and runtime Service/PDB labels are not copied.
+
+Jobs are nonroot, read-only apart from bounded `/tmp`, without service-account
+tokens, extra capabilities, init containers or automatic retries. They have a
+five-minute deadline and no automatic TTL cleanup. Names bind update identity,
+plan digest, component and operation; complete identities remain in annotations.
+Existing Jobs must still be matched by actual UID/spec and journal ownership
+before the future executor could resume them. Names alone are not completion proof.
+
+Generated Jobs do not enter the deployment resource allowlist: callers still
+cannot supply arbitrary archive Jobs. Before execution, the controller must
+verify actual database target/role identity, provide independently approved TLS
+trust and registry access, and qualify a migration-specific NetworkPolicy. It
+must await and verify each migration result before admitting application startup,
+with explicit recovery on timeout/failure. These mechanisms and live OCI/cluster
+qualification remain incomplete; execution capability blockers stay unchanged.
+In particular, a signed old image may ignore `--cell-migration` and start Spring
+normally. Never run these specifications with migration credentials merely
+because the image digest is approved. An independently verified build and isolated
+OCI test must prove that the exact image implements the migration-only contract
+without HTTP/workers or financial startup effects before Job execution is allowed.
