@@ -60,9 +60,9 @@ HTTP listener, proof verification and real restricted-role PostgreSQL consumptio
 missing client certificates, duplicated JSON and altered operator are refused;
 consumption succeeds once, replay is refused, and exact recovery inspection
 returns the retained digest. The listener is a disposable test server. Production
-listener/configuration wiring, audit, live cluster revalidation
-and controller integration remain pending; no public service is started by the
-CLI or tests outside the explicit lab.
+command-level qualification, durable audit retention, live cluster revalidation
+and controller integration remain pending. Only explicit `serve-admission`
+starts a service; verification commands never open a listener.
 
 `newAdmissionServer` prepares (but does not bind) the server with fixed mandatory
 client-certificate verification, explicit client CA/server certificate, TLS >=1.2,
@@ -73,8 +73,41 @@ authorization. HTTP/2 and session tickets are disabled in this initial boundary.
 The lab uses this configuration for real HTTP mTLS/SQL qualification and verifies
 that caller-side policy changes do not alter the active snapshot. Weak TLS modes
 are refused before anchor validation. A transport error logger is mandatory;
-production configuration loader, protected PKI references, service command,
-audited operation events and cluster revalidation still need integration.
+durable audit retention and cluster revalidation still need integration.
+
+The prepared server logs each HTTP operation, verified operator identity, a
+shape-validated Cell identifier and selected response status. Unverified identity
+is recorded as such; certificate headers, tokens, nonces, signatures and proof
+bodies are not logged. The status is not evidence of response delivery or a
+durable external audit record. A lost response after consumption still requires
+recovery inspection.
+
+`AdmissionServiceConfig` now defines the protected service profile with exact-byte
+SHA256 pinning supplied independently by the operator. Strict decoding refuses
+unknown or duplicate fields, including inline registry passwords. It references
+the separately pinned anchor/operator policy and protected server/client PKI and
+registry credential files. Loading the profile is structural validation only;
+authority loading and server preparation remain separate checks. This helper
+does not start a listener, qualify a live cluster, provision credentials or
+authorize installation.
+
+The explicit `serve-admission --service-config /absolute/profile.json
+--service-config-digest <independently-provisioned-sha256>` command loads these
+references, verifies the registry's connected database/user, and prepares the
+fixed mandatory-mTLS server before binding. SIGINT/SIGTERM stop new requests and
+allow up to 45 seconds for active requests; forced shutdown requires inspection
+of uncertain consumption. Restart retains registry records and does not reuse
+nonces. It creates no roles, certificates, policies or Cell workloads. The
+compiled command/signal qualification, live cluster binding
+revalidation and installation controller integration remain pending. Do not
+interpret a successfully started admission listener as complete Cell acceptance.
+
+The opt-in real PostgreSQL/TLS harness also exercises `runAdmissionService`, the
+command's execution path: protected profile/anchor/operator policy and PKI are
+loaded, the connected database/user are verified, and a real mTLS HTTP request
+inspects a previously consumed admission without authorizing installation.
+Context cancellation shuts down this listener successfully. This is not yet a
+subprocess CLI/SIGTERM test or a live Bank/Cell installation qualification.
 
 `admissionOperatorIdentity` derives transport identity from the actual completed
 mandatory-mTLS listener state, verified certificate chain, current certificate
@@ -106,7 +139,7 @@ independently provisioned with the service. Duplicate JSON keys, unknown fields,
 empty/ambiguous policy, shared-writable files and digest changes are refused.
 Neither a caller-supplied hash nor a hash computed merely to trust a candidate
 file is an authority. The TLS fixture loads a pinned policy before authentication.
-Policy loader plumbing into a production service remains pending; no auto-reload
+The service loads this policy at startup; no auto-reload
 or policy-write endpoint exists. Rotation requires externally reviewed provisioning
 and explicit service restart, not admission request contents.
 

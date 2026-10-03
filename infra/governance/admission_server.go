@@ -64,7 +64,7 @@ func newAdmissionServer(address string, handler *admissionHTTPHandler, config *t
 	if strictDecode(encoded, &snapshot) != nil {
 		return nil, errors.New("invalid admission policy snapshot")
 	}
-	frozen := &admissionHTTPHandler{DB: handler.DB, Anchor: snapshot.Anchor, Operators: snapshot.Operators, Cells: snapshot.Cells}
+	frozen := &admissionHTTPHandler{DB: handler.DB, Anchor: snapshot.Anchor, Operators: snapshot.Operators, Cells: snapshot.Cells, Audit: logger}
 	secure := config.Clone()
 	secure.ClientCAs = config.ClientCAs.Clone()
 	secure.NameToCertificate = nil

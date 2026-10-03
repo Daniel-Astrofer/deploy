@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -28,52 +29,63 @@ type admissionHTTPHandler struct {
 	Anchor    TrustAnchor
 	Operators map[string]AdmissionOperatorGrant
 	Cells     map[string]string
+	Audit     *log.Logger
 	mu        sync.Mutex
 	active    int
 }
 
 func (h *admissionHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	status := http.StatusOK
+	operation, actor, auditCell := "unknown", "unverified", "unverified"
+	defer func() {
+		if h.Audit != nil {
+			h.Audit.Printf("bank-admission operation=%s operator=%s cell=%s status=%d", operation, actor, auditCell, status)
+		}
+	}()
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	reject := func(status int, code string) {
-		w.WriteHeader(status)
+	deny := func(codeStatus int, code string) {
+		// Record the selected response, not proof that a remote client received it.
+		// A committed consumption can still have an uncertain/lost response.
+		status = codeStatus
+		w.WriteHeader(codeStatus)
 		json.NewEncoder(w).Encode(map[string]string{"code": code})
 	}
-	operation := ""
 	switch r.URL.Path {
 	case "/v1/cell/admissions/consume":
 		operation = "consume"
 	case "/v1/cell/admissions/inspect-recovery":
 		operation = "inspect-recovery"
 	default:
-		reject(http.StatusNotFound, "route_unknown")
+		deny(http.StatusNotFound, "route_unknown")
 		return
 	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		reject(http.StatusMethodNotAllowed, "method_not_allowed")
+		deny(http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 	if r.URL.RawQuery != "" || r.URL.ForceQuery || r.Header.Get("Content-Type") != "application/json" || r.Header.Get("Content-Encoding") != "" {
-		reject(http.StatusBadRequest, "request_invalid")
+		deny(http.StatusBadRequest, "request_invalid")
 		return
 	}
 	pins, err := admissionOperatorPolicyPins(h.Operators)
 	if err != nil {
-		reject(http.StatusServiceUnavailable, "operator_policy_unavailable")
+		deny(http.StatusServiceUnavailable, "operator_policy_unavailable")
 		return
 	}
 	now := time.Now()
 	identity, err := admissionOperatorIdentity(r.TLS, pins, now)
 	if err != nil {
-		reject(http.StatusForbidden, "operator_certificate_required")
+		deny(http.StatusForbidden, "operator_certificate_required")
 		return
 	}
+	actor = identity
 	h.mu.Lock()
 	if h.active >= 4 {
 		h.mu.Unlock()
-		reject(http.StatusTooManyRequests, "admission_busy")
+		deny(http.StatusTooManyRequests, "admission_busy")
 		return
 	}
 	h.active++
@@ -83,33 +95,36 @@ func (h *admissionHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	r.Body = http.MaxBytesReader(w, r.Body, 8*1024*1024)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
-		reject(http.StatusBadRequest, "request_invalid")
+		deny(http.StatusBadRequest, "request_invalid")
 		return
 	}
 	var request admissionHTTPRequest
 	if strictDecode(raw, &request) != nil || request.Schema != "kerosene.bank-cell-admission-request/v1" ||
 		request.Sequence == 0 || request.Sequence > maxExactJSONInteger || !hashRE.MatchString(request.ReleaseDigest) {
-		reject(http.StatusBadRequest, "request_invalid")
+		deny(http.StatusBadRequest, "request_invalid")
 		return
 	}
 	cell := request.Envelope.Admission.CellID
+	if nameRE.MatchString(cell) {
+		auditCell = cell
+	}
 	operator, err := authorizeAdmissionOperator(r.TLS, h.Operators, cell, operation, now)
 	if err != nil || operator != identity || request.Envelope.Admission.OperatorID != identity {
-		reject(http.StatusForbidden, "operator_scope_denied")
+		deny(http.StatusForbidden, "operator_scope_denied")
 		return
 	}
 	cluster := h.Cells[cell]
 	if !clusterUIDRE.MatchString(cluster) {
-		reject(http.StatusServiceUnavailable, "cell_binding_unavailable")
+		deny(http.StatusServiceUnavailable, "cell_binding_unavailable")
 		return
 	}
 	if h.DB == nil {
-		reject(http.StatusServiceUnavailable, "registry_unavailable")
+		deny(http.StatusServiceUnavailable, "registry_unavailable")
 		return
 	}
 	envelope, err := json.Marshal(request.Envelope)
 	if err != nil {
-		reject(http.StatusBadRequest, "request_invalid")
+		deny(http.StatusBadRequest, "request_invalid")
 		return
 	}
 	binding := AdmissionBinding{CellID: cell, ClusterUID: cluster, OperatorID: identity, ChangeID: request.Envelope.Admission.ChangeID}
@@ -122,7 +137,7 @@ func (h *admissionHTTPHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		result, err = inspectConsumedCellAdmission(ctx, h.DB, h.Anchor, request.Proof, request.ReleaseDigest, request.Sequence, envelope, binding, now)
 	}
 	if err != nil {
-		reject(http.StatusConflict, "admission_unverified_or_recovery_required")
+		deny(http.StatusConflict, "admission_unverified_or_recovery_required")
 		return
 	}
 	// Commit precedes response. A lost response is uncertain; clients must inspect

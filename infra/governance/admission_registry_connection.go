@@ -19,9 +19,14 @@ import (
 )
 
 type RegistryConnectionConfig struct {
-	Host, Database, User                                string
-	Port                                                int
-	CAFile, ClientCertFile, ClientKeyFile, PasswordFile string
+	Host           string `json:"host"`
+	Database       string `json:"database"`
+	User           string `json:"user"`
+	Port           int    `json:"port"`
+	CAFile         string `json:"caFile"`
+	ClientCertFile string `json:"clientCertFile"`
+	ClientKeyFile  string `json:"clientKeyFile"`
+	PasswordFile   string `json:"passwordFile"`
 }
 
 func registryCredentialFile(path string, private bool) ([]byte, error) {

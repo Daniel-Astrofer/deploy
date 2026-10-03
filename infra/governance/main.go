@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
+	standardlog "log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,7 +18,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		fail(fmt.Errorf("use serve, verify or verify-admission"))
+		fail(fmt.Errorf("use serve, serve-admission, verify or verify-admission"))
 	}
 	flags := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	policyPath := flags.String("policy", "", "operator-provisioned static governance proposer policy")
@@ -31,10 +33,26 @@ func main() {
 	clusterUID := flags.String("cluster-uid", "", "independently observed live kube-system UID")
 	operatorID := flags.String("operator-id", "", "independently authenticated operator identity")
 	changeID := flags.String("change-id", "", "audited change identity")
+	serviceConfig := flags.String("service-config", "", "protected Bank admission service configuration")
+	serviceDigest := flags.String("service-config-digest", "", "independently provisioned exact-byte configuration SHA256")
 	if err := flags.Parse(os.Args[2:]); err != nil {
 		fail(err)
 	}
 	switch os.Args[1] {
+	case "serve-admission":
+		flags.Visit(func(f *flag.Flag) {
+			if f.Name != "service-config" && f.Name != "service-config-digest" {
+				fail(fmt.Errorf("unsupported admission service flag"))
+			}
+		})
+		if flags.NArg() != 0 {
+			fail(fmt.Errorf("admission service refuses positional arguments"))
+		}
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+		defer cancel()
+		if err := runAdmissionService(ctx, *serviceConfig, *serviceDigest, standardlog.New(os.Stderr, "", standardlog.LstdFlags|standardlog.LUTC)); err != nil {
+			fail(err)
+		}
 	case "verify", "verify-admission":
 		raw, err := boundedRead(*anchorPath)
 		if err != nil {
