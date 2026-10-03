@@ -95,6 +95,46 @@ class DeploymentTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaisesRegex(stack.ReleaseValidationError, "canonical Ed25519"):
                 stack.validate_roster(str(self.path), self.summary)
 
+    def test_vault_compatibility_attestation_binds_all_sources_artifacts_and_threshold(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        attestation = {"schema": stack.VAULT_COMPATIBILITY_SCHEMA, "releaseId": self.summary["releaseId"],
+            "networkId": self.summary["networkId"], "sequence": self.summary["sequence"],
+            "sourceBundleDigest": self.summary["sourceBundle"]["digest"],
+            "repositoryCommits": self.summary["repositories"], "services": self.summary["services"],
+            "migrationRecoveryEvidenceDigest": self.summary["migration"]["recoveryEvidenceDigest"],
+            "rebuildEvidenceDigest": "sha256:" + "d" * 64, "sbomSetDigest": "sha256:" + "e" * 64,
+            "provenanceSetDigest": "sha256:" + "f" * 64,
+            "verifiedAt": (now - dt.timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
+            "expiresAt": (now + dt.timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "signatures": [{"synthetic": True}]}
+        summary = copy.deepcopy(self.summary)
+        summary["vaultCompatibility"]["attestationDigest"] = stack.canonical_digest(attestation)
+        attestation_path = self.root / "vault-attestation.json"
+        roster_path = self.root / "vault-roster.json"
+        attestation_path.write_text(json.dumps(attestation))
+        roster = {"schema": stack.VAULT_ROSTER_SCHEMA, "networkId": summary["networkId"],
+                  "members": {f"vault-{index}": base64.b64encode(stack.TUF_ED25519_SPKI_PREFIX + bytes([index]) * 32).decode()
+                              for index in range(summary["vaultCompatibility"]["members"])}}
+        roster_path.write_text(json.dumps(roster))
+        with patch.object(stack, "verify_signature_set", return_value=summary["vaultCompatibility"]["threshold"]) as verify:
+            result = stack.verify_vault_compatibility_attestation(self.release, summary, str(attestation_path), str(roster_path))
+        self.assertEqual(result["signaturesVerified"], summary["vaultCompatibility"]["threshold"])
+        self.assertEqual(len(verify.call_args.args[2]), summary["vaultCompatibility"]["members"])
+        changed = copy.deepcopy(attestation)
+        changed["services"]["vault"]["image"] = changed["services"]["core"]["image"]
+        attestation_path.write_text(json.dumps(changed))
+        summary["vaultCompatibility"]["attestationDigest"] = stack.canonical_digest(changed)
+        with self.assertRaises(stack.ReleaseValidationError):
+            stack.verify_vault_compatibility_attestation(self.release, summary, str(attestation_path), str(roster_path))
+
+    def test_vault_roster_requires_distinct_independent_keys(self):
+        key = base64.b64encode(stack.TUF_ED25519_SPKI_PREFIX + b"x" * 32).decode()
+        roster = {"schema": stack.VAULT_ROSTER_SCHEMA, "networkId": self.summary["networkId"],
+                  "members": {f"vault-{index}": key for index in range(self.summary["vaultCompatibility"]["members"])}}
+        self.path.write_text(json.dumps(roster))
+        with self.assertRaisesRegex(stack.ReleaseValidationError, "distinct canonical"):
+            stack.validate_vault_roster(str(self.path), self.summary)
+
     def test_signature_counter_cannot_count_aliases_of_one_key_as_quorum(self):
         key = stack.TUF_ED25519_SPKI_PREFIX + b"x" * 32
         with patch.object(stack, "verify_ed25519") as verify, self.assertRaisesRegex(stack.ReleaseValidationError, "duplicate public keys"):
@@ -492,9 +532,11 @@ class DeploymentTest(unittest.TestCase):
         from types import SimpleNamespace
         summary = copy.deepcopy(self.summary)
         summary["_releaseBytes"] = b"unit-only"
-        args = SimpleNamespace(release="unit.json", bft_receipt="receipt.json", validator_roster="roster.json", bank_observer_report="bank.json", state_dir="unit-state", environment="staging-cell", json=True)
+        args = SimpleNamespace(release="unit.json", bft_receipt="receipt.json", validator_roster="roster.json",
+                               vault_roster="vault-roster.json", vault_compatibility_attestation="vault.json",
+                               bank_observer_report="bank.json", state_dir="unit-state", environment="staging-cell", json=True)
         # Notice routing unit test; crypto and real consensus are tested separately.
-        with patch.object(stack, "load_and_validate", return_value=(self.release, summary)), patch.object(stack, "verify_tuf_authorization", return_value={"signatureVerified": True}), patch.object(stack, "verify_consensus_authorization", return_value={"signaturesVerified": 3}), patch.object(stack, "verify_bank_observer_report", return_value={"compatibleObservers": 3}), patch.object(stack, "read_existing_update_state") as state:
+        with patch.object(stack, "load_and_validate", return_value=(self.release, summary)), patch.object(stack, "verify_tuf_authorization", return_value={"signatureVerified": True}), patch.object(stack, "verify_consensus_authorization", return_value={"signaturesVerified": 3}), patch.object(stack, "verify_vault_compatibility_attestation", return_value={"signaturesVerified": 2}), patch.object(stack, "verify_bank_observer_report", return_value={"compatibleObservers": 3}), patch.object(stack, "read_existing_update_state") as state:
             state.return_value = None
             output = StringIO()
             with redirect_stdout(output):

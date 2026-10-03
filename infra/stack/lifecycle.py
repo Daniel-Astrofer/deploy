@@ -33,7 +33,7 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 # Remove a blocker only with the corresponding implementation and integration
 # test; signed evidence cannot implement an absent runtime safety mechanism.
 EXECUTION_BLOCKERS = (
-    "vault-independent-compatibility-gate-not-integrated",
+    "vault-live-rebuild-provenance-not-qualified",
     "migration-executor-live-recovery-not-qualified",
     "node-vault-replica-quorum-rollout-not-qualified",
     "admin-artifact-installation-not-qualified",
@@ -866,7 +866,7 @@ def verify_bootstrap_trust(stack, directory, config):
     stack.require_keys(config, "Cell configuration", ("schema", "cellId", "environment", "trustDigests", "autoActivateVaultSigners"), ("consensusVerifier", "cluster"))
     if config["schema"] != "kerosene.stack.cell/v1" or config["environment"] != "staging-cell" or config["autoActivateVaultSigners"] is not False:
         raise stack.ReleaseValidationError("unsupported Cell configuration or forbidden signer activation")
-    expected_names = {"tuf-root.json", "validator-roster.json", "snapshot-provider.pub"}
+    expected_names = {"tuf-root.json", "validator-roster.json", "vault-roster.json", "snapshot-provider.pub"}
     if "consensusVerifier" in config:
         expected_names.add("consensus-anchor.json")
     if set(config["trustDigests"]) != expected_names:
@@ -1121,7 +1121,8 @@ def command_init(stack, args):
         command = [shutil.which("kubectl") or "kubectl", "--kubeconfig", str(Path(args.kubeconfig).absolute()), "--context", args.kube_context, "--request-timeout=30s"]
         live = json.loads(run(command + ["get", "namespace", "kube-system", "-o", "json"]))
         cluster = {"kubeconfig": str(Path(args.kubeconfig).absolute()), "context": args.kube_context, "systemNamespaceUid": live["metadata"]["uid"]}
-    sources = {"tuf-root.json": args.tuf_trusted_root, "validator-roster.json": args.validator_roster, "snapshot-provider.pub": args.snapshot_provider_key}
+    sources = {"tuf-root.json": args.tuf_trusted_root, "validator-roster.json": args.validator_roster,
+               "vault-roster.json": args.vault_roster, "snapshot-provider.pub": args.snapshot_provider_key}
     if bool(args.consensus_anchor) != bool(args.consensus_verifier):
         raise stack.ReleaseValidationError("consensus anchor and installed verifier must be provisioned together")
     if args.consensus_anchor:
@@ -1210,6 +1211,7 @@ def add_commands(stack, subcommands):
     init.add_argument("--cell-id", required=True)
     init.add_argument("--tuf-trusted-root", required=True)
     init.add_argument("--validator-roster", required=True)
+    init.add_argument("--vault-roster", required=True)
     init.add_argument("--snapshot-provider-key", required=True)
     init.add_argument("--consensus-anchor", help="independently verified immutable Comet light block and governance policy")
     init.add_argument("--consensus-verifier", help="independently installed verifier executable, pinned by digest at bootstrap")

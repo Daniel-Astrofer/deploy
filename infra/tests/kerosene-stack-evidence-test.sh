@@ -35,6 +35,39 @@ release["schemaVersion"] = 2
 release["authorization"]["tuf"] = {
     "targetPath": f"releases/{release['releaseId']}.json",
 }
+now = dt.datetime.now(dt.timezone.utc)
+vault_keys = root / "vault-keys"
+vault_keys.mkdir()
+for member in range(1, 4):
+    subprocess.run(["openssl", "genpkey", "-algorithm", "Ed25519", "-out", str(vault_keys / f"{member}.key")], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(["openssl", "pkey", "-in", str(vault_keys / f"{member}.key"), "-pubout", "-outform", "DER", "-out", str(vault_keys / f"{member}.pub")], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+vault_roster_path = root / "vault-roster.json"
+vault_roster_path.write_bytes(canonical({"schema": "kerosene.vault-compatibility-roster/v1",
+    "networkId": release["network"]["id"], "members": {
+        f"vault-{member}": base64.b64encode((vault_keys / f"{member}.pub").read_bytes()).decode()
+        for member in range(1, 4)}}))
+vault_attestation = {"schema": "kerosene.vault-compatibility-attestation/v1",
+    "releaseId": release["releaseId"], "networkId": release["network"]["id"], "sequence": release["sequence"],
+    "sourceBundleDigest": release["source"]["bundle"]["digest"],
+    "repositoryCommits": {name: value["commit"] for name, value in release["source"]["repositories"].items()},
+    "services": {name: {"image": value["image"], "configDigest": value["configDigest"]} for name, value in release["services"].items()},
+    "migrationRecoveryEvidenceDigest": release["migration"]["recoveryEvidenceDigest"],
+    "rebuildEvidenceDigest": "sha256:" + "d" * 64, "sbomSetDigest": "sha256:" + "e" * 64,
+    "provenanceSetDigest": "sha256:" + "f" * 64,
+    "verifiedAt": (now - dt.timedelta(minutes=1)).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    "expiresAt": (now + dt.timedelta(days=1)).replace(microsecond=0).isoformat().replace("+00:00", "Z"), "signatures": []}
+vault_payload = canonical({key: value for key, value in vault_attestation.items() if key != "signatures"})
+for member in range(1, 3):
+    payload_path, signature_path = root / f"vault-{member}.payload", root / f"vault-{member}.sig"
+    payload_path.write_bytes(vault_payload)
+    subprocess.run(["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(vault_keys / f"{member}.key"), "-in", str(payload_path), "-out", str(signature_path)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    vault_attestation["signatures"].append({"memberId": f"vault-{member}",
+        "publicKeyDerBase64": base64.b64encode((vault_keys / f"{member}.pub").read_bytes()).decode(),
+        "signatureBase64": base64.b64encode(signature_path.read_bytes()).decode()})
+vault_attestation_path = root / "vault-attestation.json"
+vault_attestation_path.write_bytes(canonical(vault_attestation))
+release["authorization"]["vaultCompatibility"]["attestationDigest"] = digest(canonical(vault_attestation))
+vault_args = ["--vault-roster", str(vault_roster_path), "--vault-compatibility-attestation", str(vault_attestation_path)]
 release_path = root / "release-lock-v2.json"
 release_path.write_bytes(canonical(release))
 release_bytes = release_path.read_bytes()
@@ -71,7 +104,6 @@ def write_tuf(path, document):
 
 tuf_dir = root / "tuf-metadata"
 tuf_dir.mkdir()
-now = dt.datetime.now(dt.timezone.utc)
 expiry = (now + dt.timedelta(days=30)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 root_keys = {keyid: key for _role, (_private, _public, keyid, key) in tuf_keys.items()}
 roles = {
@@ -233,6 +265,7 @@ result = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--bft-receipt", str(receipt_path),
         "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--json",
     ],
@@ -267,6 +300,7 @@ expired_report_result = subprocess.run(
         stack, "verify-release", "--release", release_path,
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(expired_report_path),
     ],
     check=False,
@@ -285,6 +319,7 @@ linked_receipt_result = subprocess.run(
         stack, "verify-release", "--release", release_path,
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--bft-receipt", str(linked_receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
     ],
     check=False,
@@ -308,6 +343,7 @@ tampered_target = subprocess.run(
         stack, "verify-release", "--release", tampered_release_path,
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
     ],
     check=False,
@@ -350,6 +386,7 @@ rotated_verification = subprocess.run(
         stack, "verify-release", "--release", release_path,
         "--tuf-metadata-dir", str(rotated_tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path), "--json",
     ],
     check=True,
@@ -367,6 +404,7 @@ invalid_rotation = subprocess.run(
         stack, "verify-release", "--release", release_path,
         "--tuf-metadata-dir", str(invalid_rotation_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
     ],
     check=False,
@@ -479,6 +517,7 @@ legacy_apply = subprocess.run(
         "--tuf-proof", str(tuf_dir / "timestamp.json"), "--tuf-root-key", str(tuf_root),
         "--tuf-state-dir", str(legacy_proof_state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--snapshot-attestation-request", str(snapshot_request_path),
         "--snapshot-receipt", str(snapshot_path), "--snapshot-provider-key", str(snapshot_provider_root),
@@ -509,6 +548,7 @@ tampered_request_apply = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(tampered_request_state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--snapshot-attestation-request", str(tampered_request_path),
         "--snapshot-receipt", str(snapshot_path), "--snapshot-provider-key", str(snapshot_provider_root),
@@ -536,6 +576,7 @@ unrestored_apply = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(unrestored_state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--snapshot-attestation-request", str(snapshot_request_path),
         "--snapshot-receipt", str(unrestored_snapshot_path), "--snapshot-provider-key", str(snapshot_provider_root),
@@ -565,6 +606,7 @@ tampered_signature_apply = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(tampered_signature_state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--snapshot-attestation-request", str(snapshot_request_path),
         "--snapshot-receipt", str(tampered_snapshot_path),
@@ -596,6 +638,7 @@ untrusted_provider_apply = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(untrusted_provider_state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--snapshot-attestation-request", str(snapshot_request_path),
         "--snapshot-receipt", str(untrusted_provider_snapshot_path),
@@ -618,6 +661,7 @@ applied = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--snapshot-attestation-request", str(snapshot_request_path),
         "--snapshot-receipt", str(snapshot_path),
@@ -650,6 +694,7 @@ check_before_apply = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path), "--state-dir", str(state_dir),
     ],
     check=True,
@@ -684,6 +729,7 @@ rollback_check = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(rollback_tuf_state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
     ],
     check=False,
@@ -703,6 +749,7 @@ check_after_apply = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path), "--state-dir", str(state_dir),
     ],
     check=True,
@@ -721,6 +768,7 @@ replay = subprocess.run(
         "--tuf-metadata-dir", str(tuf_dir), "--tuf-trusted-root", str(tuf_trusted_root),
         "--tuf-state-dir", str(state_dir),
         "--bft-receipt", str(receipt_path), "--validator-roster", str(roster_path),
+        *vault_args,
         "--bank-observer-report", str(report_path),
         "--snapshot-attestation-request", str(snapshot_request_path),
         "--snapshot-receipt", str(snapshot_path),

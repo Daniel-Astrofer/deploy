@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kerosene.invalid/schemas/vault-compatibility-attestation-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "releaseId", "networkId", "sequence", "sourceBundleDigest", "repositoryCommits", "services", "migrationRecoveryEvidenceDigest", "rebuildEvidenceDigest", "sbomSetDigest", "provenanceSetDigest", "verifiedAt", "expiresAt", "signatures"],
+  "properties": {
+    "schema": {"const": "kerosene.vault-compatibility-attestation/v1"},
+    "releaseId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "networkId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"},
+    "sequence": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "sourceBundleDigest": {"$ref": "#/$defs/digest"},
+    "repositoryCommits": {"type": "object", "minProperties": 10, "maxProperties": 10, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+    "services": {"type": "object", "minProperties": 11, "maxProperties": 11, "additionalProperties": {"type": "object", "additionalProperties": false, "required": ["image", "configDigest"], "properties": {"image": {"type": "string", "minLength": 1, "maxLength": 2048}, "configDigest": {"$ref": "#/$defs/digest"}}}},
+    "migrationRecoveryEvidenceDigest": {"$ref": "#/$defs/digest"},
+    "rebuildEvidenceDigest": {"$ref": "#/$defs/digest"},
+    "sbomSetDigest": {"$ref": "#/$defs/digest"},
+    "provenanceSetDigest": {"$ref": "#/$defs/digest"},
+    "verifiedAt": {"type": "string", "format": "date-time"},
+    "expiresAt": {"type": "string", "format": "date-time"},
+    "signatures": {"type": "array", "minItems": 2, "maxItems": 64, "items": {"type": "object", "additionalProperties": false, "required": ["memberId", "publicKeyDerBase64", "signatureBase64"], "properties": {"memberId": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"}, "publicKeyDerBase64": {"type": "string"}, "signatureBase64": {"type": "string"}}}}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+}

@@ -23,8 +23,9 @@ actual installation requires a plan, but no SQL is executed by its validation.
 
 ## Bootstrap and operator workflow
 
-Provision public TUF root, roster, snapshot-provider public key and real
-consensus anchor out of band. Never trust anchors embedded in a downloaded
+Provision public TUF root, governance roster, independent Vault compatibility
+roster, snapshot-provider public key and real consensus anchor out of band.
+Never trust anchors embedded in a downloaded
 candidate. Independently install the governance verifier and approve its
 binary digest. Private keys, sessions and Kubernetes credentials stay outside
 the release archive and update journal.
@@ -33,6 +34,7 @@ the release archive and update journal.
 infra/kerosene-stack init --cell-dir /protected/cell-a --cell-id cell-a \
   --tuf-trusted-root /protected/root.json \
   --validator-roster /protected/roster.json \
+  --vault-roster /protected/vault-roster.json \
   --snapshot-provider-key /protected/snapshot-provider.pub \
   --consensus-anchor /protected/consensus-anchor.json \
   --consensus-verifier /protected/kerosene-release-consensus \
@@ -51,6 +53,17 @@ infrastructure reachability separately from `financialReadinessVerified` and
 execution. The saved explicit context is bound to the `kube-system` namespace
 UID; commands do not use the currently selected kubectl context. A replaced
 cluster requires independent bootstrap, not a journal reset.
+
+The Vault compatibility attestation is separate release evidence. Its complete
+document digest must equal `authorization.vaultCompatibility.attestationDigest`.
+Threshold signatures are checked against the protected bootstrap roster, whose
+members must have distinct canonical Ed25519 keys. The signed payload binds the
+release ID/sequence/network, every repository commit, every service image and
+configuration digest, source bundle, migration recovery evidence, plus external
+rebuild, SBOM and provenance-set digests. It expires within 30 days. Because it
+binds release contents rather than the canonical release-lock digest, the
+release can safely bind the completed signed attestation without a circular
+digest dependency. A downloaded release cannot replace the trusted roster.
 
 With the paired release/manifest inputs, preflight additionally validates exact
 approved configuration digests and inventories mandatory external Secrets in
@@ -270,7 +283,7 @@ qualified; `admin-artifact-installation-not-qualified` remains a live-apply gate
 Real `--apply` is explicitly blocked before mutation until all of these
 implementation capabilities exist and their integration tests pass:
 
-1. Independent Vault compatibility/rebuild gate integrated into apply.
+1. Live independent Vault rebuild/SBOM/provenance qualification for the gate now integrated into apply.
 2. Migration execution and actual tested recovery integrated into the phases.
 3. Node/Vault replica-by-replica rollout preserving real quorum and identities.
 4. Live OCI qualification of the integrated Admin artifact installation.

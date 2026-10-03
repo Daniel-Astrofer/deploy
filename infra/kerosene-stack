@@ -34,6 +34,8 @@ STACK_PLAN_SCHEMA = "kerosene.stack.update-plan/v1"
 RELEASE_RECEIPT_SCHEMA = "kerosene.release-receipt/v1"
 ROSTER_SCHEMA = "kerosene.release-roster/v1"
 OBSERVER_REPORT_SCHEMA = "kerosene.bank-observer-report/v2"
+VAULT_COMPATIBILITY_SCHEMA = "kerosene.vault-compatibility-attestation/v1"
+VAULT_ROSTER_SCHEMA = "kerosene.vault-compatibility-roster/v1"
 SNAPSHOT_RECEIPT_SCHEMA = "kerosene.snapshot-receipt/v2"
 SNAPSHOT_ATTESTATION_REQUEST_SCHEMA = "kerosene.snapshot-attestation-request/v1"
 TUF_PROOF_SCHEMA = "kerosene.tuf-target-proof/v1"
@@ -1272,6 +1274,59 @@ def verify_signature_set(
     return len(seen)
 
 
+def validate_vault_roster(path_text: str, summary: dict[str, Any]) -> dict[str, bytes]:
+    roster = read_json_document(path_text, "Vault compatibility roster")
+    root = require_keys(roster, "$.vaultRoster", ("schema", "networkId", "members"))
+    if root["schema"] != VAULT_ROSTER_SCHEMA or root["networkId"] != summary["networkId"]:
+        fail("$.vaultRoster", "does not identify the release network and roster schema")
+    members = require_object(root["members"], "$.vaultRoster.members")
+    if len(members) != summary["vaultCompatibility"]["members"]:
+        fail("$.vaultRoster.members", "member count does not match the release Vault membership")
+    decoded: dict[str, bytes] = {}
+    for member_id, public_key in members.items():
+        require_identifier(member_id, "$.vaultRoster.members.<member>")
+        key = decode_base64(public_key, f"$.vaultRoster.members.{member_id}")
+        if len(key) != 44 or not key.startswith(TUF_ED25519_SPKI_PREFIX) or key in decoded.values():
+            fail("$.vaultRoster.members", "requires distinct canonical Ed25519 SPKI public keys")
+        decoded[member_id] = key
+    return decoded
+
+
+def verify_vault_compatibility_attestation(release: dict[str, Any], summary: dict[str, Any],
+                                           attestation_path: str, roster_path: str) -> dict[str, Any]:
+    attestation = read_json_document(attestation_path, "Vault compatibility attestation")
+    root = require_keys(attestation, "$.vaultCompatibility", (
+        "schema", "releaseId", "networkId", "sequence", "sourceBundleDigest",
+        "repositoryCommits", "services", "migrationRecoveryEvidenceDigest", "rebuildEvidenceDigest",
+        "sbomSetDigest", "provenanceSetDigest", "verifiedAt", "expiresAt", "signatures"))
+    if canonical_digest(attestation) != summary["vaultCompatibility"]["attestationDigest"]:
+        fail("$.vaultCompatibility", "document digest does not match the release lock")
+    expected = {"schema": VAULT_COMPATIBILITY_SCHEMA,
+                "releaseId": summary["releaseId"], "networkId": summary["networkId"],
+                "sequence": summary["sequence"], "sourceBundleDigest": summary["sourceBundle"]["digest"],
+                "repositoryCommits": summary["repositories"], "services": summary["services"],
+                "migrationRecoveryEvidenceDigest": summary["migration"]["recoveryEvidenceDigest"]}
+    if any(root[key] != value for key, value in expected.items()):
+        fail("$.vaultCompatibility", "attestation does not bind the exact release sources and artifacts")
+    for key in ("rebuildEvidenceDigest", "sbomSetDigest", "provenanceSetDigest"):
+        require_digest(root[key], "$.vaultCompatibility." + key)
+    verified = parse_rfc3339(root["verifiedAt"], "$.vaultCompatibility.verifiedAt")
+    expires = parse_rfc3339(root["expiresAt"], "$.vaultCompatibility.expiresAt")
+    now = dt.datetime.now(dt.timezone.utc)
+    if verified > now + MAX_CLOCK_SKEW or expires <= now or expires <= verified or expires - verified > dt.timedelta(days=30):
+        fail("$.vaultCompatibility", "attestation is future-dated, expired or valid for too long")
+    payload = dict(attestation)
+    signatures = payload.pop("signatures")
+    roster = validate_vault_roster(roster_path, summary)
+    count = verify_signature_set(canonical_bytes(payload), signatures, roster,
+                                 summary["vaultCompatibility"]["threshold"],
+                                 "$.vaultCompatibility.signatures")
+    return {"schema": VAULT_COMPATIBILITY_SCHEMA, "signaturesVerified": count,
+            "rebuildEvidenceDigest": root["rebuildEvidenceDigest"],
+            "sbomSetDigest": root["sbomSetDigest"], "provenanceSetDigest": root["provenanceSetDigest"],
+            "verifiedAt": root["verifiedAt"], "expiresAt": root["expiresAt"]}
+
+
 def verify_bft_receipt(
     release: dict[str, Any],
     summary: dict[str, Any],
@@ -2021,6 +2076,8 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
     required_paths = {
         "--consensus-proof" if summary["releaseSchemaVersion"] == 3 else "--bft-receipt": args.consensus_proof if summary["releaseSchemaVersion"] == 3 else args.bft_receipt,
         "--validator-roster": args.validator_roster,
+        "--vault-roster": args.vault_roster,
+        "--vault-compatibility-attestation": args.vault_compatibility_attestation,
         "--bank-observer-report": args.bank_observer_report,
         "--snapshot-attestation-request": args.snapshot_attestation_request,
         "--snapshot-receipt": args.snapshot_receipt,
@@ -2055,6 +2112,8 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
             lifecycle.require_execution_capabilities(sys.modules[__name__])
         tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
         receipt_result = verify_consensus_authorization(release, summary, args)
+        vault_result = verify_vault_compatibility_attestation(
+            release, summary, args.vault_compatibility_attestation, args.vault_roster)
         if not args.dry_run and args.command != "install" and not initial_recovery:
             lifecycle.verify_maintenance(sys.modules[__name__], args)
         if not args.dry_run:
@@ -2092,6 +2151,7 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         "evidence": {
             "tuf": tuf_result,
             "bft": receipt_result,
+            "vaultCompatibility": vault_result,
             "bankObservers": observer_result,
             "snapshot": snapshot_result,
         },
@@ -2136,6 +2196,7 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         "tufStateFile": tuf_state_file,
         "tufSignatureVerified": tuf_result["signatureVerified"],
         "bftSignaturesVerified": receipt_result["signaturesVerified"],
+        "vaultCompatibilitySignaturesVerified": vault_result["signaturesVerified"],
         "bankObserversVerified": observer_result["compatibleObservers"],
         "snapshotId": snapshot_result["snapshotId"],
         "snapshotSetDigest": snapshot_result["snapshotSetDigest"],
@@ -2203,14 +2264,18 @@ def command_verify(args: argparse.Namespace) -> int:
         or args.tuf_root_key
         or args.tuf_state_dir
     )
-    other_evidence_paths = (args.consensus_proof if summary["releaseSchemaVersion"] == 3 else args.bft_receipt, args.validator_roster, args.bank_observer_report)
+    other_evidence_paths = (args.consensus_proof if summary["releaseSchemaVersion"] == 3 else args.bft_receipt,
+                            args.validator_roster, args.vault_roster,
+                            args.vault_compatibility_attestation, args.bank_observer_report)
     if tuf_requested != any(other_evidence_paths) or (any(other_evidence_paths) and not all(other_evidence_paths)):
-        raise ReleaseValidationError("verify-release requires BFT receipt, validator roster, and Bank observer report together")
+        raise ReleaseValidationError("verify-release requires consensus, Bank and independent Vault compatibility evidence together")
     authorization = None
     if tuf_requested:
         authorization = {
             "tuf": verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=False),
             "bft": verify_consensus_authorization(release, summary, args),
+            "vaultCompatibility": verify_vault_compatibility_attestation(
+                release, summary, args.vault_compatibility_attestation, args.vault_roster),
             "bankObservers": verify_bank_observer_report(
                 release,
                 summary,
@@ -2239,6 +2304,7 @@ def command_update(args: argparse.Namespace) -> int:
         args.tuf_state_dir = args.tuf_state_dir or args.state_dir
         args.tuf_trusted_root = args.tuf_trusted_root or str(Path(args.cell_dir) / "tuf-root.json")
         args.validator_roster = args.validator_roster or str(Path(args.cell_dir) / "validator-roster.json")
+        args.vault_roster = args.vault_roster or str(Path(args.cell_dir) / "vault-roster.json")
         args.snapshot_provider_key = args.snapshot_provider_key or str(Path(args.cell_dir) / "snapshot-provider.pub")
     if args.bundle_dir:
         bundle = Path(args.bundle_dir)
@@ -2251,6 +2317,7 @@ def command_update(args: argparse.Namespace) -> int:
         args.snapshot_receipt = args.snapshot_receipt or str(bundle / "snapshot-receipt.json")
         args.consensus_proof = args.consensus_proof or str(bundle / "consensus-proof.json")
         args.initial_admission = args.initial_admission or str(bundle / "cell-admission.json")
+        args.vault_compatibility_attestation = args.vault_compatibility_attestation or str(bundle / "vault-compatibility-attestation.json")
     if not args.release:
         raise ReleaseValidationError("--release or --bundle-dir is required")
     if args.command == "install":
@@ -2273,6 +2340,8 @@ def command_check_update(args: argparse.Namespace) -> int:
     required_paths = {
         "--consensus-proof" if summary["releaseSchemaVersion"] == 3 else "--bft-receipt": args.consensus_proof if summary["releaseSchemaVersion"] == 3 else args.bft_receipt,
         "--validator-roster": args.validator_roster,
+        "--vault-roster": args.vault_roster,
+        "--vault-compatibility-attestation": args.vault_compatibility_attestation,
         "--bank-observer-report": args.bank_observer_report,
     }
     missing = [name for name, path in required_paths.items() if not path]
@@ -2283,6 +2352,8 @@ def command_check_update(args: argparse.Namespace) -> int:
     try:
         tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
         receipt_result = verify_consensus_authorization(release, summary, args)
+        vault_result = verify_vault_compatibility_attestation(
+            release, summary, args.vault_compatibility_attestation, args.vault_roster)
         observer_result = verify_bank_observer_report(
             release,
             summary,
@@ -2330,6 +2401,7 @@ def command_check_update(args: argparse.Namespace) -> int:
         "manualRecoveryRequired": manual_recovery_required,
         "nextAction": next_action,
         "bankObserversVerified": observer_result["compatibleObservers"],
+        "vaultCompatibilitySignaturesVerified": vault_result["signaturesVerified"],
         "tufSignatureVerified": tuf_result["signatureVerified"],
         "tufMetadataVersions": tuf_result.get("metadataVersions"),
         "bftSignaturesVerified": receipt_result["signaturesVerified"],
@@ -2369,6 +2441,8 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--tuf-state-dir", help="optional read-only directory holding trusted TUF metadata versions")
     verify.add_argument("--bft-receipt", help="signed BFT release receipt JSON")
     verify.add_argument("--validator-roster", help="trusted validator roster JSON")
+    verify.add_argument("--vault-roster", help="protected out-of-band Vault compatibility signer roster")
+    verify.add_argument("--vault-compatibility-attestation", help="threshold-signed exact-source/rebuild compatibility attestation")
     verify.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
     verify.add_argument("--cell-dir", help="protected bootstrap consensus anchor and verifier")
     verify.add_argument("--consensus-proof", help="v3 real CometBFT ordered approval and application-state proof")
@@ -2402,6 +2476,8 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--tuf-state-dir", help="persistent trusted-TUF state directory required with --apply")
     update.add_argument("--bft-receipt", help="signed BFT release receipt JSON")
     update.add_argument("--validator-roster", help="trusted validator roster JSON")
+    update.add_argument("--vault-roster", help="protected out-of-band Vault compatibility signer roster")
+    update.add_argument("--vault-compatibility-attestation", help="threshold-signed exact-source/rebuild compatibility attestation")
     update.add_argument("--bank-observer-report", help="signed Bank observer compatibility report JSON")
     update.add_argument(
         "--snapshot-attestation-request",
@@ -2450,6 +2526,8 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--consensus-proof", help="v3 real CometBFT ordered approval and application-state proof")
     check.add_argument("--cell-dir", help="protected bootstrap consensus anchor and verifier")
     check.add_argument("--validator-roster", required=True, help="trusted validator roster JSON")
+    check.add_argument("--vault-roster", required=True, help="protected out-of-band Vault compatibility signer roster")
+    check.add_argument("--vault-compatibility-attestation", required=True, help="threshold-signed exact-source/rebuild compatibility attestation")
     check.add_argument("--bank-observer-report", required=True, help="signed Bank observer compatibility report JSON")
     check.add_argument("--state-dir", help="optional directory containing the last update-state.json")
     check.add_argument("--json", action="store_true", help="emit machine-readable output")
