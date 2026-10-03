@@ -138,6 +138,10 @@ def verify_deployment(stack, release, summary, path):
         if digest(component_config(artifact, service["image"], name)) != service["configDigest"]:
             raise stack.ApplyBlockedError(f"approved configuration digest mismatch: {name}")
     workload_phases(stack, artifact, summary)
+    try:
+        required_secret_references(stack, artifact)
+    except (TypeError, AttributeError, KeyError) as error:
+        raise stack.ApplyBlockedError("invalid external Secret reference structure") from error
     return artifact
 
 
@@ -178,6 +182,66 @@ def verify_empty_installation(stack, kubectl):
             raise stack.ApplyBlockedError("initial-install cluster inventory is invalid") from error
         if resources["items"]:
             raise stack.ApplyBlockedError("initial install refuses existing workloads or persistent volumes; use explicit recovery")
+
+
+def required_secret_references(stack, artifact):
+    """Collect Kubernetes-required external credentials, never their values."""
+    references = {}
+    def add(namespace, value, name_field, keys=()):
+        if not isinstance(value, dict) or type(value.get("optional", False)) is not bool:
+            raise stack.ApplyBlockedError("invalid Secret reference")
+        name = stack.require_identifier(value.get(name_field), "external Secret name")
+        if value.get("optional") is True:
+            return
+        required = references.setdefault((namespace, name), set())
+        for key in keys:
+            if not isinstance(key, str) or not key or len(key) > 253 or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-" for c in key):
+                raise stack.ApplyBlockedError("invalid external Secret key")
+            required.add(key)
+    for resource in artifact["resources"]:
+        if resource["kind"] not in WORKLOADS:
+            continue
+        namespace = resource["metadata"]["namespace"]
+        pod = resource["spec"]["template"]["spec"]
+        for container in containers(resource):
+            for variable in container.get("env", []):
+                reference = variable.get("valueFrom", {}).get("secretKeyRef")
+                if reference is not None:
+                    add(namespace, reference, "name", [reference.get("key")])
+            for source in container.get("envFrom", []):
+                if "secretRef" in source:
+                    add(namespace, source["secretRef"], "name")
+        for volume in pod.get("volumes", []):
+            if "secret" in volume:
+                reference = volume["secret"]
+                add(namespace, reference, "secretName", [item.get("key") for item in reference.get("items", [])])
+            for source in volume.get("projected", {}).get("sources", []):
+                if "secret" in source:
+                    reference = source["secret"]
+                    add(namespace, reference, "name", [item.get("key") for item in reference.get("items", [])])
+        for reference in pod.get("imagePullSecrets", []):
+            add(namespace, reference, "name")
+    if len(references) > 1024:
+        raise stack.ApplyBlockedError("external Secret reference limit exceeded")
+    return references
+
+
+def verify_external_secrets(stack, kubectl, references):
+    # A template projects name and key names only; no credential value is
+    # emitted, decoded, logged, journaled or included in an error.
+    template = '{{.metadata.name}}{{"\\n"}}{{range $key, $_ := .data}}{{$key}}{{"\\n"}}{{end}}'
+    for (namespace, name), required_keys in sorted(references.items()):
+        try:
+            raw = run(kubectl + ["-n", namespace, "get", "secret", name, "-o", "go-template=" + template])
+            if len(raw) > 64 * 1024:
+                raise ValueError("oversized key inventory")
+            lines = raw.decode("ascii").splitlines()
+            if not lines or lines[0] != name or len(lines[1:]) != len(set(lines[1:])):
+                raise ValueError("invalid Secret identity/key inventory")
+            if not required_keys <= set(lines[1:]):
+                raise ValueError("missing required Secret key")
+        except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as error:
+            raise stack.ApplyBlockedError("required external Secret unavailable or incomplete: " + namespace + "/" + name) from error
 
 
 def workload_phases(stack, artifact, summary):
@@ -284,6 +348,7 @@ def execute(stack, artifact, summary, args, checkpoint):
         raise stack.ApplyBlockedError("HPA requires a separately approved freeze/restore policy during Cell update")
     if getattr(args, "command", None) == "install":
         verify_empty_installation(stack, kubectl)
+    verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
     if not args.dry_run:
         receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],
                                        stack.canonical_digest(args._release), run)
@@ -510,6 +575,16 @@ def command_preflight(stack, args):
     config = load_config(stack, args.cell_dir)
     verify_bootstrap_trust(stack, args.cell_dir, config)
     blockers = []
+    release_path = getattr(args, "release", None)
+    manifest_path = getattr(args, "deployment_manifest", None)
+    if bool(release_path) != bool(manifest_path):
+        raise stack.ReleaseValidationError("preflight requires --release and --deployment-manifest together")
+    references = None
+    if release_path:
+        release, summary = stack.load_and_validate(release_path)
+        artifact = verify_deployment(stack, release, summary, manifest_path)
+        references = required_secret_references(stack, artifact)
+    secrets_verified = False
     runtime = {name: shutil.which(name) for name in ("openssl", "kubectl", "docker")}
     for name in ("openssl", "kubectl"):
         if runtime[name] is None:
@@ -520,10 +595,14 @@ def command_preflight(stack, args):
             blockers.append("trust-anchor-changed:" + name)
     if runtime["kubectl"]:
         try:
-            run(kubectl_command(stack, config) + ["get", "--raw=/readyz"])
+            kubectl = kubectl_command(stack, config)
+            run(kubectl + ["get", "--raw=/readyz"])
+            if references is not None:
+                verify_external_secrets(stack, kubectl, references)
+                secrets_verified = True
         except (stack.ReleaseValidationError, RuntimeError, subprocess.TimeoutExpired):
-            blockers.append("cluster-unreachable-or-not-ready")
-    print(json.dumps({"schema": "kerosene.stack.preflight/v1", "cellId": config["cellId"], "runtime": runtime, "blockers": blockers, "passed": not blockers, "financialReadinessVerified": False, "applyQualified": not EXECUTION_BLOCKERS, "executionBlockers": list(EXECUTION_BLOCKERS)}, indent=2))
+            blockers.append("cluster-unreachable-not-ready-or-required-secrets-unavailable")
+    print(json.dumps({"schema": "kerosene.stack.preflight/v1", "cellId": config["cellId"], "runtime": runtime, "blockers": blockers, "passed": not blockers, "externalSecretReferencesVerified": secrets_verified, "externalSecretReferenceCount": len(references) if references is not None else None, "financialReadinessVerified": False, "applyQualified": not EXECUTION_BLOCKERS, "executionBlockers": list(EXECUTION_BLOCKERS)}, indent=2))
     return 0 if not blockers else stack.EXIT_CANNOT_APPLY
 
 
@@ -548,6 +627,9 @@ def add_commands(stack, subcommands):
     for name in ("status", "diagnose", "preflight"):
         parser = subcommands.add_parser(name, help="inspect Cell without changing services or trust")
         parser.add_argument("--cell-dir", required=True)
+        if name != "status":
+            parser.add_argument("--release", help="optional release lock paired with --deployment-manifest for credential-reference preflight")
+            parser.add_argument("--deployment-manifest", help="approved manifest paired with --release; only external Secret name/key inventory is queried")
         handler = command_status if name == "status" else command_preflight
         parser.set_defaults(handler=lambda args, fn=handler: fn(stack, args))
     artifact = subcommands.add_parser("import-artifact", help="integrity-check inert release data into an offline cache; does not authorize a release")

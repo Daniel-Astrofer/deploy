@@ -24,6 +24,9 @@ infra/kerosene-stack init --cell-dir /protected/cell-a --cell-id cell-a \
   --consensus-verifier /protected/kerosene-release-consensus \
   --kubeconfig /protected/cell-a.kubeconfig --kube-context staging-cell-a
 infra/kerosene-stack preflight --cell-dir /protected/cell-a
+infra/kerosene-stack preflight --cell-dir /protected/cell-a \
+  --release /protected/package/release-lock.json \
+  --deployment-manifest /protected/package/deployment.json
 infra/kerosene-stack status --cell-dir /protected/cell-a
 ```
 
@@ -34,6 +37,25 @@ infrastructure reachability separately from `financialReadinessVerified` and
 execution. The saved explicit context is bound to the `kube-system` namespace
 UID; commands do not use the currently selected kubectl context. A replaced
 cluster requires independent bootstrap, not a journal reset.
+
+With the paired release/manifest inputs, preflight additionally validates exact
+approved configuration digests and inventories mandatory external Secrets in
+the bound cluster. It covers environment keys, envFrom, init containers,
+Secret/projected volumes and imagePullSecrets, merging repeated required keys
+per namespace/name. Optional references do not waive another required reference.
+Only Secret name and key names are projected by kubectl; values are not emitted,
+decoded or stored. The same check runs before Admin installation or Kubernetes
+resource writes. Missing credentials/RBAC/API access or malformed inventory
+fails closed; the controller never creates credentials as a fallback.
+
+`externalSecretReferencesVerified` is false unless this manifest-specific check
+ran successfully. It is not authentication, certificate validity, macaroon
+scope or financial readiness evidence. Credentials must still be independently
+provisioned with appropriate policy and contents. Another administrator can
+rotate/delete them after preflight; normal workload readiness and the remaining
+acceptance gates still apply. Initial Secret provisioning must happen after
+namespace preparation outside this release executor; these checks do not adopt
+an existing workload or bypass the first-install recovery rules.
 
 `import-artifact` only integrity-checks and caches/extracts inert bytes. See
 [release archive](release-archive.md) for offline import, size limits, mirror

@@ -226,6 +226,14 @@ class DeploymentTest(unittest.TestCase):
                     lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=True, cell_dir="unit-only"), lambda *_: None)
                 apply.assert_not_called()
 
+    def test_missing_external_secret_blocks_before_admin_install_or_resource_apply(self):
+        from types import SimpleNamespace
+        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value={"cellId": "unit"}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]), patch.object(lifecycle, "verify_external_secrets", side_effect=stack.ApplyBlockedError("required external Secret unavailable")), patch.object(lifecycle, "apply_resource") as apply, patch.object(lifecycle.admin_install, "install") as admin, patch.dict(lifecycle.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(stack.ApplyBlockedError, "external Secret unavailable"):
+                lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only"), lambda *_: None)
+            apply.assert_not_called()
+            admin.assert_not_called()
+
     def test_v3_matches_actual_static_consensus_capabilities_and_integer_range(self):
         release = copy.deepcopy(self.release)
         release.update(schema="kerosene.release-lock/v3", schemaVersion=3)
