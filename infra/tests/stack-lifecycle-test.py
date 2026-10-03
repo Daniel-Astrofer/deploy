@@ -48,6 +48,25 @@ class DeploymentTest(unittest.TestCase):
     def test_exact_configuration(self):
         self.assertEqual(self.verify(), self.artifact)
 
+    def test_vault_probe_requires_url_in_approved_configuration(self):
+        vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault")
+        container = vault["spec"]["template"]["spec"]["containers"][0]
+        container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}}
+        container["env"] = [{"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "probe", "key": "url"}}}]
+        with self.assertRaises(stack.ApplyBlockedError):
+            lifecycle.verify_vault_probe_configuration(stack, self.artifact)
+        config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"namespace": "kerosene-staging", "name": "probe"}, "data": {"url": "https://vault.example:7801/v1/health"}}
+        self.artifact["resources"].append(config)
+        lifecycle.verify_vault_probe_configuration(stack, self.artifact)
+        for url in ("http://vault.example/v1/health", "https://user@vault.example/v1/health", "https://vault.example/", "https://vault.example/v1/health?x=1"):
+            config["data"]["url"] = url
+            with self.subTest(url=url), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.verify_vault_probe_configuration(stack, self.artifact)
+        config["data"]["url"] = "https://vault.example:7801/v1/health"
+        container["env"][0]["valueFrom"]["configMapKeyRef"]["optional"] = True
+        with self.assertRaises(stack.ApplyBlockedError):
+            lifecycle.verify_vault_probe_configuration(stack, self.artifact)
+
     def test_validator_roster_requires_independent_key_material(self):
         keys = [stack.TUF_ED25519_SPKI_PREFIX + bytes([index]) * 32 for index in range(4)]
         roster = {"schema": stack.ROSTER_SCHEMA, "networkId": self.summary["bft"]["networkId"],

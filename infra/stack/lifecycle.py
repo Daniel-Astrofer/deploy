@@ -143,11 +143,45 @@ def verify_deployment(stack, release, summary, path):
             raise stack.ApplyBlockedError(f"approved configuration digest mismatch: {name}")
     workload_phases(stack, artifact, summary)
     initial_database_plan(stack, artifact, summary)
+    verify_vault_probe_configuration(stack, artifact)
     try:
         required_secret_references(stack, artifact)
     except (TypeError, AttributeError, KeyError) as error:
         raise stack.ApplyBlockedError("invalid external Secret reference structure") from error
     return artifact
+
+
+def verify_vault_probe_configuration(stack, artifact):
+    """Bind opt-in authenticated probe URL to approved ConfigMap bytes."""
+    for resource in artifact["resources"]:
+        if resource["kind"] not in WORKLOADS:
+            continue
+        for container in containers(resource):
+            command = container.get("readinessProbe", {}).get("exec", {}).get("command", [])
+            if command != ["/usr/local/bin/kerosene-vault", "--health-probe"]:
+                continue
+            try:
+                entries = [e for e in container.get("env", []) if e.get("name") == "VAULT_HEALTH_PROBE_URL"]
+                if len(entries) != 1 or set(entries[0]) != {"name", "valueFrom"}:
+                    raise ValueError("unbound probe URL")
+                source = entries[0]["valueFrom"]
+                if set(source) != {"configMapKeyRef"}:
+                    raise ValueError("wrong probe source")
+                reference = source["configMapKeyRef"]
+                if set(reference) - {"name", "key", "optional"} or reference.get("optional", False) is not False:
+                    raise ValueError("optional probe configuration")
+                matches = [r for r in artifact["resources"] if identity(r) ==
+                    (resource["metadata"]["namespace"], "ConfigMap", reference["name"])]
+                if len(matches) != 1:
+                    raise ValueError("unapproved probe configuration")
+                raw = matches[0]["data"][reference["key"]]
+                if not isinstance(raw, str) or len(raw) > 2048:
+                    raise ValueError("invalid probe URL")
+                url = urllib.parse.urlsplit(raw)
+                if url.scheme != "https" or not url.hostname or url.username is not None or url.password is not None or url.path != "/v1/health" or url.query or url.fragment:
+                    raise ValueError("invalid probe URL")
+            except (ValueError, TypeError, AttributeError, KeyError):
+                raise stack.ApplyBlockedError("Vault authenticated readiness requires an approved nonoptional URL ConfigMap") from None
 
 
 def run(argv, *, input_bytes=None):

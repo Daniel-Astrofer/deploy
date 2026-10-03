@@ -46,6 +46,10 @@ timeout (longer than the command's four-second request timeout), and reads
 hostname present in the server certificate and `/v1/health` at the correct port.
 The command connects to loopback while verifying that hostname; IP URLs fail.
 Existing mounted client cert/key/CA paths are reused, never provisioned here.
+The deployment validator rejects this exec probe unless its URL comes from a
+nonoptional same-namespace ConfigMap included in the approved deployment, with
+the referenced key present and an HTTPS `/v1/health` URL without credentials,
+query or fragment. Runtime hostname/certificate qualification is still required.
 
 No existing overlay selects this component. Enable it only after qualifying the
 exact new image, mounted certificates and Kubernetes exec behavior. Old images
