@@ -341,7 +341,8 @@ class InstallationTest(unittest.TestCase):
         args = stack.build_parser().parse_args(["update", "--release", "unit.json", "--apply", "--environment", "staging-cell",
                                                "--state-dir", str(state_dir), "--tuf-state-dir", str(state_dir),
                                                "--deployment-manifest", "unit-deployment.json"])
-        for name in ["consensus_proof", "validator_roster", "bank_observer_report", "snapshot_attestation_request", "snapshot_receipt", "snapshot_provider_key"]:
+        for name in ["consensus_proof", "validator_roster", "vault_roster", "vault_compatibility_attestation",
+                     "bank_observer_report", "snapshot_attestation_request", "snapshot_receipt", "snapshot_provider_key"]:
             setattr(args, name, "unit-evidence-not-authority")
         summary = {"releaseSchemaVersion": 3, "releaseId": "unit-release", "sequence": 1, "_releaseBytes": b"{}", **self.summary}
         def rejected_inspection(*_):
@@ -355,6 +356,7 @@ class InstallationTest(unittest.TestCase):
                 mocks.enter_context(patch.object(stack.lifecycle, name))
             mocks.enter_context(patch.object(stack, "verify_tuf_authorization", return_value={}))
             mocks.enter_context(patch.object(stack, "verify_consensus_authorization", return_value={}))
+            mocks.enter_context(patch.object(stack, "verify_vault_compatibility_attestation", return_value={}))
             mocks.enter_context(patch.object(stack, "verify_bank_observer_report", return_value={}))
             mocks.enter_context(patch.object(stack, "validate_snapshot_receipt", return_value={}))
             mocks.enter_context(patch.object(stack, "persist_tuf_state", return_value="unit-state"))

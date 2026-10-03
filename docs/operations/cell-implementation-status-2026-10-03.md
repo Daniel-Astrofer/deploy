@@ -254,8 +254,11 @@ No runtime manifest, signer, cluster, retained snapshots or custody state change
    with Byzantine-safe availability. The prior offline publisher is not a build or
    distribution/reconciliation service.
 5. **Installation/update execution:** qualify the integrated Admin OCI installation, ordered migrations
-   with tested data recovery and replica-by-replica Node/Vault rollout preserving
-   quorum. The execution capability blockers remain present (Admin now reports
+   with tested data recovery and the integrated replica-by-replica Node/Vault
+   protocol on a real cluster. It validates independent persistent identities,
+   requires the complete group ready around each mutation and applies one
+   controller with UID/resourceVersion preconditions before continuing. The
+   execution capability blockers remain present (Admin now reports
    integrated-but-not-qualified); do not remove them as flags. A separate
    complete-Cell acceptance blocker also prevents legacy smokes being mistaken
    for whole-service qualification.

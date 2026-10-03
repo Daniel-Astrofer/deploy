@@ -32,7 +32,18 @@ class DeploymentTest(unittest.TestCase):
         for name, service in self.release["services"].items():
             if name == "admin":
                 continue
-            resources.append({"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": name, "namespace": "kerosene-staging"}, "spec": {"replicas": 1, "selector": {"matchLabels": {"app": name}}, "template": {"metadata": {"labels": {"app": name}}, "spec": {"containers": [{"name": name, "image": service["image"]}]}}}})
+            instances = [name] if name != "vault" else ["vault-1", "vault-2", "vault-3"]
+            for instance in instances:
+                container = {"name": name, "image": service["image"]}
+                pod_spec = {"containers": [container]}
+                if name in {"node", "vault"}:
+                    claim = instance + "-data"
+                    container["volumeMounts"] = [{"name": "identity-data", "mountPath": "/var/lib/kerosene"}]
+                    pod_spec["volumes"] = [{"name": "identity-data", "persistentVolumeClaim": {"claimName": claim}}]
+                    resources.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
+                                      "metadata": {"name": claim, "namespace": "kerosene-staging"},
+                                      "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}}})
+                resources.append({"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": instance, "namespace": "kerosene-staging"}, "spec": {"replicas": 1, "selector": {"matchLabels": {"app": instance}}, "template": {"metadata": {"labels": {"app": instance}}, "spec": pod_spec}}})
         self.artifact = {"schema": lifecycle.SCHEMA, "environment": "staging-cell", "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://core.invalid"}}}
         for name, service in self.release["services"].items():
             service["configDigest"] = lifecycle.digest(lifecycle.component_config(self.artifact, service["image"], name))
@@ -46,11 +57,16 @@ class DeploymentTest(unittest.TestCase):
         self.path.write_text(json.dumps(artifact or self.artifact))
         return lifecycle.verify_deployment(stack, self.release, self.summary, str(self.path))
 
+    @staticmethod
+    def critical_observations(_stack, _kubectl, _component, members, _threshold):
+        return [{"identity": list(lifecycle.identity(member["resource"])), "uid": "unit-uid",
+                 "resourceVersion": "7", "storage": member["storage"]} for member in members]
+
     def test_exact_configuration(self):
         self.assertEqual(self.verify(), self.artifact)
 
     def test_vault_probe_requires_url_in_approved_configuration(self):
-        vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault")
+        vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault-1")
         container = vault["spec"]["template"]["spec"]["containers"][0]
         container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}, "timeoutSeconds": 6}
         container["env"] = [{"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "probe", "key": "url"}}}]
@@ -285,15 +301,66 @@ class DeploymentTest(unittest.TestCase):
         groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
         self.assertEqual([{r["metadata"]["name"] for r in group} for group in groups],
                          [{"postgres", "redis", "tor", "node"}, {"bitcoin"}, {"lnd"},
-                          {"vault"}, {"core", "kfe"}, {"web-page"}])
+                          {"vault-1", "vault-2", "vault-3"}, {"core", "kfe"}, {"web-page"}])
 
     def test_multiple_vault_workloads_preserve_inventory(self):
-        vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault")
+        vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault-1")
         replica = copy.deepcopy(vault)
         replica["metadata"]["name"] = "vault-secondary"
         self.artifact["resources"].append(replica)
         groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
-        self.assertEqual([r["metadata"]["name"] for r in groups[3]], ["vault", "vault-secondary"])
+        self.assertEqual([r["metadata"]["name"] for r in groups[3]],
+                         ["vault-1", "vault-2", "vault-3", "vault-secondary"])
+
+    def test_critical_topology_binds_independent_single_replica_storage(self):
+        topology = lifecycle.critical_replica_topology(stack, self.artifact, self.summary)
+        self.assertEqual([item["resource"]["metadata"]["name"] for item in topology["vault"]],
+                         ["vault-1", "vault-2", "vault-3"])
+        self.assertEqual(len({item["storage"] for members in topology.values() for item in members}), 4)
+        vault_two = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-2")
+        vault_two["spec"]["template"]["spec"]["volumes"][0]["persistentVolumeClaim"]["claimName"] = "vault-1-data"
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "persistent identity is shared"):
+            lifecycle.critical_replica_topology(stack, self.artifact, self.summary)
+
+    def test_critical_topology_rejects_grouped_or_missing_vault_members(self):
+        vault = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-1")
+        vault["spec"]["replicas"] = 2
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "one replica"):
+            lifecycle.critical_replica_topology(stack, self.artifact, self.summary)
+        vault["spec"]["replicas"] = 1
+        self.artifact["resources"] = [r for r in self.artifact["resources"] if r["metadata"].get("name") != "vault-3"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "exactly 3"):
+            lifecycle.critical_replica_topology(stack, self.artifact, self.summary)
+
+    def test_critical_apply_carries_uid_and_resource_version_preconditions(self):
+        resource = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-1")
+        precondition = {"identity": list(lifecycle.identity(resource)), "uid": "vault-uid", "resourceVersion": "19"}
+        with patch.object(lifecycle, "run") as run:
+            lifecycle.apply_resource(["/bound/kubectl"], resource, False, precondition)
+        submitted = json.loads(run.call_args.kwargs["input_bytes"])
+        self.assertEqual(submitted["metadata"]["uid"], "vault-uid")
+        self.assertEqual(submitted["metadata"]["resourceVersion"], "19")
+        self.assertNotIn("uid", resource["metadata"])
+        with self.assertRaisesRegex(RuntimeError, "precondition"):
+            lifecycle.apply_resource(["/bound/kubectl"], resource, False,
+                                     {**precondition, "identity": ["other", "Deployment", "vault-1"]})
+
+    def test_critical_group_requires_every_member_stably_ready(self):
+        members = lifecycle.critical_replica_topology(stack, self.artifact, self.summary)["vault"]
+        live = []
+        for index, member in enumerate(members, start=1):
+            resource = copy.deepcopy(member["resource"])
+            resource["metadata"].update(uid=f"vault-{index}-uid", resourceVersion=str(index), generation=2)
+            resource["status"] = {"observedGeneration": 2, "readyReplicas": 1}
+            live.append(json.dumps(resource).encode())
+        with patch.object(lifecycle, "run", side_effect=live):
+            observations = lifecycle.verify_critical_group_available(stack, ["/bound/kubectl"], "vault", members, 2)
+        self.assertEqual(len(observations), 3)
+        unavailable = json.loads(live[1])
+        unavailable["status"]["readyReplicas"] = 0
+        live[1] = json.dumps(unavailable).encode()
+        with patch.object(lifecycle, "run", side_effect=live), self.assertRaisesRegex(stack.ApplyBlockedError, "not safe"):
+            lifecycle.verify_critical_group_available(stack, ["/bound/kubectl"], "vault", members, 2)
 
     def test_canonical_node_tor_sidecar_topology_is_supported_in_both_planes(self):
         node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node")
@@ -342,18 +409,23 @@ class DeploymentTest(unittest.TestCase):
         # Test orchestration only: capabilities and readiness are mocked. This
         # deliberately provides no qualification for live apply or quorum.
         config = {"cellId": "unit", "cluster": {"kubeconfig": "/protected/cell.conf", "context": "cell-a"}}
-        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value=config), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]) as binding, patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run") as run, patch.dict(lifecycle.os.environ, {}, clear=True):
+        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value=config), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]) as binding, patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "verify_critical_group_available", side_effect=self.critical_observations) as critical_ready, patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry, *precondition: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run") as run, patch.dict(lifecycle.os.environ, {}, clear=True):
             lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
             self.assertEqual(binding.call_count, 2)
             smokes = [call.args[0] for call in run.call_args_list if call.args[0][0] == "bash"]
             self.assertEqual(len(smokes), 2)
             for command in smokes:
                 self.assertEqual(command[-4:], ["--cell-binding", "/bound-kubectl", "/protected/cell.conf", "cell-a"])
+            self.assertEqual(critical_ready.call_count, 8)
+            self.assertEqual([call.args[4] for call in critical_ready.call_args_list], [1, 1, 2, 2, 2, 2, 2, 2])
         for name in ["core", "kfe"]:
             for consumer in ["core", "kfe"]:
                 self.assertLess(events.index(("apply", name)), events.index(("ready", consumer)))
         self.assertLess(events.index(("ready", "bitcoin")), events.index(("apply", "lnd")))
-        self.assertLess(events.index(("ready", "vault")), events.index(("apply", "core")))
+        self.assertLess(events.index(("ready", "vault-3")), events.index(("apply", "core")))
+        for first, second in (("vault-1", "vault-2"), ("vault-2", "vault-3")):
+            self.assertLess(events.index(("apply", first)), events.index(("ready", first)))
+            self.assertLess(events.index(("ready", first)), events.index(("apply", second)))
 
     def test_invalid_phase_blocks_before_any_kubernetes_write(self):
         from types import SimpleNamespace
@@ -381,9 +453,10 @@ class DeploymentTest(unittest.TestCase):
                      patch.object(lifecycle.admin_install, "install", return_value={}), \
                      patch.object(lifecycle, "verify_managed_configmaps", side_effect=observations), \
                      patch.object(lifecycle, "verify_maintenance"), \
+                     patch.object(lifecycle, "verify_critical_group_available", side_effect=self.critical_observations), \
                      patch.object(lifecycle, "verify_running", return_value=[]), \
                      patch.object(lifecycle, "run"), \
-                     patch.object(lifecycle, "apply_resource", side_effect=lambda command, resource, dry: applied.append(resource)), \
+                     patch.object(lifecycle, "apply_resource", side_effect=lambda command, resource, dry, *precondition: applied.append(resource)), \
                      patch.dict(lifecycle.os.environ, {}, clear=True), \
                      self.assertRaisesRegex(stack.ApplyBlockedError, "before the next Cell phase"):
                     lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)

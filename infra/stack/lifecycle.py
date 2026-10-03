@@ -5,6 +5,7 @@ so canonical configuration digests are reproducible across packaging and apply.
 """
 from __future__ import annotations
 
+import copy
 import datetime as dt
 import hashlib
 import ipaddress
@@ -35,7 +36,7 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 EXECUTION_BLOCKERS = (
     "vault-live-rebuild-provenance-not-qualified",
     "migration-executor-live-recovery-not-qualified",
-    "node-vault-replica-quorum-rollout-not-qualified",
+    "node-vault-live-quorum-rollout-not-qualified",
     "admin-artifact-installation-not-qualified",
     "complete-cell-acceptance-not-qualified",
 )
@@ -207,11 +208,20 @@ def run(argv, *, input_bytes=None):
     return result.stdout
 
 
-def apply_resource(kubectl, resource, dry_run=False):
+def apply_resource(kubectl, resource, dry_run=False, live_precondition=None):
+    candidate = resource
+    if live_precondition is not None:
+        if (tuple(live_precondition.get("identity", ())) != identity(resource) or
+                not isinstance(live_precondition.get("uid"), str) or
+                not isinstance(live_precondition.get("resourceVersion"), str)):
+            raise RuntimeError("invalid live resource precondition")
+        candidate = copy.deepcopy(resource)
+        candidate["metadata"]["uid"] = live_precondition["uid"]
+        candidate["metadata"]["resourceVersion"] = live_precondition["resourceVersion"]
     argv = kubectl + ["apply", "--server-side", "--field-manager=kerosene-stack", "-f", "-"]
     if dry_run:
         argv.append("--dry-run=server")
-    run(argv, input_bytes=canonical(resource))
+    run(argv, input_bytes=canonical(candidate))
 
 
 def verify_empty_installation(stack, kubectl):
@@ -659,6 +669,111 @@ def workload_phases(stack, artifact, summary):
     return [sorted(group, key=identity) for group in groups if group]
 
 
+def critical_replica_topology(stack, artifact, summary):
+    """Bind Node/Vault replicas to distinct persistent identities.
+
+    Critical workloads are deliberately one replica per controller. This makes
+    a controller-level update the unit of failure and allows the executor to
+    prove that it changes no more than one identity at a time.
+    """
+    service_images = {name: service["image"] for name, service in summary["services"].items()}
+    declared_pvcs = {identity(resource) for resource in artifact["resources"]
+                     if resource["kind"] == "PersistentVolumeClaim"}
+    groups = {"node": [], "vault": []}
+    storage_owners = {}
+    for resource in artifact["resources"]:
+        if resource["kind"] not in WORKLOADS:
+            continue
+        present = {name for name in groups
+                   if any(container.get("image") == service_images[name] for container in containers(resource))}
+        if not present:
+            continue
+        if len(present) != 1:
+            raise stack.ApplyBlockedError("Node and Vault cannot share one critical workload controller")
+        component = present.pop()
+        if resource.get("spec", {}).get("replicas") != 1:
+            raise stack.ApplyBlockedError(f"{component} requires one replica per persistent workload controller")
+        pod_spec = resource["spec"]["template"]["spec"]
+        critical_containers = [container for container in pod_spec.get("containers", [])
+                               if container.get("image") == service_images[component]]
+        mounted = {mount.get("name") for container in critical_containers
+                   for mount in container.get("volumeMounts", []) if isinstance(mount.get("name"), str)}
+        ns, _, name = identity(resource)
+        persistent = set()
+        for volume in pod_spec.get("volumes", []):
+            claim = volume.get("persistentVolumeClaim", {}).get("claimName")
+            if volume.get("name") in mounted and isinstance(claim, str):
+                claim_identity = (ns, "PersistentVolumeClaim", claim)
+                if claim_identity not in declared_pvcs:
+                    raise stack.ApplyBlockedError(f"{component} persistent identity claim is not declared in the approved artifact")
+                persistent.add(f"pvc:{ns}/{claim}")
+        if resource["kind"] == "StatefulSet":
+            for template in resource["spec"].get("volumeClaimTemplates", []):
+                template_name = template.get("metadata", {}).get("name")
+                if template_name in mounted:
+                    persistent.add(f"statefulset:{ns}/{name}/{template_name}")
+        if len(persistent) != 1:
+            raise stack.ApplyBlockedError(f"{component} must mount exactly one approved persistent identity volume")
+        storage = persistent.pop()
+        if storage in storage_owners:
+            raise stack.ApplyBlockedError(f"critical persistent identity is shared by {storage_owners[storage]} and {ns}/{name}")
+        storage_owners[storage] = f"{ns}/{name}"
+        groups[component].append({"resource": resource, "storage": storage})
+    expected_vaults = summary["vaultCompatibility"]["members"]
+    if len(groups["vault"]) != expected_vaults:
+        raise stack.ApplyBlockedError(f"approved topology requires exactly {expected_vaults} independent Vault workloads")
+    if not groups["node"]:
+        raise stack.ApplyBlockedError("approved topology requires at least one persistent Node workload")
+    for component in groups:
+        groups[component].sort(key=lambda item: identity(item["resource"]))
+    return groups
+
+
+def verify_critical_group_available(stack, kubectl, component, members, threshold):
+    """Require the complete critical group ready and identities unchanged."""
+    ready = 0
+    observations = []
+    for member in members:
+        resource = member["resource"]
+        ns, kind, name = identity(resource)
+        try:
+            live = json.loads(run(kubectl + ["-n", ns, "get", kind.lower(), name, "-o", "json"]))
+            status = live.get("status", {})
+            if (identity(live) != (ns, kind, name) or not live.get("metadata", {}).get("uid") or
+                    not live["metadata"].get("resourceVersion") or
+                    live["metadata"].get("deletionTimestamp") or live.get("spec", {}).get("replicas") != 1 or
+                    status.get("observedGeneration", 0) < live["metadata"].get("generation", 1) or
+                    status.get("readyReplicas") != 1):
+                raise ValueError("critical workload is not stably ready")
+            # Compare storage directly; full topology cardinality belongs to
+            # critical_replica_topology and would reject this one-member view.
+            pod_spec = live["spec"]["template"]["spec"]
+            mounted = {mount.get("name") for container in containers(resource)
+                       for mount in container.get("volumeMounts", [])}
+            observed_storage = set()
+            for volume in pod_spec.get("volumes", []):
+                claim = volume.get("persistentVolumeClaim", {}).get("claimName")
+                if volume.get("name") in mounted and claim:
+                    observed_storage.add(f"pvc:{ns}/{claim}")
+            if kind == "StatefulSet":
+                for template in live["spec"].get("volumeClaimTemplates", []):
+                    template_name = template.get("metadata", {}).get("name")
+                    if template_name in mounted:
+                        observed_storage.add(f"statefulset:{ns}/{name}/{template_name}")
+            if observed_storage != {member["storage"]}:
+                raise ValueError("persistent identity binding changed")
+            ready += 1
+            observations.append({"identity": [ns, kind, name], "uid": live["metadata"]["uid"],
+                                 "resourceVersion": live["metadata"]["resourceVersion"],
+                                 "storage": member["storage"]})
+        except (RuntimeError, ValueError, TypeError, KeyError, json.JSONDecodeError,
+                OSError, subprocess.TimeoutExpired) as error:
+            raise stack.ApplyBlockedError(f"{component} replica group is not safe to mutate") from error
+    if ready < threshold:
+        raise stack.ApplyBlockedError(f"{component} ready replicas are below the required threshold")
+    return observations
+
+
 def verify_running(kubectl, resource):
     """Require observed generation, desired ready replicas and named live images.
 
@@ -783,6 +898,9 @@ def execute(stack, artifact, summary, args, checkpoint):
         raise stack.ApplyBlockedError("approved execution forbids tool/gate override environment variables")
     prerequisites = [r for r in artifact["resources"] if r["kind"] not in WORKLOADS]
     phases = workload_phases(stack, artifact, summary)
+    critical = critical_replica_topology(stack, artifact, summary)
+    critical_by_identity = {identity(member["resource"]): (component, member)
+                            for component, members in critical.items() for member in members}
     # Apply non-runtime inputs first. Explicit ordering prevents HPA creation
     # from silently changing approved replicas before validation.
     prerequisites.sort(key=lambda r: (0 if r["kind"] == "Namespace" else 2 if r["kind"] == "HorizontalPodAutoscaler" else 1, identity(r)))
@@ -823,9 +941,11 @@ def execute(stack, artifact, summary, args, checkpoint):
             checkpoint("initial-database-migrations-validated", migration)
             migrations_executed = True
         # Core and KFE have reciprocal integration references. Submit the
-        # entire phase before waiting, otherwise the first readiness gate can
-        # deadlock bootstrap by waiting for a service not yet created.
-        for resource in phase:
+        # entire noncritical phase before waiting, otherwise the first
+        # readiness gate can deadlock bootstrap. Existing Node/Vault identities
+        # are instead mutated one controller at a time.
+        batch = phase if initial_install or args.dry_run else [r for r in phase if identity(r) not in critical_by_identity]
+        for resource in batch:
             label = "/".join(identity(resource))
             if not args.dry_run:
                 verify_maintenance(stack, args)
@@ -833,11 +953,31 @@ def execute(stack, artifact, summary, args, checkpoint):
             apply_resource(kubectl, resource, args.dry_run)
         if args.dry_run:
             continue
-        for resource in phase:
+        for resource in batch:
             label = "/".join(identity(resource))
             ns, kind, name = identity(resource)
             run(kubectl + ["-n", ns, "rollout", "status", f"{kind.lower()}/{name}", "--timeout=110s"])
             checkpoint("ready:" + label, {"runtime": verify_running(kubectl, resource)})
+        if not initial_install:
+            for resource in (r for r in phase if identity(r) in critical_by_identity):
+                component, _ = critical_by_identity[identity(resource)]
+                members = critical[component]
+                threshold = summary["vaultCompatibility"]["threshold"] if component == "vault" else len(members)
+                before = verify_critical_group_available(stack, kubectl, component, members, threshold)
+                label = "/".join(identity(resource))
+                verify_maintenance(stack, args)
+                checkpoint("critical-group-ready-before:" + label, {"component": component, "members": before})
+                checkpoint("before:" + label, {})
+                precondition = next((item for item in before if tuple(item["identity"]) == identity(resource)), None)
+                if precondition is None:
+                    raise stack.ApplyBlockedError("critical workload precondition is missing")
+                apply_resource(kubectl, resource, False, precondition)
+                ns, kind, name = identity(resource)
+                run(kubectl + ["-n", ns, "rollout", "status", f"{kind.lower()}/{name}", "--timeout=110s"])
+                runtime = verify_running(kubectl, resource)
+                after = verify_critical_group_available(stack, kubectl, component, members, threshold)
+                checkpoint("ready:" + label, {"runtime": runtime})
+                checkpoint("critical-group-ready-after:" + label, {"component": component, "members": after})
     if initial_install and not args.dry_run and not migrations_executed:
         raise stack.ApplyBlockedError("initial database migrations were not reached before application workloads")
     if not args.dry_run:

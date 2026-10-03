@@ -285,7 +285,12 @@ implementation capabilities exist and their integration tests pass:
 
 1. Live independent Vault rebuild/SBOM/provenance qualification for the gate now integrated into apply.
 2. Migration execution and actual tested recovery integrated into the phases.
-3. Node/Vault replica-by-replica rollout preserving real quorum and identities.
+3. Live qualification of the integrated Node/Vault replica-by-replica protocol.
+   The controller now requires one replica per workload, distinct approved
+   persistent identities, all peers ready before and after every mutation, the
+   Vault release threshold, and UID/resourceVersion update preconditions. The
+   `node-vault-live-quorum-rollout-not-qualified` blocker remains until this is
+   exercised against the real two-plane Node and three-member Vault topology.
 4. Live OCI qualification of the integrated Admin artifact installation.
 5. Complete-Cell acceptance checks covering actual protocol/readiness, not just
    the legacy single-Vault health and Core login scripts.
