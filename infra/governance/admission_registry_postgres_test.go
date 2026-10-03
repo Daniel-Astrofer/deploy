@@ -132,9 +132,9 @@ func testOrderedAdmissionConsumptionPostgres(t *testing.T, anchor TrustAnchor, p
 	if count() != 0 {
 		t.Fatal("failed consensus verification wrote registry state")
 	}
-	result, err := consumeOrderedCellAdmission(ctx, db, anchor, proof, releaseDigest, 1, raw, binding, now)
-	if err != nil || result == nil || !result.NonceConsumed || result.InstallAuthorized {
-		t.Fatal("ordered admission consumption failed", err)
+	result := testAdmissionHTTPConsumption(t, db, anchor, proof, releaseDigest, raw, binding)
+	if result == nil || !result.NonceConsumed || result.InstallAuthorized {
+		t.Fatal("ordered admission consumption failed")
 	}
 	if count() != 1 {
 		t.Fatal("successful consumption not durably recorded")

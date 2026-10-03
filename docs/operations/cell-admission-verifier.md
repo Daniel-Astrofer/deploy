@@ -35,6 +35,35 @@ This is not whole-Cell acceptance or distributed replay qualification.
 
 ## Shared registry primitive
 
+## Bank HTTP handler (production listener not wired)
+
+`admissionHTTPHandler` integrates administrative mTLS identity/scope, ordered
+release proof, quorum admission and PostgreSQL consumption. Exact POST routes are
+`/v1/cell/admissions/consume` and `/v1/cell/admissions/inspect-recovery`. The backend
+request is exactly `schema:kerosene.bank-cell-admission-request/v1`,
+`releaseLockCanonicalDigest`, `sequence`, `proof`, `envelope`; this backend format
+is owned alongside the Go consensus proof, not a replacement for Contracts'
+public admission payload. Policies, anchor, registry connection and qualified
+Cell-to-cluster bindings are server inputs, never request-supplied authority.
+
+Client certificate identity is checked before body collection. Requests are
+bounded to 8 MiB and four authenticated requests in flight; strict JSON refuses
+duplicate/unknown fields. The body is not compressed. Query parameters and
+non-JSON requests are refused. The authenticated operator must match the signed
+admission and have the exact Cell/operation grant. Errors expose only fixed codes,
+responses are no-store, and a successful response still has
+`installAuthorized:false`. Consumption commits before response; a lost response
+requires exact recovery inspection, never treating the nonce as unused.
+
+The opt-in PostgreSQL/TLS lab exercises these routes through a real mandatory-mTLS
+HTTP listener, proof verification and real restricted-role PostgreSQL consumption:
+missing client certificates, duplicated JSON and altered operator are refused;
+consumption succeeds once, replay is refused, and exact recovery inspection
+returns the retained digest. The listener is a disposable test server. Production
+listener/configuration, read/header deadlines, audit, live cluster revalidation
+and controller integration remain pending; no public service is started by the
+CLI or tests outside the explicit lab.
+
 `admissionOperatorIdentity` derives transport identity from the actual completed
 mandatory-mTLS listener state, verified certificate chain, current certificate
 validity and independently provisioned SPKI pins. Duplicate pins across operators
