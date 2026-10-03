@@ -179,6 +179,25 @@ class DatabasePlanTest(unittest.TestCase):
             self.assertNotIn("envFrom", container)
             self.assertTrue(all("emptyDir" in volume for volume in pod["volumes"]))
 
+    def test_capability_resources_use_separate_namespace_and_deny_all_before_jobs(self):
+        self.refresh()
+        update = "sha256:" + "a" * 64
+        with patch.object(lifecycle, "run") as run:
+            resources = lifecycle.initial_database_capability_resources(stack, self.artifact, self.fixture.summary, update)
+            run.assert_not_called()
+        namespace, policy, *jobs = resources
+        name = namespace["metadata"]["name"]
+        self.assertNotEqual(name, "kerosene-staging")
+        self.assertLessEqual(len(name), 63)
+        self.assertEqual(namespace["metadata"]["labels"]["pod-security.kubernetes.io/enforce"], "restricted")
+        self.assertEqual(policy["spec"], {"podSelector": {}, "policyTypes": ["Ingress", "Egress"], "ingress": [], "egress": []})
+        self.assertTrue(all(r["metadata"]["namespace"] == name for r in [policy, *jobs]))
+        self.assertEqual(resources, lifecycle.initial_database_capability_resources(stack, self.artifact, self.fixture.summary, update))
+        other = lifecycle.initial_database_capability_resources(stack, self.artifact, self.fixture.summary, "sha256:" + "b" * 64)
+        self.assertNotEqual(name, other[0]["metadata"]["name"])
+        for job in jobs:
+            self.assertEqual(job["spec"]["template"]["spec"]["containers"][0]["env"], [])
+
     def test_migration_job_identity_and_operation_are_not_operator_overrides(self):
         self.refresh()
         update = "sha256:" + "a" * 64

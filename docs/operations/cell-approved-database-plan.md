@@ -78,6 +78,18 @@ The future executor must first establish network isolation and independently
 qualify the image; self-reported JSON is not release authorization, an
 attestation, or proof that another execution path is free of side effects.
 
+`initial_database_capability_resources` prepares, in order, a dedicated
+update/plan-bound namespace with restricted Pod Security admission, a namespace-
+wide ingress/egress deny policy, and the two credential-free probe Jobs in that
+namespace. No resources are submitted. This avoids inheriting staging's global
+DNS allow policy: Kubernetes NetworkPolicy allows are additive, so another deny
+policy in staging would not remove DNS access. Before execution, refuse an
+existing probe namespace (including residual Jobs or permissive policies),
+verify live CNI enforcement and apply/verify isolation before creating pods.
+Namespace names and a deny manifest alone cannot establish that protection.
+Retain failed probe evidence; do not automatically delete namespaces or adopt
+leftover workloads. Explicit recovery must verify ownership and actual resources.
+
 Jobs are nonroot, read-only apart from bounded `/tmp`, without service-account
 tokens, extra capabilities, init containers or automatic retries. They have a
 five-minute deadline for `migrate`/`validate` and no automatic TTL cleanup. Names bind update identity,

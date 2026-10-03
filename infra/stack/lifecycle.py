@@ -377,6 +377,28 @@ def initial_database_migration_jobs(stack, artifact, summary, update_id, operati
     return jobs
 
 
+def initial_database_capability_resources(stack, artifact, summary, update_id):
+    """Prepare namespace isolation before credential-free probes; no API writes.
+
+    The executor must refuse a pre-existing namespace or overlapping allow
+    policies and qualify CNI enforcement before scheduling. Policy presence
+    alone is not proof of isolation.
+    """
+    jobs = initial_database_migration_jobs(stack, artifact, summary, update_id, "capabilities")
+    namespace = "cell-probe-" + digest({"updateId": update_id,
+        "planDigest": jobs[0]["metadata"]["annotations"]["kerosene.io/database-plan-digest"]})[7:47]
+    annotations = dict(jobs[0]["metadata"]["annotations"])
+    resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {
+        "name": namespace, "annotations": annotations,
+        "labels": {"pod-security.kubernetes.io/enforce": "restricted"}}},
+        {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy",
+         "metadata": {"name": "deny-all", "namespace": namespace, "annotations": annotations},
+         "spec": {"podSelector": {}, "policyTypes": ["Ingress", "Egress"], "ingress": [], "egress": []}}]
+    for job in jobs:
+        job["metadata"]["namespace"] = namespace
+    return resources + jobs
+
+
 def verify_external_secrets(stack, kubectl, references):
     # A template projects name and key names only; no credential value is
     # emitted, decoded, logged, journaled or included in an error.
