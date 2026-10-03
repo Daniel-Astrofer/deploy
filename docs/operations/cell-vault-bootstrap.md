@@ -1,0 +1,36 @@
+# Vault image and initial readiness boundary
+
+The Vault repository is now a Cargo workspace. The executable belongs to
+`apps/kerosene-vault` / package `kerosene-vault-app`; the root package is a
+compatibility library and integration-test harness, not a binary target.
+The Deploy Dockerfile copies `src`, `apps` and `crates`, then explicitly builds
+`-p kerosene-vault-app --bin kerosene-vault --locked`. The default production
+feature remains enabled; explicitly selected features are build-time inputs,
+not runtime command arguments or release authorization.
+
+Local `cargo metadata --locked --offline --no-deps` verified binary ownership
+and the production default, and `cargo check --locked --offline
+-p kerosene-vault-app --bin kerosene-vault` passed with existing dependency
+warnings. The static Dockerfile regression is not an OCI build or qualification.
+The actual image build remains unverified while Docker storage is full.
+
+## Unresolved authenticated readiness
+
+The staging-vault overlay uses an HTTPS HTTP probe for `/v1/health`, without
+a client certificate. Vault's mandatory Rustls client verifier rejects clients
+without a certificate even for this public HTTP route. The repository's
+`mtls_axum_health_requires_client_cert` integration test explicitly covers this
+TLS boundary. Kubelet HTTP probes cannot supply the required client identity.
+
+Do not disable client authentication, use forwarded certificate headers or
+replace this check with a TCP probe and call it authenticated readiness.
+The ordinary staging replicas currently use TCP probes; those prove only that
+a listener exists, not health, compatibility, quorum or signer readiness.
+A credential-file-based in-image health command, implemented without starting
+another Vault runtime/signer, and a qualified exec probe are still required.
+Certificate paths must reference already provisioned secrets; no keys or
+passphrases may enter command arguments or output. Hostname/CA verification
+must remain enabled. Do not apply a future probe to an old image that lacks it.
+
+No live Vault deployment, certificate ceremony, custody mutation or signer
+activation was performed. These findings keep full-Cell execution blocked.

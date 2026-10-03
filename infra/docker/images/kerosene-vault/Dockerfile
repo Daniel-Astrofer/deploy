@@ -7,13 +7,14 @@ ARG CARGO_FEATURES=
 ENV CARGO_BUILD_JOBS=1
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY apps ./apps
 COPY crates ./crates
 # Tests run in CI before image construction. The image stage performs one
 # reproducible release build to keep peak memory bounded.
 RUN if [ -n "$CARGO_FEATURES" ]; then \
-      cargo build --locked --release --no-default-features --features "$CARGO_FEATURES" --bin kerosene-vault; \
+      cargo build --locked --release -p kerosene-vault-app --no-default-features --features "$CARGO_FEATURES" --bin kerosene-vault; \
     else \
-      cargo build --locked --release --bin kerosene-vault; \
+      cargo build --locked --release -p kerosene-vault-app --bin kerosene-vault; \
     fi
 
 FROM debian:bookworm-slim
