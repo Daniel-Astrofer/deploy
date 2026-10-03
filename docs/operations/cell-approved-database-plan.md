@@ -94,6 +94,12 @@ operations, invalid encoding and non-finite JSON are rejected without echoing
 stdout. The collector must bound subprocess/log collection before calling it;
 this parser does not bound an already allocated input. It validates syntax and
 contract only, not pod UID, image identity, exit status or network isolation.
+The POSIX `probe_process.run_probe` transport bounds concurrent stdout/stderr
+collection to 4096 bytes each and at most 30 seconds, rejects nonzero exit or
+any stderr, and kills/reaps the process group on collection failure. It never
+includes command arguments or output in errors. The controller still owns argv
+authorization, environment isolation and container/pod cleanup; this helper is
+not an OS sandbox and is not wired into automatic Cell execution yet.
 Retain failed probe evidence; do not automatically delete namespaces or adopt
 leftover workloads. Explicit recovery must verify ownership and actual resources.
 
