@@ -17,6 +17,7 @@ import ssl
 import subprocess
 import tempfile
 import urllib.parse
+import urllib.error
 import urllib.request
 import admin_install
 import probe_process
@@ -741,11 +742,12 @@ def execute(stack, artifact, summary, args, checkpoint):
         verify_empty_installation(stack, kubectl)
         if not args.dry_run and initial_database_plan(stack, artifact, summary) is None:
             raise stack.ApplyBlockedError("initial installation requires an approved database plan")
+        verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
         if not args.dry_run:
-            # Update maintenance requires an existing KFE. Do not silently use
-            # that protocol for bootstrap, or skip it without initial admission.
-            raise stack.ApplyBlockedError("initial installation requires independently verified Bank initial admission; bootstrap executor is not integrated")
-    verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
+            admission = consume_initial_admission(stack, config, summary, args)
+            checkpoint("initial-admission-consumed", admission)
+    else:
+        verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
     if not args.dry_run:
         receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],
                                        stack.canonical_digest(args._release), run)
@@ -843,6 +845,103 @@ def verify_consensus(stack, directory, config, proof, release_digest, summary):
     evidence["signaturesVerified"] = summary["bft"]["threshold"]
     evidence["consensusVerified"] = True
     return evidence
+
+
+def consume_initial_admission(stack, config, summary, args):
+    required = tuple(getattr(args, name, None) for name in
+                     ("initial_admission", "admission_endpoint", "admission_ca",
+                      "admission_cert", "admission_key", "consensus_proof",
+                      "operator_id", "change_id"))
+    if any(not value for value in required):
+        raise stack.ApplyBlockedError("initial installation requires Bank initial admission envelope, mTLS endpoint and identity")
+    cluster = config.get("cluster")
+    if not cluster or not cluster.get("systemNamespaceUid"):
+        raise stack.ApplyBlockedError("initial admission requires the independently observed cluster identity")
+    try:
+        endpoint = urllib.parse.urlsplit(args.admission_endpoint)
+        port = endpoint.port
+    except ValueError as error:
+        raise stack.ApplyBlockedError("invalid Bank admission endpoint") from error
+    if (endpoint.scheme != "https" or not endpoint.hostname or endpoint.username is not None or
+            endpoint.password is not None or endpoint.query or endpoint.fragment or
+            endpoint.path not in {"", "/"} or (port is not None and not 1 <= port <= 65535)):
+        raise stack.ApplyBlockedError("Bank admission endpoint must be a credential-free HTTPS origin")
+    envelope = stack.read_json_document(args.initial_admission, "initial Cell admission envelope")
+    proof = stack.read_json_document(args.consensus_proof, "ordered consensus proof")
+    admission = envelope.get("admission") if isinstance(envelope, dict) else None
+    fields = {"cellId", "changeId", "clusterUid", "epoch", "expiresAtUnixSeconds",
+              "issuedAtUnixSeconds", "networkId", "nonce", "operatorId",
+              "releaseApprovalDigest", "schema"}
+    if not isinstance(admission, dict) or set(admission) != fields:
+        raise stack.ApplyBlockedError("initial admission payload shape is invalid")
+    expected = {"cellId": config["cellId"], "clusterUid": cluster["systemNamespaceUid"],
+                "operatorId": args.operator_id, "changeId": args.change_id,
+                "networkId": summary["bft"]["networkId"], "epoch": summary["bft"]["epoch"]}
+    if any(admission.get(key) != value for key, value in expected.items()):
+        raise stack.ApplyBlockedError("initial admission identity or cluster binding differs")
+    request = {"schema": "kerosene.bank-cell-admission-request/v1",
+               "releaseLockCanonicalDigest": summary["_canonicalDigest"],
+               "sequence": summary["sequence"], "proof": proof, "envelope": envelope}
+    ca = stack.read_regular_file_bytes(Path(args.admission_ca), "Bank admission CA", 1024 * 1024)
+    certificate = stack.read_regular_file_bytes(Path(args.admission_cert), "Bank admission certificate", 1024 * 1024)
+    private_key = stack.read_regular_file_bytes(Path(args.admission_key), "Bank admission private key", 1024 * 1024)
+    try:
+        context = ssl.create_default_context(cadata=ca.decode("ascii"))
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        with tempfile.TemporaryDirectory(prefix="kerosene-admission-tls-") as directory:
+            cert_path, key_path = Path(directory) / "client.crt", Path(directory) / "client.key"
+            cert_path.write_bytes(certificate)
+            key_path.write_bytes(private_key)
+            os.chmod(cert_path, 0o600)
+            os.chmod(key_path, 0o600)
+            context.load_cert_chain(cert_path, key_path)
+    except (UnicodeDecodeError, ValueError, OSError, ssl.SSLError) as error:
+        raise stack.ApplyBlockedError("protected Bank admission TLS identity is invalid") from error
+    url = urllib.parse.urlunsplit((endpoint.scheme, endpoint.netloc, "/v1/cell/admissions/consume", "", ""))
+    http_request = urllib.request.Request(url, data=canonical(request), method="POST",
+                                          headers={"Content-Type": "application/json", "Accept": "application/json"})
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            raise stack.ApplyBlockedError("Bank admission redirect forbidden")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                         urllib.request.HTTPSHandler(context=context), NoRedirect())
+    try:
+        with opener.open(http_request, timeout=45) as response:
+            if response.status != 200 or response.headers.get_content_type() != "application/json":
+                raise stack.ApplyBlockedError("Bank initial admission was not consumed")
+            raw = response.read(16385)
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError, ssl.SSLError) as error:
+        raise stack.ApplyBlockedError("Bank initial admission failed or is uncertain; inspect recovery before retry") from error
+    if len(raw) > 16384:
+        raise stack.ApplyBlockedError("Bank admission response exceeds the bounded contract")
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate Bank admission response field")
+            result[key] = value
+        return result
+    try:
+        result = json.loads(raw, object_pairs_hook=unique_fields,
+                            parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite Bank response")))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise stack.ApplyBlockedError("Bank admission response is invalid") from error
+    if not isinstance(result, dict) or set(result) != {"schema", "admissionDigest", "consensus", "nonceConsumed", "installAuthorized"}:
+        raise stack.ApplyBlockedError("Bank admission response shape is invalid")
+    consensus = result.get("consensus")
+    expected_consensus = {"schema": "kerosene.release-consensus-verification/v1",
+                          "releaseLockCanonicalDigest": summary["_canonicalDigest"],
+                          "networkId": summary["bft"]["networkId"], "epoch": summary["bft"]["epoch"],
+                          "sequence": summary["sequence"]}
+    admission_digest = "sha256:" + hashlib.sha256(canonical(admission)).hexdigest()
+    if (result["schema"] != "kerosene.cell-admission-verification/v1" or
+            result["admissionDigest"] != admission_digest or result["nonceConsumed"] is not True or
+            result["installAuthorized"] is not False or not isinstance(consensus, dict) or
+            any(consensus.get(key) != value for key, value in expected_consensus.items())):
+        raise stack.ApplyBlockedError("Bank admission response does not bind this exact installation")
+    return {"schema": result["schema"], "admissionDigest": admission_digest,
+            "nonceConsumed": True, "bankInstallAuthorized": False,
+            "cellId": config["cellId"], "clusterUid": cluster["systemNamespaceUid"]}
 
 
 def verify_maintenance(stack, args):

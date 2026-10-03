@@ -98,8 +98,9 @@ fixed mandatory-mTLS server before binding. SIGINT/SIGTERM stop new requests and
 allow up to 45 seconds for active requests; forced shutdown requires inspection
 of uncertain consumption. Restart retains registry records and does not reuse
 nonces. It creates no roles, certificates, policies or Cell workloads. The
-live cluster binding
-revalidation and installation controller integration remain pending. Do not
+live cluster binding revalidation remains pending. The installation controller
+now consumes initial admission through this endpoint after checking empty
+inventory, the approved database plan and required external Secrets. Do not
 interpret a successfully started admission listener as complete Cell acceptance.
 
 The opt-in real PostgreSQL/TLS harness also exercises `runAdmissionService`, the

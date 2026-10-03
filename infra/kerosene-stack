@@ -2049,8 +2049,9 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
             lifecycle.require_execution_capabilities(sys.modules[__name__])
         tuf_result = verify_tuf_authorization(release, summary["_releaseBytes"], summary, args, require_full=True)
         receipt_result = verify_consensus_authorization(release, summary, args)
-        if not args.dry_run:
+        if not args.dry_run and args.command != "install":
             lifecycle.verify_maintenance(sys.modules[__name__], args)
+        if not args.dry_run:
             lifecycle.verify_recovery_plan(sys.modules[__name__], release, summary, args)
         observer_result = verify_bank_observer_report(
             release,
@@ -2243,6 +2244,7 @@ def command_update(args: argparse.Namespace) -> int:
         args.snapshot_attestation_request = args.snapshot_attestation_request or str(bundle / "snapshot-attestation-request.json")
         args.snapshot_receipt = args.snapshot_receipt or str(bundle / "snapshot-receipt.json")
         args.consensus_proof = args.consensus_proof or str(bundle / "consensus-proof.json")
+        args.initial_admission = args.initial_admission or str(bundle / "cell-admission.json")
     if not args.release:
         raise ReleaseValidationError("--release or --bundle-dir is required")
     if args.command == "install":
@@ -2409,6 +2411,11 @@ def build_parser() -> argparse.ArgumentParser:
     update.add_argument("--change-id", help="audited operator change identifier")
     update.add_argument("--operator-id", help="local operator attribution, not a substitute for API authentication")
     update.add_argument("--consensus-proof", help="v3 real CometBFT ordered approval and application-state proof")
+    update.add_argument("--initial-admission", help="quorum-signed initial Cell admission envelope consumed by Bank")
+    update.add_argument("--admission-endpoint", help="Bank admission HTTPS origin; exact consume route is fixed")
+    update.add_argument("--admission-ca", help="Bank admission TLS trust CA")
+    update.add_argument("--admission-cert", help="operator mTLS certificate for Bank admission")
+    update.add_argument("--admission-key", help="operator mTLS key reference; never stored in the journal")
     update.add_argument("--maintenance-endpoint", help="HTTPS KFE maintenance status endpoint, rechecked at each runtime phase")
     update.add_argument("--maintenance-ca", help="KFE TLS trust CA")
     update.add_argument("--maintenance-cert", help="operator mTLS certificate")

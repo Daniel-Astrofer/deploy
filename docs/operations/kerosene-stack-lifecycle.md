@@ -93,11 +93,22 @@ No resources or volumes are deleted by these checks. The inventory is not a
 distributed lock against other cluster administrators; admission and exclusive
 operational control still need full-Cell qualification.
 
-The first-install admission/recovery contract remains incomplete: the shared
-pipeline still requires live KFE maintenance and snapshot/recovery evidence
-designed for updates. These requirements are not waived merely because the
-cluster inventory is empty. Initial installation must obtain a separately
-qualified no-existing-financial-state bootstrap path before live apply is usable.
+First install no longer requires the live KFE drain endpoint, because no KFE
+exists yet. It still requires the release-bound snapshot/recovery evidence and a
+separately quorum-signed initial admission. Immediately before the first Admin or
+Kubernetes write, the controller sends the exact consensus proof, release digest,
+sequence and admission envelope to the fixed Bank consume route over mTLS. The
+admission must bind the configured Cell ID, independently observed kube-system
+UID, operator, change, Bank network and epoch. Missing inventory, database-plan
+or external-Secret prerequisites fail before the nonce is consumed.
+
+The client refuses proxies and redirects, bounds the response, rejects duplicate
+JSON fields, and validates the returned admission digest plus consensus domain.
+The Bank deliberately returns `installAuthorized:false`: its role is durable
+quorum verification and one-time nonce consumption. The local controller may
+continue only after proving that exact result; a transport failure is uncertain
+and requires recovery inspection, never an automatic retry. Live full-Cell
+qualification and that controller recovery path remain incomplete.
 
 ## Approved manifest and evidence
 

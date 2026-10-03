@@ -10,8 +10,9 @@ from pathlib import Path
 import sys
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 loader = importlib.machinery.SourceFileLoader("tested_stack", str(ROOT / "kerosene-stack"))
@@ -146,6 +147,66 @@ class DeploymentTest(unittest.TestCase):
             with self.subTest(inventory=inventory), patch.object(lifecycle, "run", side_effect=replies), self.assertRaisesRegex(stack.ApplyBlockedError, "inventory is invalid"):
                 lifecycle.verify_empty_installation(stack, ["/bound-kubectl"])
 
+    def test_initial_admission_consumes_exact_cell_cluster_and_release(self):
+        admission = {"cellId": "cell-a", "changeId": "change-a",
+                     "clusterUid": "00000000-0000-0000-0000-000000000001",
+                     "epoch": 1, "expiresAtUnixSeconds": 2000,
+                     "issuedAtUnixSeconds": 1000, "networkId": "bank-a",
+                     "nonce": "a" * 64, "operatorId": "operator-a",
+                     "releaseApprovalDigest": "sha256:" + "b" * 64,
+                     "schema": "kerosene.cell-admission/v1"}
+        envelope = {"admission": admission, "signatures": []}
+        admission_path = self.root / "admission.json"
+        proof_path = self.root / "proof.json"
+        admission_path.write_text(json.dumps(envelope))
+        proof_path.write_text(json.dumps({"schema": "proof"}))
+        summary = {"_canonicalDigest": "sha256:" + "c" * 64, "sequence": 3,
+                   "bft": {"networkId": "bank-a", "epoch": 1}}
+        args = SimpleNamespace(initial_admission=str(admission_path), admission_endpoint="https://bank.example:8443",
+                               admission_ca="/ca", admission_cert="/cert", admission_key="/key",
+                               consensus_proof=str(proof_path), operator_id="operator-a", change_id="change-a")
+        consensus = {"schema": "kerosene.release-consensus-verification/v1",
+                     "releaseLockCanonicalDigest": summary["_canonicalDigest"], "networkId": "bank-a",
+                     "epoch": 1, "sequence": 3, "approvalDigest": "sha256:" + "d" * 64}
+        response_body = lifecycle.canonical({"schema": "kerosene.cell-admission-verification/v1",
+                                             "admissionDigest": "sha256:" + lifecycle.hashlib.sha256(lifecycle.canonical(admission)).hexdigest(),
+                                             "consensus": consensus, "nonceConsumed": True, "installAuthorized": False})
+        response = MagicMock()
+        response.status = 200
+        response.headers.get_content_type.return_value = "application/json"
+        response.read.return_value = response_body
+        response.__enter__.return_value = response
+        tls = MagicMock()
+        config = {"cellId": "cell-a", "cluster": {"systemNamespaceUid": admission["clusterUid"]}}
+        opener = MagicMock()
+        opener.open.return_value = response
+        protected_read = lambda path, *_: Path(path).read_bytes() if Path(path).exists() else b"synthetic-pem"
+        with patch.object(stack, "read_regular_file_bytes", side_effect=protected_read), \
+                patch.object(lifecycle.ssl, "create_default_context", return_value=tls), \
+                patch.object(lifecycle.urllib.request, "build_opener", return_value=opener):
+            evidence = lifecycle.consume_initial_admission(stack, config, summary, args)
+        self.assertTrue(evidence["nonceConsumed"])
+        self.assertFalse(evidence["bankInstallAuthorized"])
+        sent = json.loads(opener.open.call_args.args[0].data)
+        self.assertEqual(sent["releaseLockCanonicalDigest"], summary["_canonicalDigest"])
+        self.assertEqual(opener.open.call_args.args[0].full_url, "https://bank.example:8443/v1/cell/admissions/consume")
+        tls.load_cert_chain.assert_called_once()
+
+    def test_initial_admission_rejects_binding_mismatch_before_network(self):
+        path = self.root / "admission.json"
+        path.write_text(json.dumps({"admission": {"cellId": "wrong"}, "signatures": []}))
+        proof = self.root / "proof.json"
+        proof.write_text("{}")
+        args = SimpleNamespace(initial_admission=str(path), admission_endpoint="https://bank.example",
+                               admission_ca="/ca", admission_cert="/cert", admission_key="/key",
+                               consensus_proof=str(proof), operator_id="operator-a", change_id="change-a")
+        config = {"cellId": "cell-a", "cluster": {"systemNamespaceUid": "00000000-0000-0000-0000-000000000001"}}
+        summary = {"_canonicalDigest": "sha256:" + "c" * 64, "sequence": 1,
+                   "bft": {"networkId": "bank-a", "epoch": 1}}
+        with patch.object(lifecycle.urllib.request, "build_opener") as request, self.assertRaises(stack.ApplyBlockedError):
+            lifecycle.consume_initial_admission(stack, config, summary, args)
+        request.assert_not_called()
+
     def test_install_rechecks_journal_under_lock_before_authorization(self):
         args = stack.build_parser().parse_args(["install", "--release", "unit.json", "--apply", "--state-dir", str(self.root)])
         for field in ["consensus_proof", "validator_roster", "bank_observer_report", "snapshot_attestation_request", "snapshot_receipt", "snapshot_provider_key"]:
@@ -276,6 +337,8 @@ class DeploymentTest(unittest.TestCase):
              patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]), \
              patch.object(lifecycle, "verify_empty_installation"), \
              patch.object(lifecycle, "initial_database_plan", return_value={"mode": "initial"}), \
+             patch.object(lifecycle, "verify_external_secrets"), \
+             patch.object(lifecycle, "required_secret_references", return_value=[]), \
              patch.object(lifecycle.admin_install, "install") as admin, \
              patch.object(lifecycle, "apply_resource") as apply, \
              patch.object(lifecycle, "verify_maintenance") as maintenance, \
