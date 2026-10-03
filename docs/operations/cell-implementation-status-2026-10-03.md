@@ -8,13 +8,37 @@ component evidence there is historical, not a newly rerun full-Cell test.
 
 KFE work remains on isolated `feat/complete-cell-operations`, current commit
 `e45e3f2` (continues `d866416`, `0c46542` and `074e08a`). Deploy remains on
-`feat/staging-volumesnapshot-attestation-request`; this Deploy wave changes
-documentation only. Dirty primary checkouts were untouched. No production update,
+`feat/staging-volumesnapshot-attestation-request`; the latest Deploy wave changes
+the complete-Cell workload planner and executor as described below. Dirty primary checkouts were untouched. No production update,
 real custody/provider action, release authority provisioning or signer activation.
 Admin's current isolated `feat/complete-cell-operations` commit is `f84dec2`;
 it adds a bounded KFE diagnostic client, not Admin installation by the updater.
 
 ## Implemented and verified
+
+### Complete-Cell orchestration follow-up
+
+The executor no longer places Node/Vault after their application consumers or
+groups Bitcoin and LND into one readiness phase. Runtime ordering is now
+PostgreSQL/Redis/Tor → Bitcoin → LND → Node/Vault → Core/KFE → web-page.
+Core/KFE workloads are submitted together before either readiness wait, avoiding
+a submission dependency deadlock from their reciprocal integration references.
+This remains an explicitly limited startup policy, not quorum-safe update or
+application-protocol readiness qualification.
+
+Planning rejects missing components, ambiguous image ownership and unsupported
+cross-phase container colocation before Kubernetes resource writes. All actual
+Node/Vault workloads are retained, including multiple workload identities.
+Admin/jctl is recognized as an operator CLI, not a daemon to be kept alive in a
+Deployment. Its protected artifact installation is still unimplemented; the
+four real-apply capability blockers remain unchanged.
+
+Verification: **22 lifecycle unit tests and 18 archive tests passed**, including
+complete inventory/order, multiple Vault workloads, invalid topology pre-write
+rejection, init-only service rejection, and application submission-before-wait assertions. Executor ordering
+tests mock the external capabilities/Kubernetes responses; no real install,
+quorum update, migration, data recovery or production command was executed.
+The lifecycle runbook describes unsupported topology and interruption limits.
 
 Three disjoint workers implemented bounded leaves; the coordinator reviewed and
 integrated them, owned all builds, and repaired the shared transaction guard.

@@ -46,6 +46,72 @@ class DeploymentTest(unittest.TestCase):
     def test_exact_configuration(self):
         self.assertEqual(self.verify(), self.artifact)
 
+    def test_complete_cell_dependency_phases_independent_of_manifest_order(self):
+        self.artifact["resources"].reverse()
+        groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
+        self.assertEqual([{r["metadata"]["name"] for r in group} for group in groups],
+                         [{"postgres", "redis", "tor"}, {"bitcoin"}, {"lnd"},
+                          {"node", "vault"}, {"core", "kfe"}, {"web-page"}])
+
+    def test_multiple_vault_workloads_preserve_inventory(self):
+        vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault")
+        replica = copy.deepcopy(vault)
+        replica["metadata"]["name"] = "vault-secondary"
+        self.artifact["resources"].append(replica)
+        groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
+        self.assertEqual([r["metadata"]["name"] for r in groups[3]], ["node", "vault", "vault-secondary"])
+
+    def test_cross_phase_colocation_is_rejected_not_misordered(self):
+        bitcoin = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "bitcoin")
+        bitcoin["spec"]["template"]["spec"]["initContainers"] = [{"name": "lnd", "image": self.summary["services"]["lnd"]["image"]}]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "dependency phases"):
+            lifecycle.workload_phases(stack, self.artifact, self.summary)
+
+    def test_operator_cli_is_not_a_daemon(self):
+        resource = self.artifact["resources"][1]
+        resource["spec"]["template"]["spec"]["containers"][0]["image"] = self.summary["services"]["admin"]["image"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "Admin CLI"):
+            lifecycle.workload_phases(stack, self.artifact, self.summary)
+
+    def test_init_container_does_not_satisfy_service_inventory(self):
+        node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node")
+        pod = node["spec"]["template"]["spec"]
+        pod["initContainers"] = pod["containers"]
+        pod["containers"] = [{"name": "vault", "image": self.summary["services"]["vault"]["image"]}]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components: node"):
+            lifecycle.workload_phases(stack, self.artifact, self.summary)
+
+    def test_missing_or_ambiguous_component_identity_blocks(self):
+        changed = copy.deepcopy(self.artifact)
+        changed["resources"] = [r for r in changed["resources"] if r["metadata"]["name"] != "node"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components: node"):
+            lifecycle.workload_phases(stack, changed, self.summary)
+        summary = copy.deepcopy(self.summary)
+        summary["services"]["node"]["image"] = summary["services"]["vault"]["image"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "unique approved component"):
+            lifecycle.workload_phases(stack, self.artifact, summary)
+
+    def test_application_phase_is_submitted_before_readiness_waits(self):
+        from types import SimpleNamespace
+        events = []
+        # Test orchestration only: capabilities and readiness are mocked. This
+        # deliberately provides no qualification for live apply or quorum.
+        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value={}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run"), patch.dict(lifecycle.os.environ, {}, clear=True):
+            lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only"), lambda *_: None)
+        for name in ["core", "kfe"]:
+            for consumer in ["core", "kfe"]:
+                self.assertLess(events.index(("apply", name)), events.index(("ready", consumer)))
+        self.assertLess(events.index(("ready", "bitcoin")), events.index(("apply", "lnd")))
+        self.assertLess(events.index(("ready", "vault")), events.index(("apply", "core")))
+
+    def test_invalid_phase_blocks_before_any_kubernetes_write(self):
+        from types import SimpleNamespace
+        self.artifact["resources"] = [r for r in self.artifact["resources"] if r["metadata"]["name"] != "node"]
+        with patch.object(lifecycle, "load_config", return_value={}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "apply_resource") as apply, patch.dict(lifecycle.os.environ, {}, clear=True):
+            with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components"):
+                lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=True, cell_dir="unit-only"), lambda *_: None)
+            apply.assert_not_called()
+
     def test_v3_matches_actual_static_consensus_capabilities_and_integer_range(self):
         release = copy.deepcopy(self.release)
         release.update(schema="kerosene.release-lock/v3", schemaVersion=3)

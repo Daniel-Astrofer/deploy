@@ -131,6 +131,7 @@ def verify_deployment(stack, release, summary, path):
             raise stack.ApplyBlockedError(f"missing deployed component: {name}")
         if digest(component_config(artifact, service["image"], name)) != service["configDigest"]:
             raise stack.ApplyBlockedError(f"approved configuration digest mismatch: {name}")
+    workload_phases(stack, artifact, summary)
     return artifact
 
 
@@ -147,6 +148,44 @@ def apply_resource(kubectl, resource, dry_run=False):
     if dry_run:
         argv.append("--dry-run=server")
     run(argv, input_bytes=canonical(resource))
+
+
+def workload_phases(stack, artifact, summary):
+    """Plan infrastructure before consumers, without serializing cyclic apps.
+
+    This is startup ordering, not a quorum-preserving update algorithm. The
+    separate execution capability gate remains mandatory for real apply.
+    Admin/jctl is an operator artifact, never a long-running workload.
+    """
+    phases = ({"postgres", "redis", "tor"}, {"bitcoin"}, {"lnd"},
+              {"node", "vault"}, {"core", "kfe"}, {"web-page"})
+    images = {}
+    for name, service in summary["services"].items():
+        images.setdefault(service["image"], set()).add(name)
+    groups = [[] for _ in phases]
+    observed = set()
+    for resource in artifact["resources"]:
+        if resource["kind"] not in WORKLOADS:
+            continue
+        names = set()
+        for container in containers(resource):
+            owners = images.get(container.get("image"), set())
+            if len(owners) != 1:
+                raise stack.ApplyBlockedError("workload image lacks a unique approved component identity")
+            names.update(owners)
+        if not names or "admin" in names:
+            raise stack.ApplyBlockedError("Admin CLI cannot be installed as a runtime workload")
+        indexes = {i for i, phase in enumerate(phases) if names & phase}
+        if len(indexes) != 1 or not names <= phases[next(iter(indexes))]:
+            raise stack.ApplyBlockedError("workload mixes unsupported Cell dependency phases")
+        groups[next(iter(indexes))].append(resource)
+        # A completed init container does not keep a Cell service running.
+        for container in resource.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []):
+            observed.update(images[container["image"]])
+    missing = set(summary["services"]) - {"admin"} - observed
+    if missing:
+        raise stack.ApplyBlockedError("missing runtime components: " + ", ".join(sorted(missing)))
+    return [sorted(group, key=identity) for group in groups if group]
 
 
 def verify_running(kubectl, resource):
@@ -202,27 +241,29 @@ def execute(stack, artifact, summary, args, checkpoint):
     if any(os.environ.get(k) for k in ("KUBECTL", "KEROSENE_SKIP_STAGING_SMOKES", "KEROSENE_FORCE_CONFLICTS")):
         raise stack.ApplyBlockedError("approved execution forbids tool/gate override environment variables")
     prerequisites = [r for r in artifact["resources"] if r["kind"] not in WORKLOADS]
-    workloads = [r for r in artifact["resources"] if r["kind"] in WORKLOADS]
+    phases = workload_phases(stack, artifact, summary)
     # Apply non-runtime inputs first. Explicit ordering prevents HPA creation
     # from silently changing approved replicas before validation.
     prerequisites.sort(key=lambda r: (0 if r["kind"] == "Namespace" else 2 if r["kind"] == "HorizontalPodAutoscaler" else 1, identity(r)))
-    def rank(resource):
-        names = {n for n, s in summary["services"].items() if any(c.get("image") == s["image"] for c in containers(resource))}
-        phase = 4 if names & {"node", "vault"} else 0 if names & {"postgres", "redis"} else 1 if names & {"bitcoin", "lnd", "tor"} else 3 if "web-page" in names else 2
-        return phase, identity(resource)
-    workloads.sort(key=rank)
     # Validate all unsupported policies before the first Kubernetes write.
     if any(r["kind"] == "HorizontalPodAutoscaler" for r in prerequisites):
         raise stack.ApplyBlockedError("HPA requires a separately approved freeze/restore policy during Cell update")
     for resource in prerequisites:
         apply_resource(kubectl, resource, args.dry_run)
-    for resource in workloads:
-        label = "/".join(identity(resource))
-        if not args.dry_run:
-            verify_maintenance(stack, args)
-        checkpoint("before:" + label, {})
-        apply_resource(kubectl, resource, args.dry_run)
-        if not args.dry_run:
+    for phase in phases:
+        # Core and KFE have reciprocal integration references. Submit the
+        # entire phase before waiting, otherwise the first readiness gate can
+        # deadlock bootstrap by waiting for a service not yet created.
+        for resource in phase:
+            label = "/".join(identity(resource))
+            if not args.dry_run:
+                verify_maintenance(stack, args)
+            checkpoint("before:" + label, {})
+            apply_resource(kubectl, resource, args.dry_run)
+        if args.dry_run:
+            continue
+        for resource in phase:
+            label = "/".join(identity(resource))
             ns, kind, name = identity(resource)
             run(kubectl + ["-n", ns, "rollout", "status", f"{kind.lower()}/{name}", "--timeout=110s"])
             checkpoint("ready:" + label, {"runtime": verify_running(kubectl, resource)})

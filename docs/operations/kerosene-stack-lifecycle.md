@@ -58,6 +58,32 @@ staging Cell namespaces. Secrets, arbitrary jobs, RBAC, host namespaces,
 hostPath, privileged containers and unqualified HPA policies are rejected.
 Unsupported policies are checked before any Kubernetes write.
 
+The executor now validates a complete runtime inventory and uses explicit
+startup phases: PostgreSQL/Redis/Tor, Bitcoin, LND, Node/Vault, Core/KFE,
+then web-page. Each phase is submitted before its workloads are awaited;
+in particular Core/KFE reciprocal integration references must not serialize
+their initial submission. Every preceding phase must become Kubernetes-ready
+before the next is submitted. This is an ordering policy, not proof of RPC,
+financial readiness or consensus health. Multiple Node/Vault workloads remain
+in the inventory; this does not implement their replica-by-replica update.
+Unidentified/ambiguously identified images, missing runtime components and
+cross-phase colocated containers (including init containers) are unsupported
+and block execution before resource writes, rather than silently choosing an
+unsafe order. Such topologies need a separately implemented dependency policy.
+
+The Admin image currently refers to the `kerosene-jctl` operator CLI, whose
+container entrypoint exits after a command. It is not a permanent Deployment;
+the planner rejects using it as one. The web client is a separate component.
+Installing and upgrading the operator artifact with its protected identity/TLS
+references remains an explicit implementation blocker. No fallback to a
+source build, mutable image, or automatic signer activation is introduced.
+
+These phases are not a qualified live install or update. On interruption,
+previously submitted resources may remain; the executor does not delete PVCs,
+reset identities or automatically roll back data. Existing journal recovery
+and capability blockers still apply. Kubernetes readiness tests are mocked
+in the orchestration suite and cannot substitute for a complete Cell run.
+
 Authorization requires full offline TUF metadata, ordered v3 consensus proof,
 fresh independently signed Bank aggregate, independently approved snapshot
 request and signed tested restore receipt. TUF state preserves delegated-role
