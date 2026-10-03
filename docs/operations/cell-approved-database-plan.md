@@ -98,7 +98,11 @@ Retain failed probe evidence; do not automatically delete namespaces or adopt
 leftover workloads. Explicit recovery must verify ownership and actual resources.
 
 Jobs are nonroot, read-only apart from bounded `/tmp`, without service-account
-tokens, extra capabilities, init containers or automatic retries. They have a
+tokens, extra capabilities, init containers or automatic retries. The
+PodSpec explicitly disables service-link environment injection and host network,
+PID and IPC namespaces; credentials/endpoints are not inferred from Services.
+These fields must remain unchanged by admission before execution.
+They have a
 five-minute deadline for `migrate`/`validate` and no automatic TTL cleanup. Names bind update identity,
 plan digest, component and operation; complete identities remain in annotations.
 Existing Jobs must still be matched by actual UID/spec and journal ownership

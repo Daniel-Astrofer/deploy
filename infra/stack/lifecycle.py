@@ -362,6 +362,7 @@ def initial_database_migration_jobs(stack, artifact, summary, update_id, operati
             "spec": {"backoffLimit": 0, "activeDeadlineSeconds": 30 if operation == "capabilities" else 300, "template": {
                 "metadata": {"labels": labels}, "spec": {
                     "restartPolicy": "Never", "automountServiceAccountToken": False,
+                    "enableServiceLinks": False, "hostNetwork": False, "hostPID": False, "hostIPC": False,
                     "securityContext": {"runAsNonRoot": True, "runAsUser": 65532, "runAsGroup": 65532,
                                         "fsGroup": 65532, "seccompProfile": {"type": "RuntimeDefault"}},
                     "containers": [{"name": "migration", "image": image, "imagePullPolicy": "IfNotPresent",

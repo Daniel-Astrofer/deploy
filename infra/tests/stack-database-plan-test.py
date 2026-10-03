@@ -148,6 +148,8 @@ class DatabasePlanTest(unittest.TestCase):
             pod = job["spec"]["template"]["spec"]
             self.assertEqual(pod["restartPolicy"], "Never")
             self.assertIs(pod["automountServiceAccountToken"], False)
+            for field in ("enableServiceLinks", "hostNetwork", "hostPID", "hostIPC"):
+                self.assertIs(pod[field], False)
             self.assertNotIn("initContainers", pod)
             container = pod["containers"][0]
             self.assertEqual(container["image"], self.fixture.summary["services"][component]["image"])
