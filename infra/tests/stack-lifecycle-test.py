@@ -50,8 +50,8 @@ class DeploymentTest(unittest.TestCase):
         self.artifact["resources"].reverse()
         groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
         self.assertEqual([{r["metadata"]["name"] for r in group} for group in groups],
-                         [{"postgres", "redis", "tor"}, {"bitcoin"}, {"lnd"},
-                          {"node", "vault"}, {"core", "kfe"}, {"web-page"}])
+                         [{"postgres", "redis", "tor", "node"}, {"bitcoin"}, {"lnd"},
+                          {"vault"}, {"core", "kfe"}, {"web-page"}])
 
     def test_multiple_vault_workloads_preserve_inventory(self):
         vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault")
@@ -59,7 +59,18 @@ class DeploymentTest(unittest.TestCase):
         replica["metadata"]["name"] = "vault-secondary"
         self.artifact["resources"].append(replica)
         groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
-        self.assertEqual([r["metadata"]["name"] for r in groups[3]], ["node", "vault", "vault-secondary"])
+        self.assertEqual([r["metadata"]["name"] for r in groups[3]], ["vault", "vault-secondary"])
+
+    def test_canonical_node_tor_sidecar_topology_is_supported_in_both_planes(self):
+        node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node")
+        tor = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "tor")
+        tor["spec"]["template"]["spec"]["containers"].extend(node["spec"]["template"]["spec"]["containers"])
+        self.artifact["resources"].remove(node)
+        second = copy.deepcopy(tor)
+        second["metadata"].update(name="vault-tor", namespace="kerosene-staging-vault")
+        self.artifact["resources"].append(second)
+        first = lifecycle.workload_phases(stack, self.artifact, self.summary)[0]
+        self.assertEqual({r["metadata"]["name"] for r in first}, {"postgres", "redis", "tor", "vault-tor"})
 
     def test_cross_phase_colocation_is_rejected_not_misordered(self):
         bitcoin = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "bitcoin")
@@ -77,7 +88,7 @@ class DeploymentTest(unittest.TestCase):
         node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node")
         pod = node["spec"]["template"]["spec"]
         pod["initContainers"] = pod["containers"]
-        pod["containers"] = [{"name": "vault", "image": self.summary["services"]["vault"]["image"]}]
+        pod["containers"] = [{"name": "tor", "image": self.summary["services"]["tor"]["image"]}]
         with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components: node"):
             lifecycle.workload_phases(stack, self.artifact, self.summary)
 
@@ -96,8 +107,8 @@ class DeploymentTest(unittest.TestCase):
         events = []
         # Test orchestration only: capabilities and readiness are mocked. This
         # deliberately provides no qualification for live apply or quorum.
-        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value={}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run"), patch.dict(lifecycle.os.environ, {}, clear=True):
-            lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only"), lambda *_: None)
+        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value={"cellId": "unit"}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run"), patch.dict(lifecycle.os.environ, {}, clear=True):
+            lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
         for name in ["core", "kfe"]:
             for consumer in ["core", "kfe"]:
                 self.assertLess(events.index(("apply", name)), events.index(("ready", consumer)))

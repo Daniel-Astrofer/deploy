@@ -2096,7 +2096,7 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         state["status"] = "committed" if not args.dry_run else "dry-run-passed"
         state["completedAt"] = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
         checkpoint("validate-and-commit", {})
-    except (ApplyBlockedError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+    except (ReleaseValidationError, OSError, RuntimeError, subprocess.TimeoutExpired) as error:
         state["phase"] = "failed"
         state["status"] = "failed"
         state["failure"] = str(error)
@@ -2141,6 +2141,8 @@ def apply_release(release: dict[str, Any], summary: dict[str, Any], args: argpar
         print("update blocked: --tuf-state-dir is required for an applied update", file=sys.stderr)
         return EXIT_CANNOT_APPLY
     try:
+        if args.cell_dir:
+            lifecycle.require_cell_state_directory(sys.modules[__name__], args.cell_dir, args.state_dir)
         state_dir = prepare_state_dir(args.state_dir)
         tuf_state_dir = prepare_state_dir(args.tuf_state_dir)
         if not os.path.samefile(state_dir, tuf_state_dir):

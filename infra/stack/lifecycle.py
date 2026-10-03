@@ -16,6 +16,7 @@ import subprocess
 import tempfile
 import urllib.parse
 import urllib.request
+import admin_install
 
 SCHEMA = "kerosene.stack.deployment/v1"
 NAMESPACES = {"kerosene-staging", "kerosene-staging-vault"}
@@ -29,7 +30,7 @@ EXECUTION_BLOCKERS = (
     "vault-independent-compatibility-gate-not-integrated",
     "migration-executor-and-tested-recovery-not-integrated",
     "node-vault-replica-quorum-rollout-not-qualified",
-    "admin-artifact-installation-not-integrated",
+    "admin-artifact-installation-not-qualified",
 )
 
 
@@ -126,6 +127,10 @@ def verify_deployment(stack, release, summary, path):
     if admin["image"] != summary["services"]["admin"]["image"]:
         raise stack.ApplyBlockedError("Admin artifact does not match approved release")
     stack.reject_sensitive_field_names(admin["config"], "Admin configuration")
+    try:
+        admin_install.validate_config(admin["config"])
+    except RuntimeError as error:
+        raise stack.ApplyBlockedError(str(error)) from error
     for name, service in summary["services"].items():
         if name != "admin" and service["image"] not in observed:
             raise stack.ApplyBlockedError(f"missing deployed component: {name}")
@@ -157,8 +162,10 @@ def workload_phases(stack, artifact, summary):
     separate execution capability gate remains mandatory for real apply.
     Admin/jctl is an operator artifact, never a long-running workload.
     """
-    phases = ({"postgres", "redis", "tor"}, {"bitcoin"}, {"lnd"},
-              {"node", "vault"}, {"core", "kfe"}, {"web-page"})
+    # Both canonical planes embed Node alongside Tor and share its onion
+    # identity volume. They are one startup unit, not separable workloads.
+    phases = ({"postgres", "redis", "tor", "node"}, {"bitcoin"}, {"lnd"},
+              {"vault"}, {"core", "kfe"}, {"web-page"})
     images = {}
     for name, service in summary["services"].items():
         images.setdefault(service["image"], set()).add(name)
@@ -248,6 +255,10 @@ def execute(stack, artifact, summary, args, checkpoint):
     # Validate all unsupported policies before the first Kubernetes write.
     if any(r["kind"] == "HorizontalPodAutoscaler" for r in prerequisites):
         raise stack.ApplyBlockedError("HPA requires a separately approved freeze/restore policy during Cell update")
+    if not args.dry_run:
+        receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],
+                                       stack.canonical_digest(args._release), run)
+        checkpoint("admin-installed", receipt)
     for resource in prerequisites:
         apply_resource(kubectl, resource, args.dry_run)
     for phase in phases:
@@ -483,6 +494,12 @@ def command_preflight(stack, args):
 
 
 def add_commands(stack, subcommands):
+    admin = subcommands.add_parser("admin", help="run the installed Admin CLI only from a committed Cell update")
+    admin.add_argument("--cell-dir", required=True)
+    admin.add_argument("--state-dir", help="protected update journal directory; defaults to Cell state")
+    admin.add_argument("--target", choices=("core", "kfe"), default="core", help="approved API origin; defaults to Core")
+    admin.add_argument("admin_args", nargs="...")
+    admin.set_defaults(handler=lambda args: command_admin(stack, args))
     init = subcommands.add_parser("init", help="initialize protected Cell identity and explicit out-of-band public trust anchors")
     init.add_argument("--cell-dir", required=True)
     init.add_argument("--cell-id", required=True)
@@ -519,3 +536,65 @@ def add_commands(stack, subcommands):
         print(json.dumps({"status": "integrity-verified-not-authorized", "path": str(output), "digest": args.digest}))
         return 0
     artifact.set_defaults(handler=import_artifact)
+
+
+def command_admin(stack, args):
+    try:
+        config = load_config(stack, args.cell_dir)
+        verify_bootstrap_trust(stack, args.cell_dir, config)
+        cell = admin_install.private_directory(args.cell_dir)
+        state_dir = require_cell_state_directory(stack, cell, args.state_dir)
+        if (state_dir / stack.UPDATE_LOCK_FILENAME).exists() or (state_dir / stack.UPDATE_LOCK_FILENAME).is_symlink():
+            raise RuntimeError("Admin launch blocked during an update or abandoned update lock")
+        # Hold the same exclusive update lock for the duration of this command:
+        # no upgrade can replace the journal between validation and execution.
+        summary = {"releaseId": "admin-command", "sequence": 1}
+        descriptor, lock_file = stack.acquire_update_lock(str(state_dir), summary)
+        try:
+            state = stack.read_existing_update_state(str(state_dir))
+            if not isinstance(state, dict) or state.get("schema") != "kerosene.stack.update-state/v1" or state.get("status") != "committed" or state.get("manualRecoveryRequired") or state.get("environment") != config["environment"]:
+                raise RuntimeError("Admin requires a successfully committed Cell update")
+            events = state.get("events")
+            if not isinstance(events, list) or len(events) > 4096 or any(not isinstance(event, dict) for event in events):
+                raise RuntimeError("Admin requires a valid committed event journal")
+            receipts = [event.get("evidence") for event in events if event.get("phase") == "admin-installed"]
+            if len(receipts) != 1:
+                raise RuntimeError("Committed update lacks one unambiguous Admin installation receipt")
+            receipt = receipts[0]
+            if not isinstance(receipt, dict) or receipt.get("cellId") != config["cellId"] or receipt.get("updateId") != state.get("updateId"):
+                raise RuntimeError("Admin installation belongs to another Cell or release")
+            update_id = state["updateId"]
+            import re
+            if not re.fullmatch(r"sha256:[0-9a-f]{64}", update_id):
+                raise RuntimeError("Admin installation has invalid release identity")
+            root = admin_install.private_directory(cell / "admin")
+            root = admin_install.private_directory(root / "installations")
+            launcher = admin_install.verify_installation(stack, root / update_id[7:], receipt)
+            admin_install.require_java(run)
+            arguments = args.admin_args
+            if arguments[:1] == ["--"]:
+                arguments = arguments[1:]
+            prefix = admin_install.command_prefix(receipt["config"], args.target, arguments)
+            # Deliberate operator command execution; no shell interpolation,
+            # credentials copied to disk, auto-login or signer activation.
+            environment = os.environ.copy()
+            # Deployed operator execution always uses the strongest existing
+            # jctl authentication policy; an inherited local mode is no bypass.
+            environment["KEROSENE_ENVIRONMENT"] = "production"
+            return subprocess.run([str(launcher), *prefix, *arguments], env=environment, check=False).returncode
+        finally:
+            stack.release_update_lock(descriptor, lock_file)
+    except (RuntimeError, OSError, ValueError, TypeError, KeyError) as error:
+        raise stack.ApplyBlockedError(str(error)) from error
+
+
+def require_cell_state_directory(stack, cell_dir, state_dir):
+    try:
+        cell = admin_install.private_directory(cell_dir)
+        canonical = admin_install.private_directory(cell / "state")
+        selected = admin_install.private_directory(state_dir or canonical)
+        if not os.path.samefile(canonical, selected):
+            raise RuntimeError("A Cell must use its canonical state directory; alternate journals are forbidden")
+        return canonical
+    except (RuntimeError, OSError) as error:
+        raise stack.ApplyBlockedError(str(error)) from error

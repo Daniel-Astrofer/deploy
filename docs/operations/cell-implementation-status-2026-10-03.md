@@ -20,7 +20,9 @@ it adds a bounded KFE diagnostic client, not Admin installation by the updater.
 
 The executor no longer places Node/Vault after their application consumers or
 groups Bitcoin and LND into one readiness phase. Runtime ordering is now
-PostgreSQL/Redis/Tor → Bitcoin → LND → Node/Vault → Core/KFE → web-page.
+PostgreSQL/Redis/Tor/Node → Bitcoin → LND → Vault → Core/KFE → web-page.
+Node/Tor colocation is explicitly supported, matching the actual canonical Bank
+and Vault manifests and shared onion identity volumes.
 Core/KFE workloads are submitted together before either readiness wait, avoiding
 a submission dependency deadlock from their reciprocal integration references.
 This remains an explicitly limited startup policy, not quorum-safe update or
@@ -30,8 +32,8 @@ Planning rejects missing components, ambiguous image ownership and unsupported
 cross-phase container colocation before Kubernetes resource writes. All actual
 Node/Vault workloads are retained, including multiple workload identities.
 Admin/jctl is recognized as an operator CLI, not a daemon to be kept alive in a
-Deployment. Its protected artifact installation is still unimplemented; the
-four real-apply capability blockers remain unchanged.
+Deployment. Its protected artifact installation is integrated below; real OCI
+qualification remains blocked alongside the other three capability gates.
 
 Verification: **22 lifecycle unit tests and 18 archive tests passed**, including
 complete inventory/order, multiple Vault workloads, invalid topology pre-write
@@ -39,6 +41,31 @@ rejection, init-only service rejection, and application submission-before-wait a
 tests mock the external capabilities/Kubernetes responses; no real install,
 quorum update, migration, data recovery or production command was executed.
 The lifecycle runbook describes unsupported topology and interruption limits.
+
+### Integrated Admin installation and stable operator command
+
+The executor now installs the approved cached OCI Admin distribution without
+starting its container, pins the inspected immutable local image ID, and
+extracts only bounded regular launcher/JAR files. Atomic owner-only installations
+are retained per release digest with file-integrity receipts. Approved Core/KFE
+HTTPS origins are persisted and applied by `kerosene-stack admin`; private TLS
+stores and short-lived tokens remain external. No build/pull fallback is used.
+
+The stable launcher requires an exact committed same-Cell journal, rejects file
+or receipt tampering, profiles/endpoint overrides and argument files, and holds
+the canonical Cell update lock while executing. Both update and launch reject
+alternate journal directories, so an old committed journal cannot bypass a
+failed canonical update. Installer validation failures record failed/manual
+recovery state. Older installed bytes remain available but do not auto-activate.
+
+Verified **24 installer tests**, including actual built `f84dec2` jctl Core and
+KFE help through the installed distribution; **23 lifecycle tests** cover the
+real Node/Tor sidecar startup topology. The built CLI is real, but OCI engine
+inspection/copy and release-authority/journal fixtures in these tests are mocks.
+No full Cell installation or authenticated live API request is claimed. CI now
+includes the installer suite and uses the pinned diagnostic-capable Admin SHA.
+The Docker filesystem has zero available space, so actual OCI extraction/full
+Cell qualification remains unavailable without separately authorized capacity.
 
 Three disjoint workers implemented bounded leaves; the coordinator reviewed and
 integrated them, owned all builds, and repaired the shared transaction guard.
@@ -197,7 +224,7 @@ built CLI binary. Other component suites, including KFE's 1,828/31 PostgreSQL
 results above, were not rerun in this client-only wave.
 
 The Admin catalog, quickstart, source-boundary document and status are updated.
-All four live execution blockers remain, including Admin artifact installation:
+At that client-only checkpoint all four blockers remained, including installation:
 a locally built CLI distribution and diagnostic command integration are not
 automatic approved-OCI installation or complete-Cell deployment qualification.
 No runtime manifest, signer, cluster, retained snapshots or custody state changed.
@@ -226,10 +253,10 @@ No runtime manifest, signer, cluster, retained snapshots or custody state change
    provenance, independently authorized signatures and durable Vault/mirror fetching
    with Byzantine-safe availability. The prior offline publisher is not a build or
    distribution/reconciliation service.
-5. **Installation/update execution:** Admin artifact installation, ordered migrations
+5. **Installation/update execution:** qualify the integrated Admin OCI installation, ordered migrations
    with tested data recovery and replica-by-replica Node/Vault rollout preserving
    quorum. All four explicit `infra/stack/lifecycle.py` execution blockers remain
-   unchanged; do not remove them as flags.
+   present (Admin now reports integrated-but-not-qualified); do not remove them as flags.
 6. **Real restore qualification:** resolve retained WFFC pilot binding failure,
    obtain authorized lab capacity, run the actual ten-volume restore CLI and
    qualify failure/recovery matrices including genuine LND state. No live final

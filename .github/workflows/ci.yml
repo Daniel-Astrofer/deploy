@@ -39,6 +39,7 @@ jobs:
           bash infra/tests/kerosene-stack-evidence-test.sh
           python3 infra/tests/stack-archive-test.py
           python3 infra/tests/stack-lifecycle-test.py
+          python3 -B infra/tests/stack-admin-install-test.py
           python3 -B infra/tests/stack-publication-test.py
           bash infra/tests/staging-snapshot-workflow-test.sh
 
@@ -54,7 +55,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           repository: Daniel-Astrofer/admin
-          ref: e1f57b53eac6c4f7ed4149a1e365dc8c0fc77dd7
+          ref: f84dec2eaa24fc055e309856c3c658509d6ca810
           path: admin
           persist-credentials: false
       - uses: actions/setup-java@v4
@@ -70,6 +71,11 @@ jobs:
         env:
           JCTL_PUBLICATION_TEST_BIN: ${{ github.workspace }}/admin/build/install/kerosene-jctl/bin/kerosene-jctl
         run: python3 -B infra/tests/stack-publication-test.py -v
+      - name: Verify installed operator distribution and protected Cell launcher
+        working-directory: deploy
+        env:
+          JCTL_ADMIN_INSTALL_TEST_DIST: ${{ github.workspace }}/admin/build/install/kerosene-jctl
+        run: python3 -B infra/tests/stack-admin-install-test.py -v
 
   release-governance:
     name: Ordered release governance with four real validators

@@ -99,7 +99,7 @@ class PublicationTest(unittest.TestCase):
                                   "metadata": {"name": name, "namespace": "kerosene-staging"},
                                   "spec": {"replicas": 1, "template": {"spec": {"containers": [{"name": name, "image": service["image"]}]}}}})
         self.deployment = {"schema": "kerosene.stack.deployment/v1", "environment": "staging-cell",
-                           "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"synthetic": True}}}
+                           "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://synthetic-core.invalid"}}}
         for name, service in self.release["services"].items():
             service["configDigest"] = self.stack.lifecycle.digest(self.stack.lifecycle.component_config(self.deployment, service["image"], name))
         # Preserve whitespace: neither release lock nor deployment may be rewritten.

@@ -234,7 +234,7 @@ class PackageTest(LocalTest):
                            "resources": [{"apiVersion": "v1", "kind": "ConfigMap",
                                           "metadata": {"name": "synthetic", "namespace": "kerosene-staging"},
                                           "data": {"mode": "test"}}],
-                           "admin": {"image": self.image, "config": {"synthetic": True}}}
+                           "admin": {"image": self.image, "config": {"apiBaseUrl": "https://synthetic-core.invalid"}}}
         # Noncanonical whitespace must be preserved exactly.
         raw = json.dumps(self.deployment, indent=2).encode() + b"\n"
         (self.root / "deployment.json").write_bytes(raw)

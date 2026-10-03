@@ -59,7 +59,7 @@ hostPath, privileged containers and unqualified HPA policies are rejected.
 Unsupported policies are checked before any Kubernetes write.
 
 The executor now validates a complete runtime inventory and uses explicit
-startup phases: PostgreSQL/Redis/Tor, Bitcoin, LND, Node/Vault, Core/KFE,
+startup phases: PostgreSQL/Redis/Tor/Node, Bitcoin, LND, Vault, Core/KFE,
 then web-page. Each phase is submitted before its workloads are awaited;
 in particular Core/KFE reciprocal integration references must not serialize
 their initial submission. Every preceding phase must become Kubernetes-ready
@@ -74,8 +74,8 @@ unsafe order. Such topologies need a separately implemented dependency policy.
 The Admin image currently refers to the `kerosene-jctl` operator CLI, whose
 container entrypoint exits after a command. It is not a permanent Deployment;
 the planner rejects using it as one. The web client is a separate component.
-Installing and upgrading the operator artifact with its protected identity/TLS
-references remains an explicit implementation blocker. No fallback to a
+Node/Tor colocation is supported in the first phase, matching both canonical
+plane manifests and their shared onion identity volumes. No fallback to a
 source build, mutable image, or automatic signer activation is introduced.
 
 These phases are not a qualified live install or update. On interruption,
@@ -102,6 +102,47 @@ deleted. Phase journals and success/failure checkpoints are fsynced into local
 history. This is local operational evidence, not an external signed audit log.
 Status explicitly identifies its source as `local-journal-not-live-attestation`.
 
+## Installed operator artifact
+
+The integrated executor extracts `/opt/kerosene-jctl` from an already cached,
+approved OCI digest using a created-but-never-started container. It pins creation
+to the inspected local image ID, disables networking, bounds transfer/extraction,
+rejects links/devices/path traversal, verifies file hashes and atomically installs
+an owner-only distribution under `CELL/admin/installations/RELEASE_DIGEST`.
+It requires a provisioned Java 21+ runtime; it does not pull or build a fallback.
+Temporary containers are removed by exact generated name without force. Cleanup
+failure fails the update and requires investigation; it never prunes other data.
+
+Approved nonsecret Admin config requires `apiBaseUrl` and permits optional
+`kfeBaseUrl`, both credential-free HTTPS origins. Unknown fields are rejected.
+Config is installed with the receipt, not silently ignored. Private TLS stores
+and short-lived tokens are provided outside the package using existing jctl
+operator mechanisms; the launcher does not persist them or auto-authenticate.
+
+After a successfully committed installation, the stable controller interface is:
+
+```sh
+infra/kerosene-stack admin --cell-dir /protected/cell-a -- cell status
+infra/kerosene-stack admin --cell-dir /protected/cell-a --target kfe -- kfe maintenance status
+```
+
+The wrapper selects the approved endpoint, verifies every installed file and
+receipt, and holds the canonical Cell update lock throughout CLI execution.
+Endpoint/profile overrides and argument-file expansion are forbidden.
+Inherited local-mode settings cannot downgrade authentication: installed CLI
+execution forces its production authentication policy, including dedicated
+tokens and protected mTLS stores. Help/version do not authenticate or contact APIs.
+Failed, incomplete, dry-run-only or foreign journals do not activate the new Admin.
+An alternate state directory cannot bypass a Cell's canonical journal/lock.
+Older installations are retained, but are not selected automatically after a
+failed update. Recovery revalidates the original target; no data rollback or
+signer activation is implied by restoring an operator executable.
+
+Local tests exercise the actual built pinned jctl distribution for both Core
+and KFE help, plus mocked OCI extraction/identity checks and failure journaling.
+Actual Docker OCI extraction and complete Cell installation are still not
+qualified; `admin-artifact-installation-not-qualified` remains a live-apply gate.
+
 ## Remaining live execution qualification
 
 Real `--apply` is explicitly blocked before mutation until all of these
@@ -110,7 +151,7 @@ implementation capabilities exist and their integration tests pass:
 1. Independent Vault compatibility/rebuild gate integrated into apply.
 2. Migration execution and actual tested recovery integrated into the phases.
 3. Node/Vault replica-by-replica rollout preserving real quorum and identities.
-4. Installation/upgrade of the approved Admin artifact, not merely its digest.
+4. Live OCI qualification of the integrated Admin artifact installation.
 
 Also required for final Cell acceptance: authoritative complete-Cell compatibility
 checks behind the implemented signed Core Bank read producer,
