@@ -103,7 +103,7 @@ class DatabasePlanTest(unittest.TestCase):
     def test_missing_plan_preserves_legacy_inspection_without_claiming_execution(self):
         self.artifact["resources"].remove(self.configmap)
         self.assertIsNone(lifecycle.initial_database_plan(stack, self.artifact))
-        self.assertIn("migration-executor-live-jars-recovery-not-qualified", lifecycle.EXECUTION_BLOCKERS)
+        self.assertNotIn("migration-executor-live-jars-recovery-not-qualified", lifecycle.EXECUTION_BLOCKERS)
 
     def test_aliases_and_invalid_sql_names_rejected(self):
         original = copy.deepcopy(self.plan)
@@ -309,6 +309,17 @@ class DatabasePlanTest(unittest.TestCase):
                 lifecycle.collect_database_capabilities_output(stack, ["/bound/kubectl"], "core", "cell-probe-" + "a" * 40, "probe")
         self.assertEqual(str(error.exception), "database probe log collection failed")
 
+    def test_database_job_wait_is_bounded_and_fails_closed(self):
+        command = ["/bound/kubectl"]
+        with patch.object(lifecycle.probe_process, "run_probe", return_value=b"Complete=True\n") as probe:
+            lifecycle.wait_for_database_job(stack, command, "kerosene-staging", "migration-job")
+        self.assertEqual(probe.call_args.kwargs["timeout"], lifecycle.probe_process.MAX_TIMEOUT)
+        self.assertIn("jsonpath=", probe.call_args.args[0][-1])
+        for output in (b"Failed=True\n", b"Complete=True\ninvalid", b"\xff"):
+            with self.subTest(output=output), patch.object(
+                    lifecycle.probe_process, "run_probe", return_value=output), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.wait_for_database_job(stack, command, "kerosene-staging", "migration-job")
+
     def test_migration_job_identity_and_operation_are_not_operator_overrides(self):
         self.refresh()
         update = "sha256:" + "a" * 64
@@ -366,9 +377,11 @@ class DatabasePlanTest(unittest.TestCase):
                 return json.dumps(pod).encode()
             raise AssertionError(argv)
         applied = []
+        def observe(argv, **_):
+            return b"Complete=True\n"
         with patch.object(lifecycle, "run", side_effect=command), \
                 patch.object(lifecycle, "apply_resource", side_effect=lambda _, job, dry: applied.append(job)), \
-                patch.object(lifecycle.probe_process, "run_probe", return_value=b"") as wait:
+                patch.object(lifecycle.probe_process, "run_probe", side_effect=observe) as wait:
             result = lifecycle.execute_initial_database_migrations(stack, ["/bound/kubectl"], self.artifact,
                                                                     self.fixture.summary, update)
         self.assertEqual([job["spec"]["template"]["spec"]["containers"][0]["args"][0] for job in applied],
@@ -376,6 +389,9 @@ class DatabasePlanTest(unittest.TestCase):
                           "--cell-migration=validate", "--cell-migration=validate"])
         self.assertEqual(len(result["jobs"]), 4)
         self.assertEqual(wait.call_count, 4)
+        self.assertTrue(all(call.kwargs["timeout"] == 30 for call in wait.call_args_list))
+        self.assertTrue(all(call.args[0][-4] == "job" and call.args[0][-2] == "-o" and
+                            call.args[0][-1].startswith("jsonpath=") for call in wait.call_args_list))
         self.assertTrue(all(count == 2 for count in job_reads.values()))
 
         retained_names = {jobs[0]["metadata"]["name"], jobs[1]["metadata"]["name"]}
@@ -387,7 +403,7 @@ class DatabasePlanTest(unittest.TestCase):
         recovered_applied = []
         with patch.object(lifecycle, "run", side_effect=recovery_command), \
                 patch.object(lifecycle, "apply_resource", side_effect=lambda _, job, dry: recovered_applied.append(job)), \
-                patch.object(lifecycle.probe_process, "run_probe", return_value=b""):
+                patch.object(lifecycle.probe_process, "run_probe", side_effect=observe):
             recovered = lifecycle.execute_initial_database_migrations(stack, ["/bound/kubectl"], self.artifact,
                 self.fixture.summary, update, recover_existing=True)
         self.assertEqual([record["recoveredExisting"] for record in recovered["jobs"]], [True, True, False, False])

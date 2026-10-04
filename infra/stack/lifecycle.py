@@ -17,6 +17,7 @@ import shutil
 import ssl
 import subprocess
 import tempfile
+import time
 import urllib.parse
 import urllib.error
 import urllib.request
@@ -35,7 +36,6 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 # test; signed evidence cannot implement an absent runtime safety mechanism.
 EXECUTION_BLOCKERS = (
     "vault-live-rebuild-provenance-not-qualified",
-    "migration-executor-live-jars-recovery-not-qualified",
     "node-vault-live-protocol-quorum-not-qualified",
     "complete-cell-live-acceptance-not-qualified",
 )
@@ -562,6 +562,30 @@ def collect_database_capabilities_output(stack, kubectl, component, namespace, p
     return verify_database_capabilities_output(stack, component, raw)
 
 
+def wait_for_database_job(stack, kubectl, namespace, name, timeout=300):
+    """Observe one named Job through bounded, non-streaming subprocesses."""
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise stack.ApplyBlockedError("database migration Job deadline elapsed")
+        try:
+            template = '{range .status.conditions[*]}{.type}={.status}{"\\n"}{end}'
+            raw = probe_process.run_probe(
+                kubectl + ["-n", namespace, "get", "job", name, "-o", "jsonpath=" + template],
+                timeout=min(probe_process.MAX_TIMEOUT, remaining))
+            conditions = set(raw.decode("ascii").splitlines())
+            if any("=" not in condition for condition in conditions):
+                raise ValueError("invalid Job condition")
+            if "Failed=True" in conditions:
+                raise stack.ApplyBlockedError("database migration Job failed")
+            if "Complete=True" in conditions:
+                return
+        except (probe_process.ProbeProcessError, UnicodeDecodeError, ValueError) as error:
+            raise stack.ApplyBlockedError("database migration Job observation failed") from error
+        time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+
 def execute_initial_database_migrations(stack, kubectl, artifact, summary, update_id, recover_existing=False):
     """Run migrate then validate Jobs, or inspect an exact retained prefix."""
     records = []
@@ -583,8 +607,7 @@ def execute_initial_database_migrations(stack, kubectl, artifact, summary, updat
         if not retained:
             apply_resource(kubectl, job, False)
         try:
-            probe_process.run_probe(kubectl + ["-n", namespace, "wait", "--for=condition=complete",
-                "job/" + name, "--timeout=305s"], timeout=310)
+            wait_for_database_job(stack, kubectl, namespace, name)
             live_job = json.loads(run(kubectl + ["-n", namespace, "get", "job", name, "-o", "json"]))
             metadata, status = live_job["metadata"], live_job["status"]
             job_uid = metadata["uid"]

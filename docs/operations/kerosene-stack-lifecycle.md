@@ -202,11 +202,15 @@ successful owned Pod, and rechecks Job/Pod UIDs, command, Secret references,
 security context, runtime image ID and terminal state. Jobs are retained for
 diagnosis and never automatically deleted or repaired. Core/KFE workloads are
 not submitted unless all four observations pass. Real Kubernetes execution with
-the current Core/KFE JAR images and interrupted recovery is still pending. The
-2026-10-04 host-side qualification confirmed that both current built JARs exit
-successfully with the exact bounded `kerosene.cell.migration-capabilities/v1`
-contract; it does not substitute for Job, database or recovery execution. Thus
-`migration-executor-live-jars-recovery-not-qualified` remains an execution blocker.
+the current Core/KFE JAR images was qualified on 2026-10-04 in the bound Kind
+audit cluster against PostgreSQL 17. Both exact built JARs first passed the
+bounded `kerosene.cell.migration-capabilities/v1` contract. The first Core
+migration Job completed, execution was interrupted, and recovery then
+revalidated that retained Job by Job/Pod UID and immutable runtime image ID
+before running KFE migrate plus both validation Jobs. All four Jobs completed
+against separate databases and the migration blocker was removed. This lab
+qualification does not authorize production credentials or existing-database
+adoption.
 
 ## Approved manifest and evidence
 
@@ -356,8 +360,7 @@ Real `--apply` is explicitly blocked before mutation until all of these
 implementation capabilities exist and their integration tests pass:
 
 1. Live independent Vault rebuild/SBOM/provenance qualification for the gate now integrated into apply.
-2. Migration execution and actual tested recovery integrated into the phases.
-3. Live qualification of the integrated Node/Vault replica-by-replica protocol.
+2. Live qualification of the integrated Node/Vault replica-by-replica protocol.
    The controller now requires one replica per workload, distinct approved
    persistent identities, all peers ready before and after every mutation, the
    Vault release threshold, and UID/resourceVersion update preconditions. The
@@ -366,7 +369,7 @@ implementation capabilities exist and their integration tests pass:
    and recovery. `node-vault-live-protocol-quorum-not-qualified` remains until
    the same run uses the real two-plane Node and three-member Vault protocols,
    not readiness-only qualification containers.
-4. Live qualification of the integrated complete-Cell verifier contract. Its
+3. Live qualification of the integrated complete-Cell verifier contract. Its
    bootstrap-pinned executable must bind the Cell, cluster UID, release,
    sequence, change and operator; prove every release component plus rollout,
    interruption, restore, Node/Vault quorum and resume-guard scenarios; and
