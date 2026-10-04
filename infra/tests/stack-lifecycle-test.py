@@ -56,7 +56,7 @@ class DeploymentTest(unittest.TestCase):
                     plane = instance_spec["plane"]
                     values = {"KEROSENE_NETWORK_ID": self.release["network"]["id"],
                               "KEROSENE_DISCOVERY_PLANE": plane, "KEROSENE_NODE_LISTEN_ADDR": "127.0.0.1:8800",
-                              "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/var/lib/tor/node/hostname",
+                              "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/onion/hostname",
                               "KEROSENE_NODE_ONION_PORT": "8800", "KEROSENE_IDENTITY_KEY_PATH": "/var/lib/kerosene/identity.key",
                               "KEROSENE_PEER_STORE": "/var/lib/kerosene/peer-store", "KEROSENE_LEDGER_DB_PATH": "/var/lib/kerosene/ledger",
                               "KEROSENE_GENESIS_TRUST_BUNDLE": "/etc/kerosene/node-genesis/genesis-trust-bundle.json",
@@ -97,7 +97,9 @@ class DeploymentTest(unittest.TestCase):
                     container["volumeMounts"] = [{"name": "identity-data", "mountPath": "/var/lib/kerosene"}]
                     pod_spec["volumes"] = [{"name": "identity-data", "persistentVolumeClaim": {"claimName": claim}}]
                     if name == "node":
+                        container["volumeMounts"].append({"name": "onion-public", "mountPath": "/onion", "readOnly": True})
                         container["volumeMounts"].append({"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True})
+                        pod_spec["volumes"].append({"name": "onion-public", "emptyDir": {}})
                         pod_spec["volumes"].append({"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}})
                     resources.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
                                       "metadata": {"name": claim, "namespace": namespace},
@@ -208,6 +210,25 @@ class DeploymentTest(unittest.TestCase):
         node = bank["spec"]["template"]["spec"]["containers"][0]
         node["env"] = [entry for entry in node["env"]
                        if entry["name"] != "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+    def test_node_runtime_contract_exposes_only_public_onion_hostname(self):
+        lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+
+        changed = copy.deepcopy(self.artifact)
+        bank = next(r for r in changed["resources"] if r["metadata"].get("name") == "node-bank")
+        node = bank["spec"]["template"]["spec"]["containers"][0]
+        onion_path = next(entry for entry in node["env"]
+                          if entry["name"] == "KEROSENE_NODE_ONION_HOSTNAME_PATH")
+        onion_path["value"] = "/var/lib/tor/node/hostname"
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+        changed = copy.deepcopy(self.artifact)
+        bank = next(r for r in changed["resources"] if r["metadata"].get("name") == "node-bank")
+        node = bank["spec"]["template"]["spec"]["containers"][0]
+        next(m for m in node["volumeMounts"] if m["name"] == "onion-public")["readOnly"] = False
         with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
             lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
 

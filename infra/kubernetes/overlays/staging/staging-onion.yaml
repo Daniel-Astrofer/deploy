@@ -56,7 +56,22 @@ spec:
         - name: tor
           image: kerosene/tor:staging
           imagePullPolicy: IfNotPresent
-          command: ["tor", "-f", "/etc/tor/torrc"]
+          command:
+            - sh
+            - -c
+            - >-
+              rm -f /onion/hostname;
+              tor -f /etc/tor/torrc & pid=$!;
+              forward_term() { kill -TERM "$pid" 2>/dev/null || true; };
+              trap forward_term TERM INT;
+              while [ ! -s /var/lib/tor/kerosene_service/hostname ]; do
+                kill -0 "$pid" || exit 1; sleep 1;
+              done;
+              cp /var/lib/tor/kerosene_service/hostname /onion/hostname;
+              chmod 0444 /onion/hostname;
+              wait "$pid" || status=$?;
+              wait "$pid" 2>/dev/null || true;
+              exit "${status:-0}"
           ports:
             - name: socks
               containerPort: 9050
@@ -65,7 +80,7 @@ spec:
               command:
                 - sh
                 - -c
-                - test -s /var/lib/tor/kerosene_service/hostname
+                - test -s /onion/hostname
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 30
@@ -87,6 +102,8 @@ spec:
               readOnly: true
             - name: data
               mountPath: /var/lib/tor
+            - name: onion-public
+              mountPath: /onion
         - name: kerosene-node
           image: kerosene/node:staging
           imagePullPolicy: IfNotPresent
@@ -98,11 +115,11 @@ spec:
             - name: KEROSENE_NODE_LISTEN_ADDR
               value: 127.0.0.1:8800
             - name: KEROSENE_NODE_ONION_HOSTNAME_PATH
-              value: /var/lib/tor/kerosene_service/hostname
+              value: /onion/hostname
             - name: KEROSENE_NODE_ONION_PORT
               value: "8800"
             - name: KEROSENE_IDENTITY_KEY_PATH
-              value: /var/lib/tor/kerosene-node-bank/identity.key
+              value: /etc/kerosene/node-identity/identity.key
             - name: KEROSENE_PEER_STORE
               value: /var/lib/tor/kerosene-node-bank/peer-store
             - name: KEROSENE_LEDGER_DB_PATH
@@ -166,11 +183,17 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/tor
+            - name: onion-public
+              mountPath: /onion
+              readOnly: true
             - name: node-genesis
               mountPath: /etc/kerosene/node-genesis
               readOnly: true
             - name: node-mtls
               mountPath: /etc/kerosene/node-mtls
+              readOnly: true
+            - name: node-identity
+              mountPath: /etc/kerosene/node-identity
               readOnly: true
             - name: node-state
               mountPath: /etc/kerosene/node-state
@@ -187,9 +210,15 @@ spec:
           secret:
             secretName: kerosene-node-mtls
             defaultMode: 0440
+        - name: node-identity
+          secret:
+            secretName: kerosene-node-identity
+            defaultMode: 0440
         - name: node-state
           configMap:
             name: kerosene-node-bank-state-v1
+        - name: onion-public
+          emptyDir: {}
   volumeClaimTemplates:
     - metadata:
         name: data

@@ -125,7 +125,7 @@ class PublicationTest(unittest.TestCase):
                         plane = instance_spec["plane"]
                         values = {"KEROSENE_NETWORK_ID": self.release["network"]["id"],
                                   "KEROSENE_DISCOVERY_PLANE": plane, "KEROSENE_NODE_LISTEN_ADDR": "127.0.0.1:8800",
-                                  "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/var/lib/tor/node/hostname",
+                                  "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/onion/hostname",
                                   "KEROSENE_NODE_ONION_PORT": "8800", "KEROSENE_IDENTITY_KEY_PATH": "/var/lib/kerosene/identity.key",
                                   "KEROSENE_PEER_STORE": "/var/lib/kerosene/peer-store", "KEROSENE_LEDGER_DB_PATH": "/var/lib/kerosene/ledger",
                                   "KEROSENE_GENESIS_TRUST_BUNDLE": "/etc/kerosene/node-genesis/genesis-trust-bundle.json",
@@ -164,8 +164,12 @@ class PublicationTest(unittest.TestCase):
                         containers.append({"name": "tor", "image": self.release["services"]["tor"]["image"]})
                     pod_spec = {"containers": containers}
                     if name == "node":
-                        container["volumeMounts"] = [{"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True}]
-                        pod_spec["volumes"] = [{"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}}]
+                        container["volumeMounts"] = [
+                            {"name": "onion-public", "mountPath": "/onion", "readOnly": True},
+                            {"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True}]
+                        pod_spec["volumes"] = [
+                            {"name": "onion-public", "emptyDir": {}},
+                            {"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}}]
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
                                       "metadata": {"name": instance, "namespace": namespace},
                                       "spec": {"replicas": 1, "template": {"spec": pod_spec}}})

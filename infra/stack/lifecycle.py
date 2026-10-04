@@ -305,7 +305,7 @@ def verify_node_runtime_contract(stack, artifact, summary):
                     raise ValueError("Node plane identity differs")
                 onion_path = environment.get("KEROSENE_NODE_ONION_HOSTNAME_PATH", {}).get("value")
                 onion_port = environment.get("KEROSENE_NODE_ONION_PORT", {}).get("value")
-                if not isinstance(onion_path, str) or not onion_path.startswith("/var/lib/tor/") or onion_port != "8800":
+                if onion_path != "/onion/hostname" or onion_port != "8800":
                     raise ValueError("Node onion identity is not locally bound")
                 for name in references:
                     entry = environment.get(name)
@@ -324,6 +324,11 @@ def verify_node_runtime_contract(stack, artifact, summary):
                 pod = resource["spec"]["template"]["spec"]
                 mounts = {mount.get("name"): mount for mount in container.get("volumeMounts", [])}
                 volumes = {volume.get("name"): volume for volume in pod.get("volumes", [])}
+                if mounts.get("onion-public") != {
+                        "name": "onion-public", "mountPath": "/onion", "readOnly": True}:
+                    raise ValueError("Node onion hostname is not mounted read-only")
+                if volumes.get("onion-public") != {"name": "onion-public", "emptyDir": {}}:
+                    raise ValueError("Node onion hostname publication volume differs")
                 expected_state_name = "node-" + plane + "-state"
                 if mounts.get("state-snapshot") != {
                         "name": "state-snapshot", "mountPath": "/etc/kerosene/node-state",

@@ -416,6 +416,16 @@ implementation capabilities exist and their integration tests pass:
    then completed with each round authenticated as its originating Vault. This
    closes the Vault protocol portion only. It neither qualifies the two Node
    planes nor removes the combined blocker.
+
+   The same date, `infra/tests/stack-node-protocol-kind-test.py` qualified the
+   production Node binary in six fresh Deployments: three Bank and three Vault
+   members, each with a distinct PVC-backed identity, onion and mTLS leaf. Both
+   planes accepted independent 2-of-3 signed membership manifests and
+   threshold-signed state snapshots. All six reported member, quorum and
+   financial readiness; the Vault plane rejected a Bank manifest. This closes
+   the standalone two-plane Node protocol portion. The combined blocker remains
+   until one rollout qualification preserves both Node planes and the Vault
+   signing quorum together through interruption and recovery.
 3. Live qualification of the integrated complete-Cell verifier contract. Its
    bootstrap-pinned executable must bind the Cell, cluster UID, release,
    sequence, change and operator; prove every release component plus rollout,
