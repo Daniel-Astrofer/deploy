@@ -146,6 +146,7 @@ def verify_deployment(stack, release, summary, path):
     workload_phases(stack, artifact, summary)
     initial_database_plan(stack, artifact, summary)
     verify_vault_probe_configuration(stack, artifact)
+    verify_vault_runtime_contract(stack, artifact, summary)
     try:
         required_secret_references(stack, artifact)
     except (TypeError, AttributeError, KeyError) as error:
@@ -197,6 +198,57 @@ def verify_vault_probe_configuration(stack, artifact):
                     raise ValueError("invalid probe port")
             except (ValueError, TypeError, AttributeError, KeyError):
                 raise stack.ApplyBlockedError("Vault authenticated readiness requires an approved nonoptional URL ConfigMap") from None
+
+
+def verify_vault_runtime_contract(stack, artifact, summary):
+    """Reject manifests incompatible with the hardened production-only Vault."""
+    if "vault" not in summary.get("services", {}):
+        return
+    vault_image = summary["services"]["vault"]["image"]
+    expected = {"KEROSENE_ENV": "production", "VAULT_CEREMONY_MODE": "production",
+                "VAULT_AUTH_MODE": "mtls", "VAULT_TRANSPORT": "tor",
+                "VAULT_DKG_MODE": "distributed_wire", "VAULT_NODE_TIER": "domestic",
+                "ATTESTATION_MODE": "software", "VAULT_LISTEN_ADDR": "127.0.0.1:7801",
+                "VAULT_GENESIS_N": str(summary["vaultCompatibility"]["members"]),
+                "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe"}
+    protected = {"VAULT_SEED_PEERS", "VAULT_AUDIT_PUBKEY_ALLOWLIST"}
+    observed = 0
+    try:
+        for resource in artifact["resources"]:
+            if resource["kind"] not in WORKLOADS:
+                continue
+            for container in containers(resource):
+                if container.get("image") != vault_image:
+                    continue
+                observed += 1
+                entries = container.get("env", [])
+                if len(entries) != len({entry.get("name") for entry in entries}):
+                    raise ValueError("duplicate Vault environment")
+                environment = {entry["name"]: entry for entry in entries}
+                for name, value in expected.items():
+                    if environment.get(name) != {"name": name, "value": value}:
+                        raise ValueError("Vault runtime mode differs")
+                pin = environment.get("VAULT_MEASUREMENT_PIN")
+                if (not isinstance(pin, dict) or set(pin) != {"name", "value"} or
+                        not re.fullmatch(r"[0-9a-f]{64}", pin["value"])):
+                    raise ValueError("Vault software measurement is not pinned")
+                for name in protected:
+                    entry = environment.get(name)
+                    reference = entry.get("valueFrom", {}).get("secretKeyRef", {}) if isinstance(entry, dict) else {}
+                    if (set(entry or {}) != {"name", "valueFrom"} or
+                            set(entry["valueFrom"]) != {"secretKeyRef"} or
+                            set(reference) - {"name", "key", "optional"} or
+                            not reference.get("name") or not reference.get("key") or
+                            reference.get("optional", False) is not False):
+                        raise ValueError("Vault protected runtime input is not externally referenced")
+                probe = container.get("readinessProbe", {})
+                if probe.get("exec", {}).get("command") != ["/usr/local/bin/kerosene-vault", "--health-probe"]:
+                    raise ValueError("Vault readiness is not authenticated by its binary")
+        if observed != summary["vaultCompatibility"]["members"]:
+            raise ValueError("Vault runtime count differs")
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise stack.ApplyBlockedError(
+            "Vault manifest is incompatible with the hardened production Tor/mTLS runtime") from None
 
 
 def run(argv, *, input_bytes=None):

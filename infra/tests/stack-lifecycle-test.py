@@ -29,12 +29,28 @@ class DeploymentTest(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.release = json.loads((ROOT / "stack/examples/release-lock-v2.example.json").read_text())
         resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging"}}]
+        resources.append({"apiVersion": "v1", "kind": "ConfigMap",
+                          "metadata": {"name": "vault-probe", "namespace": "kerosene-staging"},
+                          "data": {"url": "https://localhost:7801/v1/health"}})
         for name, service in self.release["services"].items():
             if name == "admin":
                 continue
             instances = [name] if name != "vault" else ["vault-1", "vault-2", "vault-3"]
             for instance in instances:
                 container = {"name": name, "image": service["image"]}
+                if name == "vault":
+                    values = {"KEROSENE_ENV": "production", "VAULT_CEREMONY_MODE": "production",
+                              "VAULT_AUTH_MODE": "mtls", "VAULT_TRANSPORT": "tor",
+                              "VAULT_DKG_MODE": "distributed_wire", "VAULT_NODE_TIER": "domestic",
+                              "ATTESTATION_MODE": "software", "VAULT_LISTEN_ADDR": "127.0.0.1:7801",
+                              "VAULT_GENESIS_N": "3", "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe",
+                              "VAULT_MEASUREMENT_PIN": "a" * 64}
+                    container["env"] = [{"name": key, "value": value} for key, value in values.items()]
+                    container["env"].extend([
+                        {"name": "VAULT_SEED_PEERS", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "seed-peers"}}},
+                        {"name": "VAULT_AUDIT_PUBKEY_ALLOWLIST", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "audit-pubkeys"}}},
+                        {"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "vault-probe", "key": "url"}}}])
+                    container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}, "timeoutSeconds": 6}
                 pod_spec = {"containers": [container]}
                 if name in {"node", "vault"}:
                     claim = instance + "-data"
@@ -88,6 +104,26 @@ class DeploymentTest(unittest.TestCase):
         container["env"][0]["valueFrom"]["configMapKeyRef"]["optional"] = True
         with self.assertRaises(stack.ApplyBlockedError):
             lifecycle.verify_vault_probe_configuration(stack, self.artifact)
+
+    def test_vault_runtime_contract_rejects_removed_profiles_and_inline_authority(self):
+        lifecycle.verify_vault_runtime_contract(stack, self.artifact, self.summary)
+        vault = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-1")
+        container = vault["spec"]["template"]["spec"]["containers"][0]
+        mutations = (("KEROSENE_ENV", {"name": "KEROSENE_ENV", "value": "staging"}),
+                     ("VAULT_TRANSPORT", {"name": "VAULT_TRANSPORT", "value": "clearnet"}),
+                     ("VAULT_LISTEN_ADDR", {"name": "VAULT_LISTEN_ADDR", "value": "0.0.0.0:7801"}),
+                     ("VAULT_SEED_PEERS", {"name": "VAULT_SEED_PEERS", "value": "inline.onion"}),
+                     ("VAULT_MEASUREMENT_PIN", {"name": "VAULT_MEASUREMENT_PIN", "value": "short"}))
+        for name, replacement in mutations:
+            changed = copy.deepcopy(container["env"])
+            index = next(i for i, entry in enumerate(changed) if entry["name"] == name)
+            changed[index] = replacement
+            container["env"] = changed
+            with self.subTest(name=name), self.assertRaisesRegex(stack.ApplyBlockedError, "hardened production"):
+                lifecycle.verify_vault_runtime_contract(stack, self.artifact, self.summary)
+            container["env"] = copy.deepcopy(next(
+                r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-2"
+            )["spec"]["template"]["spec"]["containers"][0]["env"])
 
     def test_validator_roster_requires_independent_key_material(self):
         keys = [stack.TUF_ED25519_SPKI_PREFIX + bytes([index]) * 32 for index in range(4)]
@@ -438,7 +474,7 @@ class DeploymentTest(unittest.TestCase):
             lifecycle.workload_phases(stack, self.artifact, self.summary)
 
     def test_operator_cli_is_not_a_daemon(self):
-        resource = self.artifact["resources"][1]
+        resource = next(r for r in self.artifact["resources"] if r["kind"] in lifecycle.WORKLOADS)
         resource["spec"]["template"]["spec"]["containers"][0]["image"] = self.summary["services"]["admin"]["image"]
         with self.assertRaisesRegex(stack.ApplyBlockedError, "Admin CLI"):
             lifecycle.workload_phases(stack, self.artifact, self.summary)
@@ -467,7 +503,7 @@ class DeploymentTest(unittest.TestCase):
         # Test orchestration only: capabilities and readiness are mocked. This
         # deliberately provides no qualification for live apply or quorum.
         config = {"cellId": "unit", "cluster": {"kubeconfig": "/protected/cell.conf", "context": "cell-a"}}
-        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value=config), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]) as binding, patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "verify_complete_cell_acceptance", return_value={}), patch.object(lifecycle, "verify_critical_group_available", side_effect=self.critical_observations) as critical_ready, patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry, *precondition: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run") as run, patch.dict(lifecycle.os.environ, {}, clear=True):
+        with patch.object(lifecycle, "require_execution_capabilities"), patch.object(lifecycle, "load_config", return_value=config), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]) as binding, patch.object(lifecycle, "verify_external_secrets"), patch.object(lifecycle, "verify_managed_configmaps", return_value=[]), patch.object(lifecycle, "verify_maintenance"), patch.object(lifecycle.admin_install, "install", return_value={}), patch.object(lifecycle, "verify_complete_cell_acceptance", return_value={}), patch.object(lifecycle, "verify_critical_group_available", side_effect=self.critical_observations) as critical_ready, patch.object(lifecycle, "apply_resource", side_effect=lambda cmd, r, dry, *precondition: events.append(("apply", r["metadata"]["name"]))), patch.object(lifecycle, "verify_running", side_effect=lambda cmd, r: events.append(("ready", r["metadata"]["name"])) or []), patch.object(lifecycle, "run") as run, patch.dict(lifecycle.os.environ, {}, clear=True):
             lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
             self.assertEqual(binding.call_count, 2)
             smokes = [call.args[0] for call in run.call_args_list if call.args[0][0] == "bash"]
@@ -508,6 +544,7 @@ class DeploymentTest(unittest.TestCase):
                      patch.object(lifecycle, "load_config", return_value=config), \
                      patch.object(lifecycle, "verify_bootstrap_trust"), \
                      patch.object(lifecycle, "kubectl_command", return_value=["/bound/kubectl"]), \
+                     patch.object(lifecycle, "verify_external_secrets"), \
                      patch.object(lifecycle.admin_install, "install", return_value={}), \
                      patch.object(lifecycle, "verify_managed_configmaps", side_effect=observations), \
                      patch.object(lifecycle, "verify_maintenance"), \
@@ -617,7 +654,8 @@ class DeploymentTest(unittest.TestCase):
 
     def test_extra_runtime_image_rejected(self):
         changed = copy.deepcopy(self.artifact)
-        changed["resources"][1]["spec"]["template"]["spec"]["initContainers"] = [{"name": "injected", "image": "evil.invalid/untrusted:latest"}]
+        resource = next(r for r in changed["resources"] if r["kind"] in lifecycle.WORKLOADS)
+        resource["spec"]["template"]["spec"]["initContainers"] = [{"name": "injected", "image": "evil.invalid/untrusted:latest"}]
         with self.assertRaisesRegex(stack.ApplyBlockedError, "not an approved"):
             self.verify(changed)
 
@@ -633,7 +671,8 @@ class DeploymentTest(unittest.TestCase):
 
     def test_privilege_and_admin_tamper(self):
         changed = copy.deepcopy(self.artifact)
-        changed["resources"][1]["spec"]["template"]["spec"]["hostNetwork"] = True
+        resource = next(r for r in changed["resources"] if r["kind"] in lifecycle.WORKLOADS)
+        resource["spec"]["template"]["spec"]["hostNetwork"] = True
         with self.assertRaisesRegex(stack.ApplyBlockedError, "host namespaces"):
             self.verify(changed)
         changed = copy.deepcopy(self.artifact)

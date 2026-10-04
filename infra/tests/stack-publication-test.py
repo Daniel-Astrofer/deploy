@@ -92,12 +92,32 @@ class PublicationTest(unittest.TestCase):
         self.release["network"]["id"] = "synthetic-lab-bank"
         self.release["authorization"]["tuf"] = {"targetPath": "releases/synthetic-lab-release-1.json"}
         self.release["authorization"]["bft"] = {"networkId": "synthetic-lab-governance", "epoch": 1, "threshold": 3, "members": 4}
-        resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging"}}]
+        resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging"}},
+                     {"apiVersion": "v1", "kind": "ConfigMap",
+                      "metadata": {"name": "vault-probe", "namespace": "kerosene-staging"},
+                      "data": {"url": "https://localhost:7801/v1/health"}}]
         for name, service in self.release["services"].items():
             if name != "admin":
-                resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
-                                  "metadata": {"name": name, "namespace": "kerosene-staging"},
-                                  "spec": {"replicas": 1, "template": {"spec": {"containers": [{"name": name, "image": service["image"]}]}}}})
+                instances = [name] if name != "vault" else ["vault-1", "vault-2", "vault-3"]
+                for instance in instances:
+                    container = {"name": name, "image": service["image"]}
+                    if name == "vault":
+                        values = {"KEROSENE_ENV": "production", "VAULT_CEREMONY_MODE": "production",
+                                  "VAULT_AUTH_MODE": "mtls", "VAULT_TRANSPORT": "tor",
+                                  "VAULT_DKG_MODE": "distributed_wire", "VAULT_NODE_TIER": "domestic",
+                                  "ATTESTATION_MODE": "software", "VAULT_LISTEN_ADDR": "127.0.0.1:7801",
+                                  "VAULT_GENESIS_N": "3", "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe",
+                                  "VAULT_MEASUREMENT_PIN": "a" * 64}
+                        container["env"] = [{"name": key, "value": value} for key, value in values.items()]
+                        container["env"].extend([
+                            {"name": "VAULT_SEED_PEERS", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "seed-peers"}}},
+                            {"name": "VAULT_AUDIT_PUBKEY_ALLOWLIST", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "audit-pubkeys"}}},
+                            {"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "vault-probe", "key": "url"}}}])
+                        container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]},
+                                                       "timeoutSeconds": 6}
+                    resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
+                                      "metadata": {"name": instance, "namespace": "kerosene-staging"},
+                                      "spec": {"replicas": 1, "template": {"spec": {"containers": [container]}}}})
         self.deployment = {"schema": "kerosene.stack.deployment/v1", "environment": "staging-cell",
                            "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://synthetic-core.invalid"}}}
         for name, service in self.release["services"].items():

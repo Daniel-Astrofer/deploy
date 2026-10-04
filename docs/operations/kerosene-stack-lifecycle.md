@@ -132,6 +132,23 @@ acceptance gates still apply. Initial Secret provisioning must happen after
 namespace preparation outside this release executor; these checks do not adopt
 an existing workload or bypass the first-install recovery rules.
 
+The approved manifest must also match the Vault binary's current hardened
+runtime contract. Every one of the three independent Vault controllers must use
+`production` environment and ceremony modes, Tor transport, mTLS,
+`distributed_wire` DKG, domestic/software attestation with a 64-hex measurement
+pin, loopback-only `127.0.0.1:7801`, and `onion_or_spiffe` peer verification.
+The two peer onion endpoints and mesh-audit public-key allowlist are mandatory
+external Secret references, never inline manifest values. Readiness must invoke
+the Vault binary's authenticated `--health-probe`; its URL remains bound to an
+approved ConfigMap and resolves locally. This rejects the removed
+staging/clearnet profile before Admin installation or any Kubernetes write.
+
+The contract does not generate Tor identities, peer rosters, audit keys,
+measurement pins or mTLS credentials. Those remain independently provisioned
+bootstrap inputs. The Node/Vault live-protocol blocker remains until the Tor
+sidecar/onion identity layout and both Node planes pass the real sequential
+rollout qualification.
+
 `import-artifact` only integrity-checks and caches/extracts inert bytes. See
 [release archive](release-archive.md) for offline import, size limits, mirror
 policy and packaging. The unsigned candidate workflow does not publish an
