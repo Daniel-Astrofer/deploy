@@ -255,6 +255,15 @@ their initial submission. Every preceding phase must become Kubernetes-ready
 before the next is submitted. This is an ordering policy, not proof of RPC,
 financial readiness or consensus health. Multiple Node/Vault workloads remain
 in the inventory; this does not implement their replica-by-replica update.
+Each approved Node plane now also receives an immutable, read-only
+`node-<plane>-state` ConfigMap at `/etc/kerosene/node-state`. It contains the
+threshold-signed `StateSnapshotAttestationV1` and the exact payload bound by its
+SHA-256 state root. The Node binary verifies network, plane, current membership
+manifest, threshold, epoch and payload before financial readiness. A membership
+change clears the prior binding; snapshot epoch regression or conflicting reuse
+fails closed. The ConfigMap is release-digest input, but its presence alone is
+not acceptance evidence: the live Node protocol qualification must observe the
+binary reporting authenticated quorum and financial readiness.
 Runtime checks additionally require a non-deleting workload UID and pod ownership
 by that StatefulSet, or by a ReplicaSet controlled by that Deployment UID.
 A ready pod with matching labels/images but foreign ownership is not accepted.

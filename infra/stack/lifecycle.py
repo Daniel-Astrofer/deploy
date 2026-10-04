@@ -98,7 +98,8 @@ def verify_deployment(stack, release, summary, path):
     seen, observed = set(), set()
     allowed_images = {s["image"] for name, s in summary["services"].items() if name != "admin"}
     for resource in resources:
-        stack.require_keys(resource, "resource", ("apiVersion", "kind", "metadata"), ("spec", "data", "binaryData"))
+        stack.require_keys(resource, "resource", ("apiVersion", "kind", "metadata"),
+                           ("spec", "data", "binaryData", "immutable"))
         if resource["kind"] not in KINDS:
             raise stack.ApplyBlockedError("deployment cannot create Secrets, Jobs, RBAC or arbitrary resource kinds")
         if resource["kind"] == "HorizontalPodAutoscaler":
@@ -275,8 +276,13 @@ def verify_node_runtime_contract(stack, artifact, summary):
               "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
               "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
               "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+              "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
+              "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
               "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
     references = {"KEROSENE_GENESIS_ENDPOINTS", "KEROSENE_DISCOVERY_MIRRORS"}
+    resources = {(resource.get("metadata", {}).get("namespace"), resource.get("kind"),
+                  resource.get("metadata", {}).get("name")): resource
+                 for resource in artifact["resources"]}
     observed = {}
     try:
         for resource in artifact["resources"]:
@@ -310,6 +316,29 @@ def verify_node_runtime_contract(stack, artifact, summary):
                         raise ValueError("Node bootstrap input is not externally referenced")
                 if sum(peer.get("image") == tor_image for peer in pod_containers) != 1:
                     raise ValueError("Node does not have one co-located approved Tor sidecar")
+                probe = container.get("readinessProbe", {})
+                if (probe.get("exec", {}).get("command") !=
+                        ["/usr/local/bin/kerosene-node", "--health-probe"] or
+                        probe.get("timeoutSeconds") != 6):
+                    raise ValueError("Node readiness is not authenticated by its binary")
+                pod = resource["spec"]["template"]["spec"]
+                mounts = {mount.get("name"): mount for mount in container.get("volumeMounts", [])}
+                volumes = {volume.get("name"): volume for volume in pod.get("volumes", [])}
+                expected_state_name = "node-" + plane + "-state"
+                if mounts.get("state-snapshot") != {
+                        "name": "state-snapshot", "mountPath": "/etc/kerosene/node-state",
+                        "readOnly": True}:
+                    raise ValueError("Node state snapshot is not mounted read-only")
+                if volumes.get("state-snapshot") != {
+                        "name": "state-snapshot", "configMap": {"name": expected_state_name}}:
+                    raise ValueError("Node state snapshot source differs")
+                state = resources.get((resource["metadata"]["namespace"], "ConfigMap", expected_state_name))
+                data = state.get("data", {}) if isinstance(state, dict) else {}
+                binary = state.get("binaryData", {}) if isinstance(state, dict) else {}
+                if (state is None or state.get("immutable") is not True or
+                        not isinstance(data.get("attestation.json"), str) or
+                        not isinstance(data.get("snapshot.bin", binary.get("snapshot.bin")), str)):
+                    raise ValueError("Node state snapshot source is absent, mutable or incomplete")
                 observed[plane] = resource
         if set(observed) != {"bank", "vault"}:
             raise ValueError("both Node planes are required")

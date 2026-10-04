@@ -103,7 +103,13 @@ class PublicationTest(unittest.TestCase):
                       "data": {"genesis-endpoints": "", "mirrors": ""}},
                      {"apiVersion": "v1", "kind": "ConfigMap",
                       "metadata": {"name": "node-vault-bootstrap", "namespace": "kerosene-staging-vault"},
-                      "data": {"genesis-endpoints": "", "mirrors": ""}}]
+                      "data": {"genesis-endpoints": "", "mirrors": ""}},
+                     {"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                      "metadata": {"name": "node-bank-state", "namespace": "kerosene-staging"},
+                      "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}},
+                     {"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                      "metadata": {"name": "node-vault-state", "namespace": "kerosene-staging-vault"},
+                      "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}}]
         for name, service in self.release["services"].items():
             if name != "admin":
                 instances = ([{"name": "node-bank", "plane": "bank", "namespace": "kerosene-staging"},
@@ -127,11 +133,14 @@ class PublicationTest(unittest.TestCase):
                                   "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
                                   "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
                                   "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+                                  "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
+                                  "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
                                   "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
                         container["env"] = [{"name": key, "value": value} for key, value in values.items()]
                         container["env"].extend([
                             {"name": "KEROSENE_GENESIS_ENDPOINTS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "genesis-endpoints"}}},
                             {"name": "KEROSENE_DISCOVERY_MIRRORS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "mirrors"}}}])
+                        container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-node", "--health-probe"]}, "timeoutSeconds": 6}
                     if name == "vault":
                         values = {"KEROSENE_ENV": "production", "VAULT_CEREMONY_MODE": "production",
                                   "VAULT_AUTH_MODE": "mtls", "VAULT_TRANSPORT": "tor",
@@ -153,9 +162,13 @@ class PublicationTest(unittest.TestCase):
                     containers = [container]
                     if name in {"node", "vault"}:
                         containers.append({"name": "tor", "image": self.release["services"]["tor"]["image"]})
+                    pod_spec = {"containers": containers}
+                    if name == "node":
+                        container["volumeMounts"] = [{"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True}]
+                        pod_spec["volumes"] = [{"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}}]
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
                                       "metadata": {"name": instance, "namespace": namespace},
-                                      "spec": {"replicas": 1, "template": {"spec": {"containers": containers}}}})
+                                      "spec": {"replicas": 1, "template": {"spec": pod_spec}}})
         self.deployment = {"schema": "kerosene.stack.deployment/v1", "environment": "staging-cell",
                            "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://synthetic-core.invalid"}}}
         for name, service in self.release["services"].items():

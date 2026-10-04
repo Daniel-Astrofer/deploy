@@ -23,9 +23,6 @@ spec:
     - name: socks
       port: 9050
       targetPort: socks
-    - name: node-https
-      port: 8800
-      targetPort: node-https
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -79,15 +76,17 @@ spec:
             - name: KEROSENE_DISCOVERY_PLANE
               value: vault
             - name: KEROSENE_NODE_LISTEN_ADDR
-              value: 0.0.0.0:8800
+              value: 127.0.0.1:8800
             - name: KEROSENE_NODE_ONION_HOSTNAME_PATH
               value: /var/lib/tor/vault/hostname
             - name: KEROSENE_NODE_ONION_PORT
               value: "8800"
             - name: KEROSENE_IDENTITY_KEY_PATH
-              value: /etc/kerosene/node-identity/identity.key
+              value: /var/lib/tor/kerosene-node-vault/identity.key
             - name: KEROSENE_PEER_STORE
               value: /var/lib/tor/kerosene-node-vault/peer-store
+            - name: KEROSENE_LEDGER_DB_PATH
+              value: /var/lib/tor/kerosene-node-vault/ledger
             - name: KEROSENE_GENESIS_TRUST_BUNDLE
               value: /etc/kerosene/node-genesis/genesis-trust-bundle.json
             - name: KEROSENE_TLS_CERT_PATH
@@ -98,6 +97,10 @@ spec:
               value: /etc/kerosene/node-mtls/ca.crt
             - name: KEROSENE_TLS_CLIENT_IDENTITY_PEM
               value: /etc/kerosene/node-mtls/client-identity.pem
+            - name: KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH
+              value: /etc/kerosene/node-state/attestation.json
+            - name: KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH
+              value: /etc/kerosene/node-state/snapshot.bin
             - name: KEROSENE_TOR_SOCKS_PROXY
               value: socks5h://127.0.0.1:9050
             - name: KEROSENE_GENESIS_ENDPOINTS
@@ -114,17 +117,19 @@ spec:
             - name: node-https
               containerPort: 8800
           startupProbe:
-            tcpSocket:
-              port: node-https
+            exec:
+              command: [/usr/local/bin/kerosene-node, --health-probe]
             periodSeconds: 5
             failureThreshold: 36
           readinessProbe:
-            tcpSocket:
-              port: node-https
+            exec:
+              command: [/usr/local/bin/kerosene-node, --health-probe]
+            timeoutSeconds: 6
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
-              port: node-https
+            exec:
+              command: [/usr/local/bin/kerosene-node, --health-probe]
+            timeoutSeconds: 6
             periodSeconds: 30
           resources:
             requests:
@@ -147,8 +152,8 @@ spec:
             - name: node-mtls
               mountPath: /etc/kerosene/node-mtls
               readOnly: true
-            - name: node-identity
-              mountPath: /etc/kerosene/node-identity
+            - name: node-state
+              mountPath: /etc/kerosene/node-state
               readOnly: true
       volumes:
         - name: config
@@ -162,10 +167,9 @@ spec:
           secret:
             secretName: kerosene-node-mtls
             defaultMode: 0440
-        - name: node-identity
-          secret:
-            secretName: kerosene-node-identity
-            defaultMode: 0440
+        - name: node-state
+          configMap:
+            name: kerosene-node-vault-state-v1
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -184,3 +188,14 @@ data:
   # only authenticated v3 onion Node endpoints from the ceremony.
   genesis-endpoints: ""
   mirrors: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kerosene-node-vault-state-v1
+immutable: true
+data:
+  # Fail-closed bootstrap placeholders. Release tooling replaces the referenced
+  # immutable ConfigMap name with threshold-signed state material.
+  attestation.json: "{}"
+  snapshot.bin: "bootstrap-pending"

@@ -37,6 +37,9 @@ class DeploymentTest(unittest.TestCase):
             resources.append({"apiVersion": "v1", "kind": "ConfigMap",
                               "metadata": {"name": "node-" + plane + "-bootstrap", "namespace": namespace},
                               "data": {"genesis-endpoints": "", "mirrors": ""}})
+            resources.append({"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                              "metadata": {"name": "node-" + plane + "-state", "namespace": namespace},
+                              "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}})
         for name, service in self.release["services"].items():
             if name == "admin":
                 continue
@@ -61,11 +64,14 @@ class DeploymentTest(unittest.TestCase):
                               "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
                               "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
                               "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+                              "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
+                              "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
                               "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
                     container["env"] = [{"name": key, "value": value} for key, value in values.items()]
                     container["env"].extend([
                         {"name": "KEROSENE_GENESIS_ENDPOINTS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "genesis-endpoints"}}},
                         {"name": "KEROSENE_DISCOVERY_MIRRORS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "mirrors"}}}])
+                    container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-node", "--health-probe"]}, "timeoutSeconds": 6}
                 if name == "vault":
                     values = {"KEROSENE_ENV": "production", "VAULT_CEREMONY_MODE": "production",
                               "VAULT_AUTH_MODE": "mtls", "VAULT_TRANSPORT": "tor",
@@ -90,6 +96,9 @@ class DeploymentTest(unittest.TestCase):
                     claim = instance + "-data"
                     container["volumeMounts"] = [{"name": "identity-data", "mountPath": "/var/lib/kerosene"}]
                     pod_spec["volumes"] = [{"name": "identity-data", "persistentVolumeClaim": {"claimName": claim}}]
+                    if name == "node":
+                        container["volumeMounts"].append({"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True})
+                        pod_spec["volumes"].append({"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}})
                     resources.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
                                       "metadata": {"name": claim, "namespace": namespace},
                                       "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}}})
@@ -171,9 +180,36 @@ class DeploymentTest(unittest.TestCase):
         with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
             lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
         listen["value"] = "127.0.0.1:8800"
+        container["readinessProbe"]["exec"]["command"] = ["sh", "-c", "exit 0"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-node", "--health-probe"]}, "timeoutSeconds": 6}
         bank["spec"]["template"]["spec"]["containers"].pop()
         with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
             lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+
+    def test_node_runtime_contract_requires_immutable_attested_state_files(self):
+        lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        changed = copy.deepcopy(self.artifact)
+        state = next(r for r in changed["resources"] if r["metadata"].get("name") == "node-bank-state")
+        state["immutable"] = False
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+        changed = copy.deepcopy(self.artifact)
+        bank = next(r for r in changed["resources"] if r["metadata"].get("name") == "node-bank")
+        node = bank["spec"]["template"]["spec"]["containers"][0]
+        next(m for m in node["volumeMounts"] if m["name"] == "state-snapshot")["readOnly"] = False
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+        changed = copy.deepcopy(self.artifact)
+        bank = next(r for r in changed["resources"] if r["metadata"].get("name") == "node-bank")
+        node = bank["spec"]["template"]["spec"]["containers"][0]
+        node["env"] = [entry for entry in node["env"]
+                       if entry["name"] != "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH"]
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
 
     def test_validator_roster_requires_independent_key_material(self):
         keys = [stack.TUF_ED25519_SPKI_PREFIX + bytes([index]) * 32 for index in range(4)]
