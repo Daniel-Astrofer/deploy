@@ -339,9 +339,13 @@ failed update. Recovery revalidates the original target; no data rollback or
 signer activation is implied by restoring an operator executable.
 
 Local tests exercise the actual built pinned jctl distribution for both Core
-and KFE help, plus mocked OCI extraction/identity checks and failure journaling.
-Actual signed-bundle OCI installation and complete Cell execution are still not
-qualified; `admin-oci-live-installation-not-qualified` remains a live-apply gate.
+and KFE help, plus OCI extraction/identity checks and failure journaling. On
+2026-10-04 the built `installDist` was packaged as a compressed offline OCI,
+validated and installed by the production installer without Docker, revalidated
+from its receipt, and executed through the protected Cell wrapper for Core and
+KFE help. This qualifies the Admin OCI installation capability and its dedicated
+execution blocker was removed. It does not qualify real API authentication or
+complete Cell execution.
 
 ## Remaining live execution qualification
 
@@ -359,8 +363,7 @@ implementation capabilities exist and their integration tests pass:
    and recovery. `node-vault-live-protocol-quorum-not-qualified` remains until
    the same run uses the real two-plane Node and three-member Vault protocols,
    not readiness-only qualification containers.
-4. Live signed-bundle qualification of the integrated offline Admin OCI installation.
-5. Live qualification of the integrated complete-Cell verifier contract. Its
+4. Live qualification of the integrated complete-Cell verifier contract. Its
    bootstrap-pinned executable must bind the Cell, cluster UID, release,
    sequence, change and operator; prove every release component plus rollout,
    interruption, restore, Node/Vault quorum and resume-guard scenarios; and

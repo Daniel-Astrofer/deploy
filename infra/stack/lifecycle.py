@@ -37,7 +37,6 @@ EXECUTION_BLOCKERS = (
     "vault-live-rebuild-provenance-not-qualified",
     "migration-executor-live-jars-recovery-not-qualified",
     "node-vault-live-protocol-quorum-not-qualified",
-    "admin-oci-live-installation-not-qualified",
     "complete-cell-live-acceptance-not-qualified",
 )
 
