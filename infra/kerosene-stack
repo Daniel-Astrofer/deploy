@@ -2096,6 +2096,12 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
             raise ApplyBlockedError("--recover-initial-install is valid only with recover")
         if initial_recovery:
             lifecycle.verify_initial_admission_recovery_state(sys.modules[__name__], previous, summary, args)
+        postwrite_initial_recovery = None
+        if args.command == "recover" and not initial_recovery:
+            postwrite_initial_recovery = lifecycle.verify_postwrite_initial_install_recovery_state(
+                sys.modules[__name__], previous, summary, args)
+        args._postwrite_initial_recovery = postwrite_initial_recovery is not None
+        args._postwrite_initial_recovery_evidence = postwrite_initial_recovery
         # The public command's early check is helpful feedback, but only this
         # check under update.lock prevents concurrent installs from both seeing
         # a missing journal before one of them commits the Cell.
@@ -2114,7 +2120,8 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         receipt_result = verify_consensus_authorization(release, summary, args)
         vault_result = verify_vault_compatibility_attestation(
             release, summary, args.vault_compatibility_attestation, args.vault_roster)
-        if not args.dry_run and args.command != "install" and not initial_recovery:
+        if (not args.dry_run and args.command != "install" and not initial_recovery and
+                not postwrite_initial_recovery):
             lifecycle.verify_maintenance(sys.modules[__name__], args)
         if not args.dry_run:
             lifecycle.verify_recovery_plan(sys.modules[__name__], release, summary, args)

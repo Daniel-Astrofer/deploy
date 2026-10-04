@@ -101,7 +101,7 @@ class DatabasePlanTest(unittest.TestCase):
     def test_missing_plan_preserves_legacy_inspection_without_claiming_execution(self):
         self.artifact["resources"].remove(self.configmap)
         self.assertIsNone(lifecycle.initial_database_plan(stack, self.artifact))
-        self.assertIn("migration-executor-live-recovery-not-qualified", lifecycle.EXECUTION_BLOCKERS)
+        self.assertIn("migration-executor-live-jars-recovery-not-qualified", lifecycle.EXECUTION_BLOCKERS)
 
     def test_aliases_and_invalid_sql_names_rejected(self):
         original = copy.deepcopy(self.plan)
@@ -358,6 +358,34 @@ class DatabasePlanTest(unittest.TestCase):
         self.assertEqual(len(result["jobs"]), 4)
         self.assertEqual(wait.call_count, 4)
         self.assertTrue(all(count == 2 for count in job_reads.values()))
+
+        retained_names = {jobs[0]["metadata"]["name"], jobs[1]["metadata"]["name"]}
+        def recovery_command(argv, **_):
+            if "job" in argv and "--ignore-not-found" in argv:
+                name = argv[argv.index("job") + 1]
+                return json.dumps(fixtures[name][0]).encode() if name in retained_names else b""
+            return command(argv)
+        recovered_applied = []
+        with patch.object(lifecycle, "run", side_effect=recovery_command), \
+                patch.object(lifecycle, "apply_resource", side_effect=lambda _, job, dry: recovered_applied.append(job)), \
+                patch.object(lifecycle.probe_process, "run_probe", return_value=b""):
+            recovered = lifecycle.execute_initial_database_migrations(stack, ["/bound/kubectl"], self.artifact,
+                self.fixture.summary, update, recover_existing=True)
+        self.assertEqual([record["recoveredExisting"] for record in recovered["jobs"]], [True, True, False, False])
+        self.assertEqual([job["metadata"]["name"] for job in recovered_applied],
+                         [jobs[2]["metadata"]["name"], jobs[3]["metadata"]["name"]])
+
+        def gap_command(argv, **_):
+            if "job" in argv and "--ignore-not-found" in argv:
+                name = argv[argv.index("job") + 1]
+                return b'{"kind":"Job"}' if name == jobs[2]["metadata"]["name"] else b""
+            raise AssertionError(argv)
+        with patch.object(lifecycle, "run", side_effect=gap_command), \
+                patch.object(lifecycle, "apply_resource") as gap_apply, \
+                self.assertRaisesRegex(stack.ApplyBlockedError, "ordered recovery prefix"):
+            lifecycle.execute_initial_database_migrations(stack, ["/bound/kubectl"], self.artifact,
+                self.fixture.summary, update, recover_existing=True)
+        gap_apply.assert_not_called()
 
     def test_migration_executor_refuses_preexisting_job_without_writes(self):
         self.refresh()

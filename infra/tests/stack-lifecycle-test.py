@@ -269,6 +269,32 @@ class DeploymentTest(unittest.TestCase):
             with self.subTest(phase=phase), self.assertRaises(stack.ApplyBlockedError):
                 lifecycle.verify_initial_admission_recovery_state(stack, changed, summary, args)
 
+    def test_postwrite_initial_recovery_requires_exact_failed_installation(self):
+        digest = "sha256:" + "c" * 64
+        summary = {"_canonicalDigest": digest, "sequence": 3}
+        args = SimpleNamespace(environment="staging-cell", change_id="change-a", operator_id="operator-a",
+                               resume_update_id=digest, recover_initial_install=False)
+        state = {"schema": "kerosene.stack.update-state/v1", "updateId": digest, "sequence": 3,
+                 "environment": "staging-cell", "changeId": "change-a", "operatorId": "operator-a",
+                 "status": "failed", "phase": "failed", "manualRecoveryRequired": True,
+                 "events": [{"phase": phase} for phase in
+                            ("snapshot-accepted", "rollout-started", "initial-admission-consumed",
+                             "admin-installed", "initial-database-migrations-validated", "failed")]}
+        evidence = lifecycle.verify_postwrite_initial_install_recovery_state(stack, state, summary, args)
+        self.assertEqual(evidence["priorAdmissionPhase"], "initial-admission-consumed")
+        self.assertFalse(evidence["bankAdmissionReused"])
+        ordinary = copy.deepcopy(state)
+        ordinary["events"] = [{"phase": "snapshot-accepted"}, {"phase": "rollout-started"}, {"phase": "failed"}]
+        self.assertIsNone(lifecycle.verify_postwrite_initial_install_recovery_state(stack, ordinary, summary, args))
+        for mutation in ({"operatorId": "other"}, {"updateId": "sha256:" + "d" * 64}):
+            changed = {**state, **mutation}
+            with self.subTest(mutation=mutation), self.assertRaises(stack.ApplyBlockedError):
+                lifecycle.verify_postwrite_initial_install_recovery_state(stack, changed, summary, args)
+        duplicated = copy.deepcopy(state)
+        duplicated["events"].insert(-1, {"phase": "initial-admission-retained"})
+        with self.assertRaises(stack.ApplyBlockedError):
+            lifecycle.verify_postwrite_initial_install_recovery_state(stack, duplicated, summary, args)
+
     def test_initial_admission_rejects_binding_mismatch_before_network(self):
         path = self.root / "admission.json"
         path.write_text(json.dumps({"admission": {"cellId": "wrong"}, "signatures": []}))
@@ -515,6 +541,43 @@ class DeploymentTest(unittest.TestCase):
             admin.assert_not_called()
             apply.assert_not_called()
             maintenance.assert_not_called()
+
+    def test_postwrite_initial_recovery_retains_admission_and_recovers_migrations(self):
+        summary = copy.deepcopy(self.summary)
+        summary["_canonicalDigest"] = "sha256:" + "c" * 64
+        evidence = {"updateId": summary["_canonicalDigest"], "bankAdmissionReused": False}
+        args = SimpleNamespace(command="recover", dry_run=False, cell_dir="unit-only", _release={},
+                               _postwrite_initial_recovery=True,
+                               _postwrite_initial_recovery_evidence=evidence)
+        checkpoints = []
+        config = {"cellId": "unit", "cluster": {"kubeconfig": "/protected/cell.conf", "context": "cell-a"}}
+        baseline = []
+        with patch.object(lifecycle, "require_execution_capabilities"), \
+             patch.object(lifecycle, "load_config", return_value=config), \
+             patch.object(lifecycle, "verify_bootstrap_trust"), \
+             patch.object(lifecycle, "kubectl_command", return_value=["/bound-kubectl"]), \
+             patch.object(lifecycle, "verify_empty_installation") as empty, \
+             patch.object(lifecycle, "initial_database_plan", return_value={"mode": "initial"}), \
+             patch.object(lifecycle, "verify_external_secrets"), \
+             patch.object(lifecycle, "required_secret_references", return_value=[]), \
+             patch.object(lifecycle, "consume_initial_admission") as admission, \
+             patch.object(lifecycle.admin_install, "install", return_value={}), \
+             patch.object(lifecycle, "verify_managed_configmaps", return_value=baseline), \
+             patch.object(lifecycle, "apply_resource"), \
+             patch.object(lifecycle, "verify_running", return_value=[]), \
+             patch.object(lifecycle, "execute_initial_database_migrations",
+                          side_effect=stack.ApplyBlockedError("stop-after-argument-check")) as migrations, \
+             patch.object(lifecycle, "verify_maintenance") as maintenance, \
+             patch.object(lifecycle, "run"), \
+             patch.dict(lifecycle.os.environ, {}, clear=True), \
+             self.assertRaisesRegex(stack.ApplyBlockedError, "stop-after-argument-check"):
+            lifecycle.execute(stack, self.artifact, summary, args,
+                              lambda phase, details: checkpoints.append((phase, details)))
+        empty.assert_not_called()
+        admission.assert_not_called()
+        maintenance.assert_not_called()
+        self.assertIn(("initial-admission-retained", evidence), checkpoints)
+        self.assertTrue(migrations.call_args.kwargs["recover_existing"])
 
     def test_smoke_overrides_block_before_any_resource_write(self):
         from types import SimpleNamespace

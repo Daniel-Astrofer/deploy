@@ -182,17 +182,28 @@ database plan and external Secrets, then calls the Bank's read-only
 special recovery mode and requires the broader recovery procedure. Live
 full-Cell qualification remains incomplete.
 
+If failure occurs after a successful Bank admission checkpoint, use ordinary
+`recover` with the same change/operator and exact `--resume-update-id`; do not
+pass `--recover-initial-install`. Under the update lock, the controller proves
+that the failed journal belongs to that exact initial installation and contains
+one admission checkpoint. It then records `initial-admission-retained` without
+calling Bank or consuming a nonce again. Repeated recovery attempts apply the
+same rule.
+
 For initial installation, PostgreSQL must become Ready before application
 schemas are touched. Immediately before the Core/KFE phase, the controller
 creates deterministic migration-credential Jobs in `kerosene-staging`: first
-`migrate` for Core and KFE, then `validate` for both. It refuses pre-existing Job
-names, uses no retries, waits within the Job deadline, accepts exactly one
+`migrate` for Core and KFE, then `validate` for both. A fresh installation
+refuses pre-existing Job names. Post-admission recovery accepts only an exact,
+successfully completed prefix in that order, revalidates every retained Job and
+Pod, and creates only the missing suffix. A gap or changed identity fails closed.
+Execution uses no retries, waits within the Job deadline, accepts exactly one
 successful owned Pod, and rechecks Job/Pod UIDs, command, Secret references,
 security context, runtime image ID and terminal state. Jobs are retained for
 diagnosis and never automatically deleted or repaired. Core/KFE workloads are
-not submitted unless all four observations pass. Real Kubernetes/JAR failure and
-operator recovery qualification is still pending, so
-`migration-executor-live-recovery-not-qualified` remains an execution blocker.
+not submitted unless all four observations pass. Real Kubernetes execution with
+the current Core/KFE JAR images and interrupted recovery is still pending, so
+`migration-executor-live-jars-recovery-not-qualified` remains an execution blocker.
 
 ## Approved manifest and evidence
 

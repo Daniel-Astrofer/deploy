@@ -35,7 +35,7 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 # test; signed evidence cannot implement an absent runtime safety mechanism.
 EXECUTION_BLOCKERS = (
     "vault-live-rebuild-provenance-not-qualified",
-    "migration-executor-live-recovery-not-qualified",
+    "migration-executor-live-jars-recovery-not-qualified",
     "node-vault-live-protocol-quorum-not-qualified",
     "admin-oci-live-installation-not-qualified",
     "complete-cell-live-acceptance-not-qualified",
@@ -563,50 +563,60 @@ def collect_database_capabilities_output(stack, kubectl, component, namespace, p
     return verify_database_capabilities_output(stack, component, raw)
 
 
-def execute_initial_database_migrations(stack, kubectl, artifact, summary, update_id):
-    """Run controller-owned migrate then validate Jobs; retain every Job."""
+def execute_initial_database_migrations(stack, kubectl, artifact, summary, update_id, recover_existing=False):
+    """Run migrate then validate Jobs, or inspect an exact retained prefix."""
     records = []
-    for operation in ("migrate", "validate"):
-        for job in initial_database_migration_jobs(stack, artifact, summary, update_id, operation):
-            namespace, name = job["metadata"]["namespace"], job["metadata"]["name"]
-            existing = run(kubectl + ["-n", namespace, "get", "job", name,
-                                      "--ignore-not-found", "-o", "json"])
-            if existing.strip():
-                raise stack.ApplyBlockedError("database migration Job already exists; explicit recovery is required")
+    ordered = [(operation, job) for operation in ("migrate", "validate")
+               for job in initial_database_migration_jobs(stack, artifact, summary, update_id, operation)]
+    existing_documents = []
+    for _, job in ordered:
+        namespace, name = job["metadata"]["namespace"], job["metadata"]["name"]
+        raw = run(kubectl + ["-n", namespace, "get", "job", name, "--ignore-not-found", "-o", "json"])
+        existing_documents.append(raw)
+    present = [bool(raw.strip()) for raw in existing_documents]
+    if any(present) and not recover_existing:
+        raise stack.ApplyBlockedError("database migration Job already exists; explicit recovery is required")
+    if recover_existing and any(present[index] and not all(present[:index]) for index in range(len(present))):
+        raise stack.ApplyBlockedError("retained database migration Jobs are not an ordered recovery prefix")
+    for index, (operation, job) in enumerate(ordered):
+        namespace, name = job["metadata"]["namespace"], job["metadata"]["name"]
+        retained = present[index]
+        if not retained:
             apply_resource(kubectl, job, False)
-            try:
-                probe_process.run_probe(kubectl + ["-n", namespace, "wait", "--for=condition=complete",
-                    "job/" + name, "--timeout=305s"], timeout=310)
-                live_job = json.loads(run(kubectl + ["-n", namespace, "get", "job", name, "-o", "json"]))
-                metadata, status = live_job["metadata"], live_job["status"]
-                job_uid = metadata["uid"]
-                if (metadata.get("name") != name or metadata.get("namespace") != namespace or
-                        metadata.get("deletionTimestamp") or
-                        metadata.get("annotations", {}).get("kerosene.io/update-id") != update_id or
-                        not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", job_uid) or
-                        status.get("succeeded") != 1 or status.get("failed", 0) != 0 or status.get("active", 0) != 0 or
-                        not any(condition.get("type") == "Complete" and condition.get("status") == "True"
-                                for condition in status.get("conditions", []))):
-                    raise ValueError("unexpected completed Job")
-                raw_pods = run(kubectl + ["-n", namespace, "get", "pods", "-l",
-                    "batch.kubernetes.io/controller-uid=" + job_uid, "-o", "json"])
-                pod_list = json.loads(raw_pods)
-                if not isinstance(pod_list, dict) or not isinstance(pod_list.get("items"), list) or len(pod_list["items"]) != 1:
-                    raise ValueError("ambiguous migration Pod")
-                pod = pod_list["items"][0]
-                pod_uid = pod.get("metadata", {}).get("uid")
-                record = verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid, operation)
-                final_job = json.loads(run(kubectl + ["-n", namespace, "get", "job", name, "-o", "json"]))
-                final_pod = json.loads(run(kubectl + ["-n", namespace, "get", "pod", record["podName"], "-o", "json"]))
-                if final_job.get("metadata", {}).get("uid") != job_uid:
-                    raise ValueError("migration Job identity changed")
-                final_record = verify_database_capability_terminal_pod(stack, job, job_uid, final_pod, pod_uid, operation)
-                if final_record != record:
-                    raise ValueError("migration Pod changed after observation")
-                records.append(record)
-            except (probe_process.ProbeProcessError, RuntimeError, ValueError, KeyError, TypeError,
-                    json.JSONDecodeError, stack.ApplyBlockedError) as error:
-                raise stack.ApplyBlockedError("database migration did not complete with the expected retained Job") from error
+        try:
+            probe_process.run_probe(kubectl + ["-n", namespace, "wait", "--for=condition=complete",
+                "job/" + name, "--timeout=305s"], timeout=310)
+            live_job = json.loads(run(kubectl + ["-n", namespace, "get", "job", name, "-o", "json"]))
+            metadata, status = live_job["metadata"], live_job["status"]
+            job_uid = metadata["uid"]
+            if (metadata.get("name") != name or metadata.get("namespace") != namespace or
+                    metadata.get("deletionTimestamp") or
+                    metadata.get("annotations", {}).get("kerosene.io/update-id") != update_id or
+                    not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", job_uid) or
+                    status.get("succeeded") != 1 or status.get("failed", 0) != 0 or status.get("active", 0) != 0 or
+                    not any(condition.get("type") == "Complete" and condition.get("status") == "True"
+                            for condition in status.get("conditions", []))):
+                raise ValueError("unexpected completed Job")
+            raw_pods = run(kubectl + ["-n", namespace, "get", "pods", "-l",
+                "batch.kubernetes.io/controller-uid=" + job_uid, "-o", "json"])
+            pod_list = json.loads(raw_pods)
+            if not isinstance(pod_list, dict) or not isinstance(pod_list.get("items"), list) or len(pod_list["items"]) != 1:
+                raise ValueError("ambiguous migration Pod")
+            pod = pod_list["items"][0]
+            pod_uid = pod.get("metadata", {}).get("uid")
+            record = verify_database_capability_terminal_pod(stack, job, job_uid, pod, pod_uid, operation)
+            final_job = json.loads(run(kubectl + ["-n", namespace, "get", "job", name, "-o", "json"]))
+            final_pod = json.loads(run(kubectl + ["-n", namespace, "get", "pod", record["podName"], "-o", "json"]))
+            if final_job.get("metadata", {}).get("uid") != job_uid:
+                raise ValueError("migration Job identity changed")
+            final_record = verify_database_capability_terminal_pod(stack, job, job_uid, final_pod, pod_uid, operation)
+            if final_record != record:
+                raise ValueError("migration Pod changed after observation")
+            record["recoveredExisting"] = retained
+            records.append(record)
+        except (probe_process.ProbeProcessError, RuntimeError, ValueError, KeyError, TypeError,
+                json.JSONDecodeError, stack.ApplyBlockedError) as error:
+            raise stack.ApplyBlockedError("database migration did not complete with the expected retained Job") from error
     return {"schema": "kerosene.cell.database-migration-execution/v1",
             "updateId": update_id, "jobs": records}
 
@@ -907,18 +917,24 @@ def execute(stack, artifact, summary, args, checkpoint):
     # Validate all unsupported policies before the first Kubernetes write.
     if any(r["kind"] == "HorizontalPodAutoscaler" for r in prerequisites):
         raise stack.ApplyBlockedError("HPA requires a separately approved freeze/restore policy during Cell update")
-    initial_install = (getattr(args, "command", None) == "install" or
-                       (getattr(args, "command", None) == "recover" and
-                        getattr(args, "recover_initial_install", False)))
+    fresh_install = getattr(args, "command", None) == "install"
+    prewrite_initial_recovery = (getattr(args, "command", None) == "recover" and
+                                 getattr(args, "recover_initial_install", False))
+    postwrite_initial_recovery = bool(getattr(args, "_postwrite_initial_recovery", False))
+    initial_install = fresh_install or prewrite_initial_recovery or postwrite_initial_recovery
     if initial_install:
-        verify_empty_installation(stack, kubectl)
+        if fresh_install or prewrite_initial_recovery:
+            verify_empty_installation(stack, kubectl)
         if not args.dry_run and initial_database_plan(stack, artifact, summary) is None:
             raise stack.ApplyBlockedError("initial installation requires an approved database plan")
         verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
         if not args.dry_run:
-            operation = "inspect-recovery" if getattr(args, "recover_initial_install", False) else "consume"
-            admission = consume_initial_admission(stack, config, summary, args, operation)
-            checkpoint("initial-admission-recovered" if operation == "inspect-recovery" else "initial-admission-consumed", admission)
+            if postwrite_initial_recovery:
+                checkpoint("initial-admission-retained", args._postwrite_initial_recovery_evidence)
+            else:
+                operation = "inspect-recovery" if prewrite_initial_recovery else "consume"
+                admission = consume_initial_admission(stack, config, summary, args, operation)
+                checkpoint("initial-admission-recovered" if operation == "inspect-recovery" else "initial-admission-consumed", admission)
     else:
         verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
     if not args.dry_run:
@@ -938,7 +954,9 @@ def execute(stack, artifact, summary, args, checkpoint):
             raise stack.ApplyBlockedError("managed ConfigMaps changed before the next Cell phase")
         if (initial_install and not args.dry_run and not migrations_executed and
                 any(container.get("image") in application_images for resource in phase for container in containers(resource))):
-            migration = execute_initial_database_migrations(stack, kubectl, artifact, summary, summary["_canonicalDigest"])
+            migration = execute_initial_database_migrations(
+                stack, kubectl, artifact, summary, summary["_canonicalDigest"],
+                recover_existing=postwrite_initial_recovery)
             checkpoint("initial-database-migrations-validated", migration)
             migrations_executed = True
         # Core and KFE have reciprocal integration references. Submit the
@@ -948,7 +966,7 @@ def execute(stack, artifact, summary, args, checkpoint):
         batch = phase if initial_install or args.dry_run else [r for r in phase if identity(r) not in critical_by_identity]
         for resource in batch:
             label = "/".join(identity(resource))
-            if not args.dry_run:
+            if not args.dry_run and not initial_install:
                 verify_maintenance(stack, args)
             checkpoint("before:" + label, {})
             apply_resource(kubectl, resource, args.dry_run)
@@ -1072,6 +1090,45 @@ def verify_initial_admission_recovery_state(stack, previous, summary, args):
         raise stack.ApplyBlockedError("journal does not prove a pre-write uncertain initial admission")
     return {"updateId": summary["_canonicalDigest"], "changeId": args.change_id,
             "operatorId": args.operator_id, "priorPhase": "failed"}
+
+
+def verify_postwrite_initial_install_recovery_state(stack, previous, summary, args):
+    """Classify an exact failed initial install after Bank admission.
+
+    Returns None for an ordinary update recovery. Once an initial admission is
+    observed, every mismatch fails closed instead of falling through to update
+    semantics or attempting to consume the admission nonce again.
+    """
+    if not isinstance(previous, dict) or previous.get("schema") != "kerosene.stack.update-state/v1":
+        return None
+    events = previous.get("events")
+    if not isinstance(events, list) or len(events) > 4096 or any(not isinstance(event, dict) for event in events):
+        return None
+    phases = [event.get("phase") for event in events]
+    admission_phases = {"initial-admission-consumed", "initial-admission-recovered",
+                        "initial-admission-retained"}
+    observed = [phase for phase in phases if phase in admission_phases]
+    if not observed:
+        return None
+    expected = {"updateId": summary["_canonicalDigest"], "sequence": summary["sequence"],
+                "environment": args.environment, "changeId": args.change_id,
+                "operatorId": args.operator_id, "status": "failed", "phase": "failed",
+                "manualRecoveryRequired": True}
+    if any(previous.get(key) != value for key, value in expected.items()):
+        raise stack.ApplyBlockedError("post-write initial recovery journal does not bind this exact failed installation")
+    if getattr(args, "resume_update_id", None) != summary["_canonicalDigest"]:
+        raise stack.ApplyBlockedError("post-write initial recovery requires the exact --resume-update-id")
+    if getattr(args, "recover_initial_install", False):
+        raise stack.ApplyBlockedError("post-write initial recovery must not use --recover-initial-install")
+    if (len(observed) != 1 or phases[:2] != ["snapshot-accepted", "rollout-started"] or
+            phases[-1:] != ["failed"] or "validate-and-commit" in phases):
+        raise stack.ApplyBlockedError("journal does not prove one incomplete post-admission initial installation")
+    admission_index = phases.index(observed[0])
+    if admission_index < 2 or admission_index >= len(phases) - 1:
+        raise stack.ApplyBlockedError("initial admission checkpoint is out of order")
+    return {"updateId": summary["_canonicalDigest"], "changeId": args.change_id,
+            "operatorId": args.operator_id, "priorAdmissionPhase": observed[0],
+            "bankAdmissionReused": False}
 
 
 def consume_initial_admission(stack, config, summary, args, operation="consume"):
