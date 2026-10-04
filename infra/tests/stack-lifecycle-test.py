@@ -640,7 +640,7 @@ class DeploymentTest(unittest.TestCase):
     def test_single_operation_directory_expands_private_references_without_reading_secrets(self):
         operation = self.root / "operation"
         operation.mkdir(mode=0o700)
-        text = {"change-id": "change-a", "operator-id": "operator-a",
+        text = {"confirm-release": "release-a", "change-id": "change-a", "operator-id": "operator-a",
                 "admission-endpoint": "https://bank.invalid", "maintenance-endpoint": "https://kfe.invalid/api/admin/kfe/maintenance/status"}
         private = ("admission-ca.pem", "admission-cert.pem", "admission-key.pem", "maintenance-ca.pem",
                    "maintenance-cert.pem", "maintenance-key.pem", "maintenance-token", "recovery-evidence.json")
@@ -654,6 +654,7 @@ class DeploymentTest(unittest.TestCase):
         lifecycle.resolve_operation_directory(stack, args)
         self.assertEqual(args.change_id, "change-a")
         self.assertEqual(args.operator_id, "operator-a")
+        self.assertEqual(args.confirm_release, "release-a")
         self.assertEqual(args.maintenance_token_file, str(operation / "maintenance-token"))
         self.assertNotIn("private-reference-content", vars(args).values())
         mixed = stack.build_parser().parse_args(["update", "--operation-dir", str(operation), "--release", "unit.json",

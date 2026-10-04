@@ -40,7 +40,7 @@ infra/kerosene-stack preflight --cell-dir /protected/cell-a \
 infra/kerosene-stack install --cell-dir /protected/cell-a \
   --bundle-dir /media/release/deployment \
   --operation-dir /protected/operation-a \
-  --apply --confirm-release RELEASE_ID
+  --apply
 ```
 
 The protected bootstrap directory uses exact conventional names:
@@ -61,12 +61,13 @@ cluster package, not part of the downloaded release bundle.
 The owner-only operation directory uses:
 
 ```text
-change-id                       operator-id
-admission-endpoint              admission-ca.pem
-admission-cert.pem              admission-key.pem
-maintenance-endpoint            maintenance-ca.pem
-maintenance-cert.pem            maintenance-key.pem
-maintenance-token               recovery-evidence.json
+confirm-release                 change-id
+operator-id                     admission-endpoint
+admission-ca.pem                admission-cert.pem
+admission-key.pem               maintenance-endpoint
+maintenance-ca.pem              maintenance-cert.pem
+maintenance-key.pem             maintenance-token
+recovery-evidence.json
 ```
 
 Only attribution and endpoint text are read into process arguments. Credential

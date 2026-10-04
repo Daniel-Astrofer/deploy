@@ -1389,7 +1389,7 @@ def resolve_operation_directory(stack, args):
     """Expand private operator references without copying them into Cell state."""
     if not getattr(args, "operation_dir", None):
         return args
-    fields = {"change_id": "change-id", "operator_id": "operator-id",
+    fields = {"confirm_release": "confirm-release", "change_id": "change-id", "operator_id": "operator-id",
               "admission_endpoint": "admission-endpoint", "admission_ca": "admission-ca.pem",
               "admission_cert": "admission-cert.pem", "admission_key": "admission-key.pem",
               "maintenance_endpoint": "maintenance-endpoint", "maintenance_ca": "maintenance-ca.pem",
@@ -1414,7 +1414,7 @@ def resolve_operation_directory(stack, args):
         if (path.is_symlink() or not stat.S_ISREG(file_info.st_mode) or file_info.st_uid != os.getuid() or
                 file_info.st_mode & 0o077):
             raise stack.ReleaseValidationError("operation file must be owner-only, regular and not a symlink: " + name)
-        if field in {"change_id", "operator_id", "admission_endpoint", "maintenance_endpoint"}:
+        if field in {"confirm_release", "change_id", "operator_id", "admission_endpoint", "maintenance_endpoint"}:
             try:
                 value = stack.read_regular_file_bytes(path, "operational " + field, 4096).decode("ascii").strip()
             except UnicodeDecodeError as error:
