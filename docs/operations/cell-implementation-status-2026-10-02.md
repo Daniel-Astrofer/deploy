@@ -157,8 +157,11 @@ they were not falsely rerun or elevated to full-Cell proof in this wave.
    operator-approved resumption using actual Admin/Node/UI and all services.
    Retain bound evidence; never auto-activate Vault signers.
 
-The next live lab run needs an explicit capacity decision. Expanding the named
-40 GiB Docker loop image to 60 GiB was requested but not authorized. Space is
-one external test constraint, **not** the only missing implementation above.
-The subsequent read-only capacity check showed 122 MiB available; no resize,
-prune or new live qualification was attempted in this continuation wave.
+The named Docker loop image was subsequently authorized and expanded from
+40 GiB to 60 GiB without pruning containers, images or volumes. On 2026-10-04,
+the real three-member Vault protocol qualification passed over fresh Tor onion
+identities and mTLS: every member reported financial readiness for the 2-of-3
+constitution and distributed-wire DKG completed. Capacity is therefore no
+longer the blocker recorded by this checkpoint. The combined Node/Vault blocker
+remains because the real two-plane Node protocol has not yet passed the same
+qualification.

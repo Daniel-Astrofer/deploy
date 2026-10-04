@@ -142,8 +142,10 @@ loopback SOCKS endpoint; Vault and Tor are one rollout unit.
 The two peer onion endpoints and mesh-audit public-key allowlist are mandatory
 external Secret references, never inline manifest values. The attestation root
 and AEAD share passphrase are external Secret references as well. Readiness must invoke
-the Vault binary's authenticated `--health-probe`; its URL remains bound to an
-approved ConfigMap and resolves locally. This rejects the removed
+the Vault binary's authenticated `--health-probe` against the non-recursive
+`/v1/local-health` endpoint; its URL remains bound to an approved ConfigMap and
+resolves locally. Financial/quorum health remains a distinct acceptance gate.
+This rejects the removed
 staging/clearnet profile before Admin installation or any Kubernetes write.
 
 The contract does not generate Tor identities, peer rosters, audit keys,
@@ -390,11 +392,21 @@ implementation capabilities exist and their integration tests pass:
    The controller now requires one replica per workload, distinct approved
    persistent identities, all peers ready before and after every mutation, the
    Vault release threshold, and UID/resourceVersion update preconditions. The
-   The opt-in Kind qualification exercises real Deployments, PVC identities,
+   opt-in Kind qualification exercises real Deployments, PVC identities,
    controller revisions, one-at-a-time sequencing, unavailable-member refusal
    and recovery. `node-vault-live-protocol-quorum-not-qualified` remains until
    the same run uses the real two-plane Node and three-member Vault protocols,
    not readiness-only qualification containers.
+
+   On 2026-10-04, `infra/tests/stack-vault-protocol-kind-test.py` additionally
+   qualified the actual production Vault binary in three fresh Deployments with
+   independent PVC-backed onion identities, synthetic per-member mTLS material,
+   non-recursive authenticated peer liveness and a 2-of-3 constitution. Every
+   member reported `local_ready=true`, `financial_ready=true`,
+   `configured_members=3` and `required_threshold=2`; a distributed-wire DKG
+   then completed with each round authenticated as its originating Vault. This
+   closes the Vault protocol portion only. It neither qualifies the two Node
+   planes nor removes the combined blocker.
 3. Live qualification of the integrated complete-Cell verifier contract. Its
    bootstrap-pinned executable must bind the Cell, cluster UID, release,
    sequence, change and operator; prove every release component plus rollout,

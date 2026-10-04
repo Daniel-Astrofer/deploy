@@ -185,7 +185,7 @@ def verify_vault_probe_configuration(stack, artifact):
                 if not isinstance(raw, str) or len(raw) > 2048:
                     raise ValueError("invalid probe URL")
                 url = urllib.parse.urlsplit(raw)
-                if url.scheme != "https" or not url.hostname or url.username is not None or url.password is not None or url.path != "/v1/health" or url.query or url.fragment:
+                if url.scheme != "https" or not url.hostname or url.username is not None or url.password is not None or url.path != "/v1/local-health" or url.query or url.fragment:
                     raise ValueError("invalid probe URL")
                 try:
                     ipaddress.ip_address(url.hostname)

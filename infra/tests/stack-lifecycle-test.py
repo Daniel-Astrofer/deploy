@@ -32,7 +32,7 @@ class DeploymentTest(unittest.TestCase):
                      for namespace in ("kerosene-staging", "kerosene-staging-vault")]
         resources.append({"apiVersion": "v1", "kind": "ConfigMap",
                           "metadata": {"name": "vault-probe", "namespace": "kerosene-staging"},
-                          "data": {"url": "https://localhost:7801/v1/health"}})
+                          "data": {"url": "https://localhost:7801/v1/local-health"}})
         for plane, namespace in (("bank", "kerosene-staging"), ("vault", "kerosene-staging-vault")):
             resources.append({"apiVersion": "v1", "kind": "ConfigMap",
                               "metadata": {"name": "node-" + plane + "-bootstrap", "namespace": namespace},
@@ -122,14 +122,14 @@ class DeploymentTest(unittest.TestCase):
         container["env"] = [{"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "probe", "key": "url"}}}]
         with self.assertRaises(stack.ApplyBlockedError):
             lifecycle.verify_vault_probe_configuration(stack, self.artifact)
-        config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"namespace": "kerosene-staging", "name": "probe"}, "data": {"url": "https://vault.example:7801/v1/health"}}
+        config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"namespace": "kerosene-staging", "name": "probe"}, "data": {"url": "https://vault.example:7801/v1/local-health"}}
         self.artifact["resources"].append(config)
         lifecycle.verify_vault_probe_configuration(stack, self.artifact)
-        for url in ("http://vault.example/v1/health", "https://user@vault.example/v1/health", "https://vault.example/", "https://vault.example/v1/health?x=1", "https://192.0.2.1/v1/health", "https://[::1]/v1/health", "https://2130706433/v1/health", "https://vault.example:0/v1/health"):
+        for url in ("http://vault.example/v1/local-health", "https://user@vault.example/v1/local-health", "https://vault.example/", "https://vault.example/v1/local-health?x=1", "https://192.0.2.1/v1/local-health", "https://[::1]/v1/local-health", "https://2130706433/v1/local-health", "https://vault.example:0/v1/local-health"):
             config["data"]["url"] = url
             with self.subTest(url=url), self.assertRaises(stack.ApplyBlockedError):
                 lifecycle.verify_vault_probe_configuration(stack, self.artifact)
-        config["data"]["url"] = "https://vault.example:7801/v1/health"
+        config["data"]["url"] = "https://vault.example:7801/v1/local-health"
         for timeout in (None, True, 1, 4, "6"):
             container["readinessProbe"]["timeoutSeconds"] = timeout
             with self.subTest(timeout=timeout), self.assertRaises(stack.ApplyBlockedError):

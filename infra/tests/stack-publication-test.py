@@ -97,7 +97,7 @@ class PublicationTest(unittest.TestCase):
         resources += [
                      {"apiVersion": "v1", "kind": "ConfigMap",
                       "metadata": {"name": "vault-probe", "namespace": "kerosene-staging"},
-                      "data": {"url": "https://localhost:7801/v1/health"}},
+                      "data": {"url": "https://localhost:7801/v1/local-health"}},
                      {"apiVersion": "v1", "kind": "ConfigMap",
                       "metadata": {"name": "node-bank-bootstrap", "namespace": "kerosene-staging"},
                       "data": {"genesis-endpoints": "", "mirrors": ""}},
