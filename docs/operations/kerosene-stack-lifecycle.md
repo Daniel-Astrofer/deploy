@@ -202,7 +202,10 @@ successful owned Pod, and rechecks Job/Pod UIDs, command, Secret references,
 security context, runtime image ID and terminal state. Jobs are retained for
 diagnosis and never automatically deleted or repaired. Core/KFE workloads are
 not submitted unless all four observations pass. Real Kubernetes execution with
-the current Core/KFE JAR images and interrupted recovery is still pending, so
+the current Core/KFE JAR images and interrupted recovery is still pending. The
+2026-10-04 host-side qualification confirmed that both current built JARs exit
+successfully with the exact bounded `kerosene.cell.migration-capabilities/v1`
+contract; it does not substitute for Job, database or recovery execution. Thus
 `migration-executor-live-jars-recovery-not-qualified` remains an execution blocker.
 
 ## Approved manifest and evidence

@@ -5,7 +5,9 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -210,6 +212,23 @@ class DatabasePlanTest(unittest.TestCase):
                             dict(expected, operations=["validate", "migrate", "clean"])):
                 with self.subTest(changed=changed), self.assertRaises(stack.ApplyBlockedError):
                     lifecycle.verify_database_capabilities_output(stack, component, json.dumps(changed).encode())
+
+    @unittest.skipUnless(os.environ.get("CORE_CELL_MIGRATION_TEST_JAR") and
+                         os.environ.get("KFE_CELL_MIGRATION_TEST_JAR"),
+                         "explicit built Core and KFE JARs required")
+    def test_actual_built_jars_expose_exact_migration_capabilities(self):
+        for component, variable in (("core", "CORE_CELL_MIGRATION_TEST_JAR"),
+                                    ("kfe", "KFE_CELL_MIGRATION_TEST_JAR")):
+            path = Path(os.environ[variable])
+            self.assertTrue(path.is_file())
+            completed = subprocess.run(
+                ["java", "-jar", str(path), "--cell-migration=capabilities"],
+                capture_output=True, check=False, timeout=30)
+            self.assertEqual(completed.returncode, 0, completed.stderr.decode(errors="replace"))
+            expected = {"schema": "kerosene.cell.migration-capabilities/v1",
+                        "component": component, "operations": ["validate", "migrate"]}
+            self.assertEqual(lifecycle.verify_database_capabilities_output(
+                stack, component, completed.stdout), expected)
 
     def test_capabilities_output_rejects_ambiguous_logs_without_echoing_them(self):
         raw = b'{"schema":"kerosene.cell.migration-capabilities/v1","component":"core","operations":["validate","migrate"]}'
