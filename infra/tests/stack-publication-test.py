@@ -92,15 +92,46 @@ class PublicationTest(unittest.TestCase):
         self.release["network"]["id"] = "synthetic-lab-bank"
         self.release["authorization"]["tuf"] = {"targetPath": "releases/synthetic-lab-release-1.json"}
         self.release["authorization"]["bft"] = {"networkId": "synthetic-lab-governance", "epoch": 1, "threshold": 3, "members": 4}
-        resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging"}},
+        resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}
+                     for namespace in ("kerosene-staging", "kerosene-staging-vault")]
+        resources += [
                      {"apiVersion": "v1", "kind": "ConfigMap",
                       "metadata": {"name": "vault-probe", "namespace": "kerosene-staging"},
-                      "data": {"url": "https://localhost:7801/v1/health"}}]
+                      "data": {"url": "https://localhost:7801/v1/health"}},
+                     {"apiVersion": "v1", "kind": "ConfigMap",
+                      "metadata": {"name": "node-bank-bootstrap", "namespace": "kerosene-staging"},
+                      "data": {"genesis-endpoints": "", "mirrors": ""}},
+                     {"apiVersion": "v1", "kind": "ConfigMap",
+                      "metadata": {"name": "node-vault-bootstrap", "namespace": "kerosene-staging-vault"},
+                      "data": {"genesis-endpoints": "", "mirrors": ""}}]
         for name, service in self.release["services"].items():
             if name != "admin":
-                instances = [name] if name != "vault" else ["vault-1", "vault-2", "vault-3"]
-                for instance in instances:
+                instances = ([{"name": "node-bank", "plane": "bank", "namespace": "kerosene-staging"},
+                              {"name": "node-vault", "plane": "vault", "namespace": "kerosene-staging-vault"}]
+                             if name == "node" else
+                             [{"name": instance, "namespace": "kerosene-staging"}
+                              for instance in ([name] if name != "vault" else ["vault-1", "vault-2", "vault-3"])])
+                for instance_spec in instances:
+                    instance = instance_spec["name"]
+                    namespace = instance_spec["namespace"]
                     container = {"name": name, "image": service["image"]}
+                    if name == "node":
+                        plane = instance_spec["plane"]
+                        values = {"KEROSENE_NETWORK_ID": self.release["network"]["id"],
+                                  "KEROSENE_DISCOVERY_PLANE": plane, "KEROSENE_NODE_LISTEN_ADDR": "127.0.0.1:8800",
+                                  "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/var/lib/tor/node/hostname",
+                                  "KEROSENE_NODE_ONION_PORT": "8800", "KEROSENE_IDENTITY_KEY_PATH": "/var/lib/kerosene/identity.key",
+                                  "KEROSENE_PEER_STORE": "/var/lib/kerosene/peer-store", "KEROSENE_LEDGER_DB_PATH": "/var/lib/kerosene/ledger",
+                                  "KEROSENE_GENESIS_TRUST_BUNDLE": "/etc/kerosene/node-genesis/genesis-trust-bundle.json",
+                                  "KEROSENE_TLS_CERT_PATH": "/etc/kerosene/node-mtls/server.crt",
+                                  "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
+                                  "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
+                                  "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+                                  "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
+                        container["env"] = [{"name": key, "value": value} for key, value in values.items()]
+                        container["env"].extend([
+                            {"name": "KEROSENE_GENESIS_ENDPOINTS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "genesis-endpoints"}}},
+                            {"name": "KEROSENE_DISCOVERY_MIRRORS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "mirrors"}}}])
                     if name == "vault":
                         values = {"KEROSENE_ENV": "production", "VAULT_CEREMONY_MODE": "production",
                                   "VAULT_AUTH_MODE": "mtls", "VAULT_TRANSPORT": "tor",
@@ -120,10 +151,10 @@ class PublicationTest(unittest.TestCase):
                         container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]},
                                                        "timeoutSeconds": 6}
                     containers = [container]
-                    if name == "vault":
+                    if name in {"node", "vault"}:
                         containers.append({"name": "tor", "image": self.release["services"]["tor"]["image"]})
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
-                                      "metadata": {"name": instance, "namespace": "kerosene-staging"},
+                                      "metadata": {"name": instance, "namespace": namespace},
                                       "spec": {"replicas": 1, "template": {"spec": {"containers": containers}}}})
         self.deployment = {"schema": "kerosene.stack.deployment/v1", "environment": "staging-cell",
                            "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://synthetic-core.invalid"}}}

@@ -147,6 +147,7 @@ def verify_deployment(stack, release, summary, path):
     initial_database_plan(stack, artifact, summary)
     verify_vault_probe_configuration(stack, artifact)
     verify_vault_runtime_contract(stack, artifact, summary)
+    verify_node_runtime_contract(stack, artifact, summary)
     try:
         required_secret_references(stack, artifact)
     except (TypeError, AttributeError, KeyError) as error:
@@ -256,6 +257,65 @@ def verify_vault_runtime_contract(stack, artifact, summary):
     except (ValueError, TypeError, KeyError, AttributeError):
         raise stack.ApplyBlockedError(
             "Vault manifest is incompatible with the hardened production Tor/mTLS runtime") from None
+
+
+def verify_node_runtime_contract(stack, artifact, summary):
+    """Require one persistent Tor-only discovery Node for each Cell plane."""
+    if "node" not in summary.get("services", {}):
+        return
+    node_image = summary["services"]["node"]["image"]
+    tor_image = summary["services"]["tor"]["image"]
+    common = {"KEROSENE_NETWORK_ID": summary["networkId"],
+              "KEROSENE_NODE_LISTEN_ADDR": "127.0.0.1:8800",
+              "KEROSENE_IDENTITY_KEY_PATH": "/var/lib/kerosene/identity.key",
+              "KEROSENE_PEER_STORE": "/var/lib/kerosene/peer-store",
+              "KEROSENE_LEDGER_DB_PATH": "/var/lib/kerosene/ledger",
+              "KEROSENE_GENESIS_TRUST_BUNDLE": "/etc/kerosene/node-genesis/genesis-trust-bundle.json",
+              "KEROSENE_TLS_CERT_PATH": "/etc/kerosene/node-mtls/server.crt",
+              "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
+              "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
+              "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+              "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
+    references = {"KEROSENE_GENESIS_ENDPOINTS", "KEROSENE_DISCOVERY_MIRRORS"}
+    observed = {}
+    try:
+        for resource in artifact["resources"]:
+            if resource["kind"] not in WORKLOADS:
+                continue
+            pod_containers = containers(resource)
+            for container in pod_containers:
+                if container.get("image") != node_image:
+                    continue
+                entries = container.get("env", [])
+                if len(entries) != len({entry.get("name") for entry in entries}):
+                    raise ValueError("duplicate Node environment")
+                environment = {entry["name"]: entry for entry in entries}
+                for name, value in common.items():
+                    if environment.get(name) != {"name": name, "value": value}:
+                        raise ValueError("Node runtime mode differs")
+                plane = environment.get("KEROSENE_DISCOVERY_PLANE", {}).get("value")
+                expected_namespace = "kerosene-staging" if plane == "bank" else "kerosene-staging-vault"
+                if plane not in {"bank", "vault"} or plane in observed or resource["metadata"]["namespace"] != expected_namespace:
+                    raise ValueError("Node plane identity differs")
+                onion_path = environment.get("KEROSENE_NODE_ONION_HOSTNAME_PATH", {}).get("value")
+                onion_port = environment.get("KEROSENE_NODE_ONION_PORT", {}).get("value")
+                if not isinstance(onion_path, str) or not onion_path.startswith("/var/lib/tor/") or onion_port != "8800":
+                    raise ValueError("Node onion identity is not locally bound")
+                for name in references:
+                    entry = environment.get(name)
+                    reference = entry.get("valueFrom", {}).get("configMapKeyRef", {}) if isinstance(entry, dict) else {}
+                    if (set(entry or {}) != {"name", "valueFrom"} or set(entry["valueFrom"]) != {"configMapKeyRef"} or
+                            set(reference) - {"name", "key", "optional"} or not reference.get("name") or
+                            not reference.get("key") or reference.get("optional", False) is not False):
+                        raise ValueError("Node bootstrap input is not externally referenced")
+                if sum(peer.get("image") == tor_image for peer in pod_containers) != 1:
+                    raise ValueError("Node does not have one co-located approved Tor sidecar")
+                observed[plane] = resource
+        if set(observed) != {"bank", "vault"}:
+            raise ValueError("both Node planes are required")
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise stack.ApplyBlockedError(
+            "Node manifest is incompatible with the two-plane Tor/mTLS runtime") from None
 
 
 def run(argv, *, input_bytes=None):

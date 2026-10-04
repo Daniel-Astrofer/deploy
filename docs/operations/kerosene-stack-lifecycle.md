@@ -292,7 +292,10 @@ The Admin image currently refers to the `kerosene-jctl` operator CLI, whose
 container entrypoint exits after a command. It is not a permanent Deployment;
 the planner rejects using it as one. The web client is a separate component.
 Node/Tor colocation is supported in the first phase, matching both canonical
-plane manifests and their shared onion identity volumes. Vault/Tor colocation
+plane manifests and their shared onion identity volumes. The approved manifest
+must contain exactly one persistent Node in each of the `bank` and `vault`
+planes, in their respective namespaces, with loopback-only Node and SOCKS
+listeners plus externally referenced discovery bootstrap. Vault/Tor colocation
 is required in the Vault phase so its production-only loopback listener is not
 exposed over cluster networking. No fallback to a
 source build, mutable image, or automatic signer activation is introduced.

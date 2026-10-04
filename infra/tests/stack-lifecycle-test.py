@@ -28,16 +28,44 @@ class DeploymentTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.release = json.loads((ROOT / "stack/examples/release-lock-v2.example.json").read_text())
-        resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging"}}]
+        resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}
+                     for namespace in ("kerosene-staging", "kerosene-staging-vault")]
         resources.append({"apiVersion": "v1", "kind": "ConfigMap",
                           "metadata": {"name": "vault-probe", "namespace": "kerosene-staging"},
                           "data": {"url": "https://localhost:7801/v1/health"}})
+        for plane, namespace in (("bank", "kerosene-staging"), ("vault", "kerosene-staging-vault")):
+            resources.append({"apiVersion": "v1", "kind": "ConfigMap",
+                              "metadata": {"name": "node-" + plane + "-bootstrap", "namespace": namespace},
+                              "data": {"genesis-endpoints": "", "mirrors": ""}})
         for name, service in self.release["services"].items():
             if name == "admin":
                 continue
-            instances = [name] if name != "vault" else ["vault-1", "vault-2", "vault-3"]
-            for instance in instances:
+            instances = ([{"name": "node-bank", "plane": "bank", "namespace": "kerosene-staging"},
+                          {"name": "node-vault", "plane": "vault", "namespace": "kerosene-staging-vault"}]
+                         if name == "node" else
+                         [{"name": instance, "namespace": "kerosene-staging"}
+                          for instance in ([name] if name != "vault" else ["vault-1", "vault-2", "vault-3"])])
+            for instance_spec in instances:
+                instance = instance_spec["name"]
+                namespace = instance_spec["namespace"]
                 container = {"name": name, "image": service["image"]}
+                if name == "node":
+                    plane = instance_spec["plane"]
+                    values = {"KEROSENE_NETWORK_ID": self.release["network"]["id"],
+                              "KEROSENE_DISCOVERY_PLANE": plane, "KEROSENE_NODE_LISTEN_ADDR": "127.0.0.1:8800",
+                              "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/var/lib/tor/node/hostname",
+                              "KEROSENE_NODE_ONION_PORT": "8800", "KEROSENE_IDENTITY_KEY_PATH": "/var/lib/kerosene/identity.key",
+                              "KEROSENE_PEER_STORE": "/var/lib/kerosene/peer-store", "KEROSENE_LEDGER_DB_PATH": "/var/lib/kerosene/ledger",
+                              "KEROSENE_GENESIS_TRUST_BUNDLE": "/etc/kerosene/node-genesis/genesis-trust-bundle.json",
+                              "KEROSENE_TLS_CERT_PATH": "/etc/kerosene/node-mtls/server.crt",
+                              "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
+                              "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
+                              "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+                              "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
+                    container["env"] = [{"name": key, "value": value} for key, value in values.items()]
+                    container["env"].extend([
+                        {"name": "KEROSENE_GENESIS_ENDPOINTS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "genesis-endpoints"}}},
+                        {"name": "KEROSENE_DISCOVERY_MIRRORS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "mirrors"}}}])
                 if name == "vault":
                     values = {"KEROSENE_ENV": "production", "VAULT_CEREMONY_MODE": "production",
                               "VAULT_AUTH_MODE": "mtls", "VAULT_TRANSPORT": "tor",
@@ -56,16 +84,16 @@ class DeploymentTest(unittest.TestCase):
                         {"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "vault-probe", "key": "url"}}}])
                     container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}, "timeoutSeconds": 6}
                 pod_spec = {"containers": [container]}
-                if name == "vault":
+                if name in {"node", "vault"}:
                     pod_spec["containers"].append({"name": "tor", "image": self.release["services"]["tor"]["image"]})
                 if name in {"node", "vault"}:
                     claim = instance + "-data"
                     container["volumeMounts"] = [{"name": "identity-data", "mountPath": "/var/lib/kerosene"}]
                     pod_spec["volumes"] = [{"name": "identity-data", "persistentVolumeClaim": {"claimName": claim}}]
                     resources.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
-                                      "metadata": {"name": claim, "namespace": "kerosene-staging"},
+                                      "metadata": {"name": claim, "namespace": namespace},
                                       "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}}})
-                resources.append({"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": instance, "namespace": "kerosene-staging"}, "spec": {"replicas": 1, "selector": {"matchLabels": {"app": instance}}, "template": {"metadata": {"labels": {"app": instance}}, "spec": pod_spec}}})
+                resources.append({"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": instance, "namespace": namespace}, "spec": {"replicas": 1, "selector": {"matchLabels": {"app": instance}}, "template": {"metadata": {"labels": {"app": instance}}, "spec": pod_spec}}})
         self.artifact = {"schema": lifecycle.SCHEMA, "environment": "staging-cell", "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://core.invalid"}}}
         for name, service in self.release["services"].items():
             service["configDigest"] = lifecycle.digest(lifecycle.component_config(self.artifact, service["image"], name))
@@ -133,6 +161,19 @@ class DeploymentTest(unittest.TestCase):
         vault["spec"]["template"]["spec"]["containers"].pop()
         with self.assertRaisesRegex(stack.ApplyBlockedError, "hardened production"):
             lifecycle.verify_vault_runtime_contract(stack, self.artifact, self.summary)
+
+    def test_node_runtime_contract_requires_two_loopback_tor_planes(self):
+        lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        bank = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "node-bank")
+        container = bank["spec"]["template"]["spec"]["containers"][0]
+        listen = next(entry for entry in container["env"] if entry["name"] == "KEROSENE_NODE_LISTEN_ADDR")
+        listen["value"] = "0.0.0.0:8800"
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        listen["value"] = "127.0.0.1:8800"
+        bank["spec"]["template"]["spec"]["containers"].pop()
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+            lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
 
     def test_validator_roster_requires_independent_key_material(self):
         keys = [stack.TUF_ED25519_SPKI_PREFIX + bytes([index]) * 32 for index in range(4)]
@@ -371,7 +412,7 @@ class DeploymentTest(unittest.TestCase):
         self.artifact["resources"].reverse()
         groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
         self.assertEqual([{r["metadata"]["name"] for r in group} for group in groups],
-                         [{"postgres", "redis", "tor", "node"}, {"bitcoin"}, {"lnd"},
+                         [{"postgres", "redis", "tor", "node-bank", "node-vault"}, {"bitcoin"}, {"lnd"},
                           {"vault-1", "vault-2", "vault-3"}, {"core", "kfe"}, {"web-page"}])
 
     def test_multiple_vault_workloads_preserve_inventory(self):
@@ -387,7 +428,7 @@ class DeploymentTest(unittest.TestCase):
         topology = lifecycle.critical_replica_topology(stack, self.artifact, self.summary)
         self.assertEqual([item["resource"]["metadata"]["name"] for item in topology["vault"]],
                          ["vault-1", "vault-2", "vault-3"])
-        self.assertEqual(len({item["storage"] for members in topology.values() for item in members}), 4)
+        self.assertEqual(len({item["storage"] for members in topology.values() for item in members}), 5)
         vault_two = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-2")
         vault_two["spec"]["template"]["spec"]["volumes"][0]["persistentVolumeClaim"]["claimName"] = "vault-1-data"
         with self.assertRaisesRegex(stack.ApplyBlockedError, "persistent identity is shared"):
@@ -466,7 +507,7 @@ class DeploymentTest(unittest.TestCase):
             lifecycle.verify_complete_cell_acceptance(stack, config, self.root, summary, args)
 
     def test_canonical_node_tor_sidecar_topology_is_supported_in_both_planes(self):
-        node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node")
+        node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node-bank")
         tor = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "tor")
         tor["spec"]["template"]["spec"]["containers"].extend(node["spec"]["template"]["spec"]["containers"])
         self.artifact["resources"].remove(node)
@@ -474,7 +515,7 @@ class DeploymentTest(unittest.TestCase):
         second["metadata"].update(name="vault-tor", namespace="kerosene-staging-vault")
         self.artifact["resources"].append(second)
         first = lifecycle.workload_phases(stack, self.artifact, self.summary)[0]
-        self.assertEqual({r["metadata"]["name"] for r in first}, {"postgres", "redis", "tor", "vault-tor"})
+        self.assertEqual({r["metadata"]["name"] for r in first}, {"postgres", "redis", "tor", "node-vault", "vault-tor"})
 
     def test_cross_phase_colocation_is_rejected_not_misordered(self):
         bitcoin = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "bitcoin")
@@ -489,16 +530,16 @@ class DeploymentTest(unittest.TestCase):
             lifecycle.workload_phases(stack, self.artifact, self.summary)
 
     def test_init_container_does_not_satisfy_service_inventory(self):
-        node = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "node")
-        pod = node["spec"]["template"]["spec"]
-        pod["initContainers"] = pod["containers"]
-        pod["containers"] = [{"name": "tor", "image": self.summary["services"]["tor"]["image"]}]
+        for node in (r for r in self.artifact["resources"] if r["metadata"]["name"] in {"node-bank", "node-vault"}):
+            pod = node["spec"]["template"]["spec"]
+            pod["initContainers"] = pod["containers"]
+            pod["containers"] = [{"name": "tor", "image": self.summary["services"]["tor"]["image"]}]
         with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components: node"):
             lifecycle.workload_phases(stack, self.artifact, self.summary)
 
     def test_missing_or_ambiguous_component_identity_blocks(self):
         changed = copy.deepcopy(self.artifact)
-        changed["resources"] = [r for r in changed["resources"] if r["metadata"]["name"] != "node"]
+        changed["resources"] = [r for r in changed["resources"] if r["metadata"]["name"] not in {"node-bank", "node-vault"}]
         with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components: node"):
             lifecycle.workload_phases(stack, changed, self.summary)
         summary = copy.deepcopy(self.summary)
@@ -519,8 +560,8 @@ class DeploymentTest(unittest.TestCase):
             self.assertEqual(len(smokes), 2)
             for command in smokes:
                 self.assertEqual(command[-4:], ["--cell-binding", "/bound-kubectl", "/protected/cell.conf", "cell-a"])
-            self.assertEqual(critical_ready.call_count, 8)
-            self.assertEqual([call.args[4] for call in critical_ready.call_args_list], [1, 1, 2, 2, 2, 2, 2, 2])
+            self.assertEqual(critical_ready.call_count, 10)
+            self.assertEqual([call.args[4] for call in critical_ready.call_args_list], [2] * 10)
         for name in ["core", "kfe"]:
             for consumer in ["core", "kfe"]:
                 self.assertLess(events.index(("apply", name)), events.index(("ready", consumer)))
@@ -532,8 +573,8 @@ class DeploymentTest(unittest.TestCase):
 
     def test_invalid_phase_blocks_before_any_kubernetes_write(self):
         from types import SimpleNamespace
-        self.artifact["resources"] = [r for r in self.artifact["resources"] if r["metadata"]["name"] != "node"]
-        with patch.object(lifecycle, "load_config", return_value={}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "apply_resource") as apply, patch.dict(lifecycle.os.environ, {}, clear=True):
+        self.artifact["resources"] = [r for r in self.artifact["resources"] if r["metadata"]["name"] not in {"node-bank", "node-vault"}]
+        with patch.object(lifecycle, "load_config", return_value={}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "verify_external_secrets"), patch.object(lifecycle, "apply_resource") as apply, patch.dict(lifecycle.os.environ, {}, clear=True):
             with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components"):
                 lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=True, cell_dir="unit-only"), lambda *_: None)
             apply.assert_not_called()
@@ -565,7 +606,7 @@ class DeploymentTest(unittest.TestCase):
                      self.assertRaisesRegex(stack.ApplyBlockedError, "before the next Cell phase"):
                     lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
                 runtime_names = {r["metadata"]["name"] for r in applied if r["kind"] in lifecycle.WORKLOADS}
-                self.assertEqual(runtime_names, set() if completed_phases == 0 else {"postgres", "redis", "tor", "node"})
+                self.assertEqual(runtime_names, set() if completed_phases == 0 else {"postgres", "redis", "tor", "node-bank", "node-vault"})
 
     def test_initial_install_cannot_fall_through_to_update_maintenance(self):
         from types import SimpleNamespace
@@ -674,7 +715,8 @@ class DeploymentTest(unittest.TestCase):
         with self.assertRaisesRegex(stack.ApplyBlockedError, "cannot create Secrets"):
             self.verify(changed)
         changed = copy.deepcopy(self.artifact)
-        changed["resources"][1]["metadata"]["namespace"] = "other-bank"
+        namespaced = next(r for r in changed["resources"] if r["kind"] != "Namespace")
+        namespaced["metadata"]["namespace"] = "other-bank"
         with self.assertRaisesRegex(stack.ApplyBlockedError, "Cell namespace"):
             self.verify(changed)
 
