@@ -343,8 +343,11 @@ implementation capabilities exist and their integration tests pass:
    The controller now requires one replica per workload, distinct approved
    persistent identities, all peers ready before and after every mutation, the
    Vault release threshold, and UID/resourceVersion update preconditions. The
-   `node-vault-live-quorum-rollout-not-qualified` blocker remains until this is
-   exercised against the real two-plane Node and three-member Vault topology.
+   The opt-in Kind qualification exercises real Deployments, PVC identities,
+   controller revisions, one-at-a-time sequencing, unavailable-member refusal
+   and recovery. `node-vault-live-protocol-quorum-not-qualified` remains until
+   the same run uses the real two-plane Node and three-member Vault protocols,
+   not readiness-only qualification containers.
 4. Live signed-bundle qualification of the integrated offline Admin OCI installation.
 5. Live qualification of the integrated complete-Cell verifier contract. Its
    bootstrap-pinned executable must bind the Cell, cluster UID, release,

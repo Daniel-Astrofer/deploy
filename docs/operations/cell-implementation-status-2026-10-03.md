@@ -236,6 +236,13 @@ owner-only operation directory supplies attribution and credential file
 references. The intended flow is `init`, `preflight`, then `install`; expanded
 flags remain available without permitting mixed or ambiguous sources.
 
+The critical rollout executor also passed an opt-in live Kind qualification:
+one Node and three Vault Deployment identities were rolled one at a time over
+real bound PVCs; all PVC UIDs remained stable; each complete group recovered
+before the next mutation; and scaling one Vault unavailable caused a fail-closed
+refusal before restoration. This qualifies Kubernetes orchestration mechanics,
+not real Node/Vault cryptographic quorum, which remains an explicit blocker.
+
 ## Remaining work for the complete service
 
 1. **Complete KFE drain/recovery:** complete remaining provider/embedded inventory

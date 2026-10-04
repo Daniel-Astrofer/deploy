@@ -36,7 +36,7 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 EXECUTION_BLOCKERS = (
     "vault-live-rebuild-provenance-not-qualified",
     "migration-executor-live-recovery-not-qualified",
-    "node-vault-live-quorum-rollout-not-qualified",
+    "node-vault-live-protocol-quorum-not-qualified",
     "admin-oci-live-installation-not-qualified",
     "complete-cell-live-acceptance-not-qualified",
 )
