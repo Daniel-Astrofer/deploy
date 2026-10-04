@@ -107,17 +107,24 @@ class PublicationTest(unittest.TestCase):
                                   "VAULT_DKG_MODE": "distributed_wire", "VAULT_NODE_TIER": "domestic",
                                   "ATTESTATION_MODE": "software", "VAULT_LISTEN_ADDR": "127.0.0.1:7801",
                                   "VAULT_GENESIS_N": "3", "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe",
-                                  "VAULT_MEASUREMENT_PIN": "a" * 64}
+                                  "VAULT_MEASUREMENT_PIN": "a" * 64, "BITCOIN_NETWORK": "testnet3",
+                                  "VAULT_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
+                                  "VAULT_SHARE_STORE": "aead_disk", "VAULT_DATA_DIR": "/var/lib/kerosene-vault"}
                         container["env"] = [{"name": key, "value": value} for key, value in values.items()]
                         container["env"].extend([
                             {"name": "VAULT_SEED_PEERS", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "seed-peers"}}},
                             {"name": "VAULT_AUDIT_PUBKEY_ALLOWLIST", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "audit-pubkeys"}}},
+                            {"name": "VAULT_ATTESTATION_ROOT", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "attestation-root"}}},
+                            {"name": "VAULT_DATA_PASSPHRASE", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "data-passphrase"}}},
                             {"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "vault-probe", "key": "url"}}}])
                         container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]},
                                                        "timeoutSeconds": 6}
+                    containers = [container]
+                    if name == "vault":
+                        containers.append({"name": "tor", "image": self.release["services"]["tor"]["image"]})
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
                                       "metadata": {"name": instance, "namespace": "kerosene-staging"},
-                                      "spec": {"replicas": 1, "template": {"spec": {"containers": [container]}}}})
+                                      "spec": {"replicas": 1, "template": {"spec": {"containers": containers}}}})
         self.deployment = {"schema": "kerosene.stack.deployment/v1", "environment": "staging-cell",
                            "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://synthetic-core.invalid"}}}
         for name, service in self.release["services"].items():

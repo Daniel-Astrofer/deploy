@@ -210,17 +210,24 @@ def verify_vault_runtime_contract(stack, artifact, summary):
                 "VAULT_DKG_MODE": "distributed_wire", "VAULT_NODE_TIER": "domestic",
                 "ATTESTATION_MODE": "software", "VAULT_LISTEN_ADDR": "127.0.0.1:7801",
                 "VAULT_GENESIS_N": str(summary["vaultCompatibility"]["members"]),
-                "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe"}
-    protected = {"VAULT_SEED_PEERS", "VAULT_AUDIT_PUBKEY_ALLOWLIST"}
+                "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe", "BITCOIN_NETWORK": "testnet3",
+                "VAULT_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
+                "VAULT_SHARE_STORE": "aead_disk", "VAULT_DATA_DIR": "/var/lib/kerosene-vault"}
+    protected = {"VAULT_SEED_PEERS", "VAULT_AUDIT_PUBKEY_ALLOWLIST",
+                 "VAULT_ATTESTATION_ROOT", "VAULT_DATA_PASSPHRASE"}
     observed = 0
     try:
         for resource in artifact["resources"]:
             if resource["kind"] not in WORKLOADS:
                 continue
+            pod_containers = containers(resource)
             for container in containers(resource):
                 if container.get("image") != vault_image:
                     continue
                 observed += 1
+                tor_image = summary["services"]["tor"]["image"]
+                if sum(peer.get("image") == tor_image for peer in pod_containers) != 1:
+                    raise ValueError("Vault does not have one co-located approved Tor sidecar")
                 entries = container.get("env", [])
                 if len(entries) != len({entry.get("name") for entry in entries}):
                     raise ValueError("duplicate Vault environment")
@@ -741,9 +748,13 @@ def workload_phases(stack, artifact, summary):
         if not names or "admin" in names:
             raise stack.ApplyBlockedError("Admin CLI cannot be installed as a runtime workload")
         indexes = {i for i, phase in enumerate(phases) if names & phase}
-        if len(indexes) != 1 or not names <= phases[next(iter(indexes))]:
+        if names == {"tor", "vault"}:
+            index = 3
+        elif len(indexes) == 1 and names <= phases[next(iter(indexes))]:
+            index = next(iter(indexes))
+        else:
             raise stack.ApplyBlockedError("workload mixes unsupported Cell dependency phases")
-        groups[next(iter(indexes))].append(resource)
+        groups[index].append(resource)
         # A completed init container does not keep a Cell service running.
         for container in resource.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []):
             observed.update(images[container["image"]])

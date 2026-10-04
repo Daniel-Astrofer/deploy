@@ -137,8 +137,11 @@ runtime contract. Every one of the three independent Vault controllers must use
 `production` environment and ceremony modes, Tor transport, mTLS,
 `distributed_wire` DKG, domestic/software attestation with a 64-hex measurement
 pin, loopback-only `127.0.0.1:7801`, and `onion_or_spiffe` peer verification.
+Each Vault controller must contain exactly one approved Tor sidecar and use its
+loopback SOCKS endpoint; Vault and Tor are one rollout unit.
 The two peer onion endpoints and mesh-audit public-key allowlist are mandatory
-external Secret references, never inline manifest values. Readiness must invoke
+external Secret references, never inline manifest values. The attestation root
+and AEAD share passphrase are external Secret references as well. Readiness must invoke
 the Vault binary's authenticated `--health-probe`; its URL remains bound to an
 approved ConfigMap and resolves locally. This rejects the removed
 staging/clearnet profile before Admin installation or any Kubernetes write.
@@ -242,7 +245,8 @@ hostPath, privileged containers and unqualified HPA policies are rejected.
 Unsupported policies are checked before any Kubernetes write.
 
 The executor now validates a complete runtime inventory and uses explicit
-startup phases: PostgreSQL/Redis/Tor/Node, Bitcoin, LND, Vault, Core/KFE,
+startup phases: PostgreSQL/Redis/Tor/Node, Bitcoin, LND, Vault with its Tor
+sidecar, Core/KFE,
 then web-page. Each phase is submitted before its workloads are awaited;
 in particular Core/KFE reciprocal integration references must not serialize
 their initial submission. Every preceding phase must become Kubernetes-ready
@@ -288,7 +292,9 @@ The Admin image currently refers to the `kerosene-jctl` operator CLI, whose
 container entrypoint exits after a command. It is not a permanent Deployment;
 the planner rejects using it as one. The web client is a separate component.
 Node/Tor colocation is supported in the first phase, matching both canonical
-plane manifests and their shared onion identity volumes. No fallback to a
+plane manifests and their shared onion identity volumes. Vault/Tor colocation
+is required in the Vault phase so its production-only loopback listener is not
+exposed over cluster networking. No fallback to a
 source build, mutable image, or automatic signer activation is introduced.
 
 These phases are not a qualified live install or update. On interruption,
