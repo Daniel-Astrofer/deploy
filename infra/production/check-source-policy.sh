@@ -14,20 +14,38 @@ targets=(
   "$ROOT/infra/start.sh"
 )
 
+scan_prohibited() {
+  local target="$1"
+  local pattern='dealer_lab|static_token|x-vault-token|attestation[_ -]?mode[[:space:]]*[:=][[:space:]]*(sim|software)|http://|localhost|127\.0\.0\.1'
+  if command -v rg >/dev/null 2>&1; then
+    rg -n -i "$pattern" "$target"
+  else
+    grep -E -n -i -r "$pattern" "$target"
+  fi
+}
+
+scan_contains() {
+  local pattern="$1"
+  shift
+  if command -v rg >/dev/null 2>&1; then
+    rg -q "$pattern" "$@"
+  else
+    grep -E -q -r "$pattern" "$@"
+  fi
+}
+
 for target in "${targets[@]}"; do
   if [[ ! -e "$target" ]]; then
     echo "Production source policy failed: required source is missing: $target" >&2
     exit 3
   fi
-  if rg -n -i \
-    'dealer_lab|static_token|x-vault-token|attestation[_ -]?mode[[:space:]]*[:=][[:space:]]*(sim|software)|http://|localhost|127\.0\.0\.1' \
-    "$target"; then
+  if scan_prohibited "$target"; then
     echo "Production source policy failed: legacy or insecure operator guidance found in $target." >&2
     exit 3
   fi
 done
 
-if ! rg -q 'testnet3' "$ROOT/README.md" "$ROOT/docs/quickstart" "$ROOT/docs/reference" "$ROOT/infra/production"; then
+if ! scan_contains 'testnet3' "$ROOT/README.md" "$ROOT/docs/quickstart" "$ROOT/docs/reference" "$ROOT/infra/production"; then
   echo "Production source policy failed: testnet3 must be documented explicitly." >&2
   exit 3
 fi
