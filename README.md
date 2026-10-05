@@ -1,12 +1,22 @@
+<!--
+status: active
+audience: internal/restricted
+owner: deploy
+source_of_truth: deploy infra and production preflight
+last_reviewed: 2026-09-03
+-->
+
 # Kerosene Deploy
 
-Deployment templates, orchestration and operational runbooks for Kerosene.
+Container packaging, Kubernetes manifests, rollout and rollback controls for
+the Kerosene polyrepo. Start at the [documentation](../../kerosene-global-docs/services/deploy/docs/quickstart/README.md) and
+[production-safe quickstart](../../kerosene-global-docs/services/deploy/docs/quickstart/QUICKSTART.md).
 
-Documentation entrypoints:
+Deploy composes sibling repositories; it does not own their source code.
 
-- [English operator documentation](docs/en/README.md)
-- [Documentação para operadores em português](docs/pt-BR/README.md)
-- [Docker, Kubernetes and scripts index](docs/en/DEPLOYMENT_INDEX.md)
+## Documentação global
+
+Arquitetura transversal, regras de negócio compartilhadas e infraestrutura/operação global estão no repositório externo [kerosene-global-docs](../../kerosene-global-docs/README.md). A documentação inline de implementação permanece junto ao código neste repositório.
 
 This repository contains Docker/Kubernetes/Tor/observability configuration and
 operational validation for independently released services. It must not contain runtime secrets,
@@ -28,17 +38,13 @@ bash infra/scripts/check-polyrepo-workspace.sh
 ```
 
 Service source remains owned by its repository; Deploy only supplies packaging
-recipes and runtime composition. See the [service boundary](docs/en/SERVICE_BOUNDARIES.md).
+recipes and runtime composition. See the [service boundary](docs/architecture/SERVICE_BOUNDARIES.md).
 
 Start the local integration environment through the canonical public entrypoint:
 
 ```bash
 bash infra/start.sh
 ```
-
-`infra/start-complete.sh` is a legacy compatibility wrapper. It remains
-available during the transition, but new automation must use the environment
-entrypoints documented in `docs/en/DEPLOYMENT_INDEX.md`.
 
 The closest production-like topology deploys Core and the first Vault into
 independent staging namespaces and requires immutable image digests:
@@ -50,7 +56,7 @@ WEB_PAGE_IMAGE=registry.example/web@sha256:... \
 VAULT_IMAGE=registry.example/vault@sha256:... \
 NODE_IMAGE=registry.example/node@sha256:... \
 TOR_IMAGE=registry.example/tor@sha256:... \
-  bash infra/start-complete.sh staging
+  bash infra/start.sh staging
 ```
 
 Before enabling the SPIFFE profiles, provision the native admission boundary
@@ -60,10 +66,9 @@ writes to the dedicated `kerosene-deployer` principal. The CI negative suite
 proves that direct Pods, copied service accounts/labels, CSI socket sidecars and
 arbitrary ClusterSPIFFEID resources are denied by a real Kubernetes API server.
 
-`infra/start-complete.sh production` is fail-closed. It requires a private
-operations overlay, immutable images, external audit/recovery evidence and an
-approved change identifier. This public repository never manufactures secrets
-or activates Vault signers.
+Production is fail-closed. It requires a private operations overlay, immutable images,
+external audit/recovery evidence and an approved change identifier. Production must target
+Bitcoin `testnet3`. This public repository never manufactures secrets or activates Vault signers.
 
 Every production gate document must conform to
 `infra/production/evidence.schema.json`. The referenced report is checked by

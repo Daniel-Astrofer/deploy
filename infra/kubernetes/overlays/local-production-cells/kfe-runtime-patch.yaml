@@ -1,0 +1,24 @@
+spec:
+  template:
+    spec:
+      containers:
+        - name: kfe-service
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: >-
+                -XX:+UseContainerSupport
+                -XX:MaxRAMPercentage=75.0
+                -XX:+ExitOnOutOfMemoryError
+                -Djava.security.egd=file:/dev/./urandom
+                -Djava.awt.headless=true
+                -Djavax.net.ssl.trustStore=/certs/truststore.p12
+                -Djavax.net.ssl.trustStorePassword=changeit
+                -Djavax.net.ssl.trustStoreType=PKCS12
+          volumeMounts:
+            - name: vault-mesh-certs
+              mountPath: /certs
+              readOnly: true
+      volumes:
+        - name: vault-mesh-certs
+          secret:
+            secretName: vault-client-mtls

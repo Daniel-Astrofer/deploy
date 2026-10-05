@@ -2,10 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/backend-common.sh
-source "$SCRIPT_DIR/backend-common.sh"
-# shellcheck source=scripts/flutter-common.sh
-source "$SCRIPT_DIR/flutter-common.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+# shellcheck source=infra/scripts/backend-common.sh
+source "$REPO_ROOT/infra/scripts/backend-common.sh"
+# shellcheck source=infra/scripts/flutter-common.sh
+source "$REPO_ROOT/infra/scripts/flutter-common.sh"
 
 BUILD_JAR=1
 FRONTEND_DIR="$CLIENTS_DIR"

@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-rail-cell-0-data
+spec:
+  capacity: {storage: 256Mi}
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-local
+  claimRef:
+    namespace: kerosene-local
+    name: data-rail-cell-0
+  hostPath:
+    path: /var/lib/kerosene-local/rail-cell-0
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-rail-cell-1-data
+spec:
+  capacity: {storage: 256Mi}
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-local
+  claimRef:
+    namespace: kerosene-local
+    name: data-rail-cell-1
+  hostPath:
+    path: /var/lib/kerosene-local/rail-cell-1
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: local-rail-cell-2-data
+spec:
+  capacity: {storage: 256Mi}
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-local
+  claimRef:
+    namespace: kerosene-local
+    name: data-rail-cell-2
+  hostPath:
+    path: /var/lib/kerosene-local/rail-cell-2
+    type: DirectoryOrCreate

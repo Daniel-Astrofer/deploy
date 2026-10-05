@@ -1,0 +1,5 @@
+[allowlist]
+description = "Synthetic test fixtures and mocks"
+paths = [
+  '''infra/tests/local-auth-config-test\.sh''',
+]

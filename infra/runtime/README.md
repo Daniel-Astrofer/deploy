@@ -1,18 +1,5 @@
-# Kerosene Runtime Assets
+# Documento movido para a documentação global
 
-Este diretório é o destino dos arquivos de runtime que não são código de aplicação, Dockerfile ou Kustomize puro.
+O conteúdo normativo deste documento foi consolidado no repositório externo [kerosene-global-docs](../../../../kerosene-global-docs/operations/deploy/infra/runtime/README.md).
 
-## Destinos
-
-```text
-infra/runtime/bitcoin/
-infra/runtime/vault/
-infra/runtime/tor/
-infra/runtime/web/
-infra/runtime/postgres/
-infra/runtime/observability/
-```
-
-## Regra
-
-Não transferir certificados reais, chaves privadas, secrets, onion keys ou material sensível sem plano explícito de rotação e limpeza de histórico.
+Edite a cópia global; este arquivo local é mantido apenas como ponte de navegação.

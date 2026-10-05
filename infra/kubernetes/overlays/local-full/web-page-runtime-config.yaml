@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: web-page-runtime-config
-data:
-  kerosene-runtime-config.json: |
-    {"source":"infra/kubernetes/overlays/local-full","access":"tor-hidden-service-only"}

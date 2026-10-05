@@ -43,7 +43,11 @@ def rel(root: Path, path: Path) -> str:
     path = path.resolve(strict=False)
     if path == root:
         return "."
-    return path.relative_to(root).as_posix()
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        # Polyrepo service roots may be siblings of the selected deploy repo.
+        return path.as_posix()
 
 
 def blocked_path(path: Path) -> bool:
@@ -280,6 +284,21 @@ def delete_path_safe(root: Path, args: dict[str, Any]) -> dict[str, Any]:
     return {"deleted": True, "dry_run": False, "path": rel(root, path), "entries": len(entries)}
 
 
+def frontend_root(root: Path) -> Path:
+    """Resolve the checked-out clients service in the current polyrepo layout."""
+    candidates = (
+        root / "clients",
+        root.parent / "clients",
+        root,
+    )
+    for candidate in candidates:
+        if (candidate / "lib").is_dir() and (candidate / "pubspec.yaml").is_file():
+            return candidate
+    raise WorkToolError(
+        "Frontend service not found; expected clients/lib + clients/pubspec.yaml."
+    )
+
+
 def format_paths(root: Path, args: dict[str, Any]) -> dict[str, Any]:
     raw_paths = args.get("paths") or changed_files(root)
     if not isinstance(raw_paths, list):
@@ -287,9 +306,17 @@ def format_paths(root: Path, args: dict[str, Any]) -> dict[str, Any]:
     paths = [rel(root, resolve_target(root, p)) for p in raw_paths if str(p).strip()]
     commands = []
     dart = [p for p in paths if p.endswith(".dart")]
-    if dart and (root / "frontend").exists():
-        rels = [str(Path(p).relative_to("frontend")) for p in dart if p.startswith("frontend/")]
-        commands.append(run(root, ["dart", "format", *rels], cwd=root / "frontend", timeout_seconds=300))
+    if dart:
+        frontend = frontend_root(root)
+        rels = []
+        for path in dart:
+            candidate = (root / path).resolve()
+            try:
+                rels.append(str(candidate.relative_to(frontend)))
+            except ValueError:
+                continue
+        if rels:
+            commands.append(run(root, ["dart", "format", *rels], cwd=frontend, timeout_seconds=300))
     py = [p for p in paths if p.endswith(".py")]
     if py:
         commands.append(run(root, ["python3", "-m", "py_compile", *py], timeout_seconds=300))
@@ -388,8 +415,13 @@ def named_validation(root: Path, name: str, command: list[str], cwd: Path | None
 
 
 def validate_frontend(root: Path, args: dict[str, Any]) -> dict[str, Any]:
-    frontend = root / "frontend"
-    commands = [named_validation(root, "flutter analyze", ["flutter", "analyze"], cwd=frontend, timeout_seconds=1200), named_validation(root, "cleanup guard", ["bash", "tool/check_frontend_cleanup_rules.sh"], cwd=frontend, timeout_seconds=300), named_validation(root, "frontend alignment audit", ["bash", "tool/audit_frontend_alignment.sh"], cwd=frontend, timeout_seconds=300), named_validation(root, "architecture guard", ["dart", "run", "tool/check_frontend_architecture_rules.dart"], cwd=frontend, timeout_seconds=600)]
+    frontend = frontend_root(root)
+    commands = [
+        named_validation(root, "flutter analyze", ["flutter", "analyze"], cwd=frontend, timeout_seconds=1200),
+        named_validation(root, "cleanup guard", ["bash", "tools/tool/check_frontend_cleanup_rules.sh"], cwd=frontend, timeout_seconds=300),
+        named_validation(root, "frontend alignment audit", ["bash", "tools/tool/audit_frontend_alignment.sh"], cwd=frontend, timeout_seconds=300),
+        named_validation(root, "architecture guard", ["dart", "run", "tools/tool/check_frontend_architecture_rules.dart"], cwd=frontend, timeout_seconds=600),
+    ]
     return {"status": "pass" if all(c["status"] == "pass" for c in commands) else "fail", "commands": commands}
 
 
@@ -407,10 +439,18 @@ def validate_changed_files(root: Path, args: dict[str, Any]) -> dict[str, Any]:
     paths = [rel(root, resolve_target(root, p)) for p in selected if str(p).strip()]
     commands = []
     dart = [p for p in paths if p.endswith(".dart")]
-    if dart and (root / "frontend").exists():
-        rels = [str(Path(p).relative_to("frontend")) for p in dart if p.startswith("frontend/")]
-        commands.append(named_validation(root, "dart format changed", ["dart", "format", *rels], cwd=root / "frontend", timeout_seconds=300))
-        commands.append(named_validation(root, "flutter analyze", ["flutter", "analyze"], cwd=root / "frontend", timeout_seconds=1200))
+    if dart:
+        frontend = frontend_root(root)
+        rels = []
+        for path in dart:
+            candidate = (root / path).resolve()
+            try:
+                rels.append(str(candidate.relative_to(frontend)))
+            except ValueError:
+                continue
+        if rels:
+            commands.append(named_validation(root, "dart format changed", ["dart", "format", *rels], cwd=frontend, timeout_seconds=300))
+            commands.append(named_validation(root, "flutter analyze", ["flutter", "analyze"], cwd=frontend, timeout_seconds=1200))
     py = [p for p in paths if p.endswith(".py")]
     if py:
         commands.append(named_validation(root, "python compile", ["python3", "-m", "py_compile", *py], timeout_seconds=300))
@@ -544,22 +584,24 @@ def rename_symbol_safe(root: Path, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def dart_import_rewrite(root: Path, args: dict[str, Any]) -> dict[str, Any]:
+    frontend = frontend_root(root)
     path = resolve_existing(root, args.get("path"))
     package = str(args.get("package") or "kerosene")
     dry_run = as_bool(args.get("dry_run"), False)
     text = read_text(path)
-    file_path = Path(rel(root, path))
-    if not file_path.as_posix().startswith("frontend/lib/"):
-        raise WorkToolError("expected a file under frontend/lib")
-    current_dir = file_path.parent
-    lib_root = (root / "frontend" / "lib").resolve(strict=False)
+    lib_root = (frontend / "lib").resolve(strict=False)
+    try:
+        path.resolve(strict=False).relative_to(lib_root)
+    except ValueError as exc:
+        raise WorkToolError("expected a file under clients/lib") from exc
+    current_dir = path.parent
     def repl(match: re.Match[str]) -> str:
         quote = match.group(1)
         value = match.group(2)
         end_quote = match.group(3)
         if not value.startswith("."):
             return match.group(0)
-        target = (root / current_dir / value).resolve(strict=False)
+        target = (current_dir / value).resolve(strict=False)
         if not is_relative_to(target, lib_root):
             return match.group(0)
         return f"import {quote}package:{package}/{target.relative_to(lib_root).as_posix()}{end_quote}"
@@ -570,10 +612,10 @@ def dart_import_rewrite(root: Path, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def validate_mcp(root: Path, args: dict[str, Any]) -> dict[str, Any]:
-    files = [p for p in ["scripts/kerosene_server.py", "scripts/kerosene_work_tools.py", "scripts/k_more_tools.py"] if (root / p).exists()]
+    files = [p for p in ["infra/mcp/kerosene_server.py"] if (root / p).exists()]
     commands = [named_validation(root, "python compile", ["python3", "-m", "py_compile", *files], timeout_seconds=300)]
-    if (root / "scripts" / "kerosene-mcp").exists():
-        commands.append(named_validation(root, "server help", ["scripts/kerosene-mcp", "--help"], timeout_seconds=30))
+    if (root / "infra" / "mcp" / "kerosene-mcp").exists():
+        commands.append(named_validation(root, "server help", ["infra/mcp/kerosene-mcp", "--help"], timeout_seconds=30))
     return {"status": "pass" if all(c["status"] == "pass" for c in commands) else "fail", "commands": commands}
 
 
@@ -999,13 +1041,13 @@ def dart_rename_symbol_safe(root: Path, args: dict[str, Any]) -> dict[str, Any]:
 SERVER_NAME = "kerosene-mcp"
 SERVER_VERSION = "0.4.0"
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = SCRIPT_DIR.parent
+PROJECT_ROOT = SCRIPT_DIR.parents[1]
 DEFAULT_ROOT = Path(os.environ.get("KEROSENE_MCP_ROOT") or str(PROJECT_ROOT))
 CODEX_FLEET_SCRIPT = Path(
     os.environ.get("KEROSENE_MCP_CODEX_FLEET_SCRIPT") or str(PROJECT_ROOT / "AGENTS" / "codex-fleet-mcp")
 )
 AGY_FLEET_SCRIPT = Path(os.environ.get("KEROSENE_MCP_AGY_FLEET_SCRIPT") or str(PROJECT_ROOT / "AGENTS" / "agy-fleet-mcp"))
-CODEX_FLEET_STATE_DIR = Path(os.environ.get("CODEX_FLEET_HOME", "/home/omega/.codex-fleet"))
+CODEX_FLEET_STATE_DIR = Path(os.environ.get("CODEX_FLEET_HOME", str(Path.home() / ".codex-fleet")))
 CODEX_FLEET_WORKTREES_DIR = CODEX_FLEET_STATE_DIR / "worktrees"
 NIGHTLY_QUEUE_REL = Path(os.environ.get("KEROSENE_MCP_NIGHTLY_QUEUE", "docs/AGENTS/NIGHTLY_ORCHESTRATION_QUEUE.md"))
 NIGHTLY_STATE_REL = Path(os.environ.get("KEROSENE_MCP_NIGHTLY_STATE", "docs/AGENTS/NIGHTLY_ORCHESTRATION_STATE.md"))
@@ -1108,7 +1150,7 @@ SENSITIVE_ENV_MARKERS = {
     "TOKEN",
 }
 
-SCRUB_SHELL_ENV = os.environ.get("KEROSENE_MCP_SCRUB_SHELL_ENV", "0").strip().lower() in {
+SCRUB_SHELL_ENV = os.environ.get("KEROSENE_MCP_SCRUB_SHELL_ENV", "1").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -1862,7 +1904,7 @@ Use the repository-local orchestration queue as the source of truth:
 - {NIGHTLY_QUEUE_REL.as_posix()}
 - {NIGHTLY_STATE_REL.as_posix()}
 
-Implement only the task section below. Do not broaden scope. Do not run infra/scripts/local/control.sh start.
+Implement only the task section below. Do not broaden scope or start services.
 Do not commit; the Kerosene MCP orchestrator will validate and commit locally.
 Do not use git add . If validation is blocked by sandbox, report the exact command and error.
 
@@ -2600,23 +2642,20 @@ def project_summary(root: Path, _args: dict[str, Any]) -> dict[str, Any]:
 
     important_files = [
         "README.md",
-        "docs/backend/PROJECT_CONSOLIDATED_SUMMARY.md",
-        "docs/backend/API_REFERENCE.md",
-        "docs/backend/api/WALLET.md",
-        "backend/kerosene/build.gradle.kts",
-        "frontend/pubspec.yaml",
-        "backend/mpc-sidecar/go.mod",
+        "docs/quickstart/README.md",
+        "docs/quickstart/QUICKSTART.md",
+        "infra/production/preflight.sh",
+        "infra/docker/images.yaml",
+        "infra/kubernetes/base/kustomization.yaml",
     ]
 
     components: list[dict[str, str]] = []
-    if (root / "backend/kerosene/build.gradle.kts").exists():
-        components.append({"name": "backend/kerosene", "stack": "Java/Kotlin Gradle backend"})
-    if (root / "frontend/pubspec.yaml").exists():
-        components.append({"name": "frontend", "stack": "Flutter/Dart app"})
-    if (root / "backend/mpc-sidecar/go.mod").exists():
-        components.append({"name": "backend/mpc-sidecar", "stack": "Go MPC sidecar"})
-    if (root / "infra").exists():
-        components.append({"name": "infra", "stack": "Docker/Kubernetes/runtime infrastructure"})
+    if (root / "infra/production").exists():
+        components.append({"name": "infra/production", "stack": "Production rollout gates"})
+    if (root / "infra/docker").exists():
+        components.append({"name": "infra/docker", "stack": "Container packaging"})
+    if (root / "infra/kubernetes/base").exists():
+        components.append({"name": "infra/kubernetes/base", "stack": "Public Kubernetes base"})
     if (root / "docs").exists():
         components.append({"name": "docs", "stack": "Project documentation"})
 
@@ -2627,8 +2666,8 @@ def project_summary(root: Path, _args: dict[str, Any]) -> dict[str, Any]:
             "all paths are resolved under the configured project root",
             "all non-sensitive project files are writable, including backend, frontend, docs, scripts, and infrastructure files",
             "sensitive files such as .env files, private keys, .git internals, local databases, and secrets directories are refused",
-            "shell commands run from inside the project root and inherit the full server environment by default",
-            "set KEROSENE_MCP_SCRUB_SHELL_ENV=1 to strip secret-like environment variables before shell execution",
+            "shell commands run from inside the project root with secret-like environment variables removed by default",
+            "set KEROSENE_MCP_SCRUB_SHELL_ENV=0 only in an explicitly isolated environment to pass the full server environment",
             "binary and oversized files are skipped for search",
         ],
         "components": components,
@@ -2642,8 +2681,9 @@ def project_summary(root: Path, _args: dict[str, Any]) -> dict[str, Any]:
 
 
 class McpServer:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, read_only: bool = False) -> None:
         self.root = root
+        self.read_only = read_only
 
     def send(self, payload: dict[str, Any]) -> None:
         sys.stdout.write(json.dumps(payload, separators=(",", ":")) + "\n")
@@ -2672,14 +2712,14 @@ class McpServer:
                     },
                 )
             elif method == "tools/list":
-                self.result(request_id, {"tools": tool_schema()})
+                self.result(request_id, {"tools": tool_schema(read_only=self.read_only)})
             elif method == "tools/call":
                 params = message.get("params") or {}
                 name = str(params.get("name") or "")
                 args = params.get("arguments") or {}
                 if not isinstance(args, dict):
                     raise ReadOnlyMcpError("Tool arguments must be a JSON object")
-                value = call_tool(self.root, name, args)
+                value = call_tool(self.root, name, args, read_only=self.read_only)
                 self.result(
                     request_id,
                     {
@@ -2730,19 +2770,26 @@ class McpServer:
                 self.handle(message)
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="MCP server for the Kerosene project.")
-    parser.add_argument("--root", default=str(DEFAULT_ROOT), help="Project root exposed through MCP.")
-    return parser.parse_args()
-
-
-
-
 # ==========================================
 # META TOOLS ROUTING PATCH (V2)
 # ==========================================
-def tool_schema():
-    return [
+READ_ONLY_TOOL_NAMES = {
+    "Kerosene.Project",
+    "Kerosene.ReadCode",
+    "Kerosene.Search",
+    "Kerosene.System",
+}
+
+READ_ONLY_TOOL_ALIASES = {
+    "Kerosene.Browse",
+    "Kerosene.Get",
+    "Kerosene.Find",
+    "Kerosene.Status",
+}
+
+
+def tool_schema(*, read_only: bool = False):
+    schemas = [
         {
             "name": "Kerosene.Project",
             "description": "Navegar pela estrutura do workspace de desenvolvimento e obter resumos.",
@@ -2864,6 +2911,9 @@ def tool_schema():
             }
         }
     ]
+    if read_only:
+        return [schema for schema in schemas if schema["name"] in READ_ONLY_TOOL_NAMES]
+    return schemas
 
 def execute_command(root: Path, args: dict[str, Any]) -> dict[str, Any]:
     cmd = args.get("command")
@@ -2887,6 +2937,7 @@ def execute_command(root: Path, args: dict[str, Any]) -> dict[str, Any]:
             cmd,
             shell=True,
             cwd=str(cwd_path),
+            env=shell_environment(root),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -3218,8 +3269,11 @@ def compact_fleet_response(value: Any, *, max_agents: int = 16) -> Any:
 
 INTERNAL_TOOLS = build_internal_tools()
 
-def call_tool(root, name, args):
+def call_tool(root, name, args, *, read_only: bool = False):
     if not isinstance(args, dict): args = {}
+
+    if read_only and name not in READ_ONLY_TOOL_NAMES | READ_ONLY_TOOL_ALIASES:
+        raise ReadOnlyMcpError(f"Tool unavailable in read-only mode: {name}")
     
     # Remapeia parâmetro target/directory para path/cwd para compatibilidade interna e contornar a OpenAI Web
     if "target" in args and name in {"Kerosene.Project", "Kerosene.Browse", "Kerosene.ReadCode", "Kerosene.Get", "Kerosene.Search", "Kerosene.Find", "Kerosene.Edit", "Kerosene.Patch"}:
@@ -3350,11 +3404,7 @@ def run_tunnel_launcher() -> None:
     root_path = Path(project_root).resolve()
     tunnel_client_bin = root_path / "tunnel-client"
     if not tunnel_client_bin.exists():
-        downloads_bin = Path("/home/omega/Downloads/tunnel-client-v0.0.9--context-conduit-topaz-all/bin/linux_amd64/tunnel-client")
-        if downloads_bin.exists():
-            tunnel_client_bin = downloads_bin
-        else:
-            tunnel_client_bin = Path("tunnel-client")
+        tunnel_client_bin = Path("tunnel-client")
 
     profile_dir = Path("~/.config/tunnel-client").expanduser()
     profile_dir.mkdir(parents=True, exist_ok=True)
@@ -3387,7 +3437,7 @@ mcp:
   max_concurrent_requests: 1
   commands:
     - channel: main
-      command: "{mcp_dir / 'mcp.py'} --server --root {project_root}"
+      command: "{mcp_dir / 'kerosene_server.py'} --server --readonly --root {project_root}"
 """
     profile_path.write_text(profile_content, encoding="utf-8")
 
@@ -3397,7 +3447,7 @@ mcp:
 
     print(f"[tunnel] Starting tunnel client with tunnel_id={tunnel_id}...")
     print(f"[tunnel] Using tunnel-client binary: {tunnel_client_bin}")
-    print(f"[tunnel] MCP command: python3 {mcp_dir / 'mcp.py'} --server --root {project_root}")
+    print(f"[tunnel] MCP command: python3 {mcp_dir / 'kerosene_server.py'} --server --readonly --root {project_root}")
 
     cmd = [
         str(tunnel_client_bin),
@@ -3423,6 +3473,7 @@ mcp:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="MCP server for the Kerosene project.")
     parser.add_argument("--server", action="store_true", help="Run in MCP server mode (stdio)")
+    parser.add_argument("--readonly", action="store_true", help="Expose only non-mutating MCP tools")
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="Project root exposed through MCP.")
     return parser.parse_args()
 
@@ -3431,7 +3482,7 @@ def main() -> None:
     args = parse_args()
     if args.server:
         root = resolve_root(Path(args.root))
-        McpServer(root).serve()
+        McpServer(root, read_only=args.readonly).serve()
     else:
         run_tunnel_launcher()
 

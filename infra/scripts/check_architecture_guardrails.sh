@@ -3,45 +3,81 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 deployment="${repo_root}/infra/kubernetes/base/server/deployment.yaml"
-configmap="${repo_root}/infra/kubernetes/base/server/configmap.yaml"
+server_configmap="${repo_root}/infra/kubernetes/base/server/configmap.yaml"
+kfe_configmap="${repo_root}/infra/kubernetes/base/kfe-service/configmap.yaml"
+base_directory="${repo_root}/infra/kubernetes/base"
 images="${repo_root}/infra/docker/images.yaml"
-vault_compose="${repo_root}/infra/docker/compose/vault-mesh-lab.compose.yaml"
-vault_composes=("${repo_root}"/infra/docker/compose/vault-mesh-*.compose.yaml)
+vault_dockerfile="${repo_root}/infra/docker/images/kerosene-vault/Dockerfile"
+web_nginx="${repo_root}/infra/runtime/web/nginx.k8s.conf"
 
 test -f "${deployment}"
-test -f "${configmap}"
+test -f "${server_configmap}"
+test -f "${kfe_configmap}"
 test -f "${images}"
-test -f "${vault_compose}"
+test -f "${vault_dockerfile}"
+test -f "${web_nginx}"
 
-grep -q 'SPRING_PROFILES_ACTIVE: "prod"' "${configmap}" "${deployment}"
-grep -q 'name: SPRING_DATASOURCE_URL' "${configmap}" "${deployment}"
-grep -q 'name: SPRING_DATASOURCE_USERNAME' "${configmap}" "${deployment}"
-grep -q 'name: SPRING_DATASOURCE_PASSWORD' "${configmap}" "${deployment}"
-grep -q 'SPRING_DATA_REDIS_HOST' "${configmap}" "${deployment}"
-grep -q 'name: SPRING_DATA_REDIS_PASSWORD' "${configmap}" "${deployment}"
-grep -q 'LIGHTNING_LND_HOST' "${configmap}" "${deployment}"
-grep -q 'name: LIGHTNING_LND_MACAROON' "${configmap}" "${deployment}"
+grep -q 'SPRING_PROFILES_ACTIVE: "prod"' "${server_configmap}" "${deployment}"
+grep -q 'name: SPRING_DATASOURCE_URL' "${server_configmap}" "${deployment}"
+grep -q 'name: SPRING_DATASOURCE_USERNAME' "${server_configmap}" "${deployment}"
+grep -q 'name: SPRING_DATASOURCE_PASSWORD' "${server_configmap}" "${deployment}"
+grep -q 'SPRING_DATA_REDIS_HOST' "${server_configmap}" "${deployment}"
+grep -q 'name: SPRING_DATA_REDIS_PASSWORD' "${server_configmap}" "${deployment}"
+grep -q 'LIGHTNING_LND_HOST' "${server_configmap}" "${deployment}"
+grep -q 'name: LIGHTNING_LND_MACAROON' "${server_configmap}" "${deployment}"
 
 if grep -Eq 'SPRING_PROFILES_ACTIVE: "production"|VAULT_RAFT_URL|MPC_SIDECAR_HOST|name: (POSTGRES_URL|REDIS_HOST|LND_HOST|LND_MACAROON_HEX)' \
-  "${configmap}" "${deployment}"; then
+  "${server_configmap}" "${deployment}"; then
   echo "Deployment contains a forbidden legacy environment variable."
   exit 1
 fi
 
-if grep -Eq 'mpc-sidecar:|backend/mpc-sidecar' "${images}" "${vault_compose}"; then
-  echo "Deployment contains a removed mpc-sidecar reference."
+for configmap in "${server_configmap}" "${kfe_configmap}"; do
+  if ! grep -q 'BITCOIN_NETWORK: "testnet3"' "${configmap}"; then
+    echo "Base runtime must select Bitcoin testnet3 explicitly: ${configmap}" >&2
+    exit 1
+  fi
+  grep -q 'BITCOIN_ZMQ_RAWTX: "tcp://bitcoin-core:28333"' "${configmap}"
+  grep -q 'BITCOIN_ZMQ_HASHBLOCK: "tcp://bitcoin-core:28332"' "${configmap}"
+done
+
+if grep -RInE \
+  --include='*.yaml' \
+  'BITCOIN_NETWORK:[[:space:]]*"?(mainnet|regtest|signet)"?|(^|[^0-9])833[23]([^0-9]|$)' \
+  "${base_directory}"
+then
+  echo "Base runtime contains a forbidden Bitcoin network or mainnet port." >&2
   exit 1
 fi
 
-grep -Eq 'kerosene-vault|vault-1' "${vault_compose}"
+if grep -Eiq 'ATTESTATION_MODE[=:][[:space:]]*sim|CARGO_FEATURES|dealer_lab|static_token' \
+  "${vault_dockerfile}"; then
+  echo "Vault image exposes a laboratory or mutable feature default." >&2
+  exit 1
+fi
 
-for compose in "${vault_composes[@]}"; do
-  if grep -q 'dockerfile: ../../infra/docker/images/kerosene-vault/Dockerfile' "${compose}"; then
-    echo "Vault Compose still resolves its Dockerfile through the removed monorepo layout: ${compose}"
+grep -q '^USER 65532:65532$' "${vault_dockerfile}"
+
+for obsolete_vault_resource in \
+  vault-deployment.yaml \
+  vault-service.yaml \
+  vault-servicemonitor.yaml
+do
+  if [[ -e "${base_directory}/${obsolete_vault_resource}" ]]; then
+    echo "Public base contains obsolete Vault resource: ${obsolete_vault_resource}" >&2
     exit 1
   fi
 done
-grep -q 'KEROSENE_DEPLOY_DIR' "${vault_compose}"
+
+if grep -Eiq 'localhost|127\.0\.0\.1' "${web_nginx}"; then
+  echo "Production web policy contains a loopback exception." >&2
+  exit 1
+fi
+
+if grep -Eq 'mpc-sidecar:|backend/mpc-sidecar' "${images}"; then
+  echo "Deployment contains a removed mpc-sidecar reference."
+  exit 1
+fi
 
 if grep -RInE \
   --exclude-dir=.git \

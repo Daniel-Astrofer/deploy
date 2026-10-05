@@ -24,15 +24,16 @@ images:
     owner: kfe
 
   kerosene-vault:
-    image: kerosene/kerosene-vault
+    image: kerosene/vault
     local_tag: local
     dockerfile: infra/docker/images/kerosene-vault/Dockerfile
     context_repository: vault
     context: .
     owner: vault-mesh
     notes: >-
-      Vault mesh node (Rust). Lab uses ATTESTATION_MODE=sim; production builds
-      must refuse sim (KEROSENE_VAULT_REFUSE_SIM / feature production).
+      Vault mesh node (Rust), always built with production and hybrid features.
+      Runtime configuration remains fail-closed and comes from the private
+      operations overlay.
 
   kerosene-node:
     image: kerosene/node
@@ -76,9 +77,25 @@ images:
     image: kerosene/web-page
     local_tag: local
     dockerfile: infra/docker/images/web-page/Dockerfile
-    context_repository: generated
-    context: .
+    context_repository: clients
+    context: build/web
     owner: frontend
     notes: >-
-      The web-page Kubernetes image now has a canonical Dockerfile. Legacy
-      scripts may still keep fallback behavior during the migration window.
+      build-image.sh first creates the Flutter web bundle, then packages that
+      generated directory with Deploy's production Nginx configuration.
+
+  bitcoin-rail:
+    image: kerosene/bitcoin-rail
+    local_tag: local
+    dockerfile: infra/docker/images/bitcoin-rail/Dockerfile
+    context_repository: rails
+    context: bitcoin_core_backend
+    owner: rails
+
+  lightning-rail:
+    image: kerosene/lightning-rail
+    local_tag: local
+    dockerfile: infra/docker/images/lightning-rail/Dockerfile
+    context_repository: rails
+    context: lightning_flask
+    owner: rails

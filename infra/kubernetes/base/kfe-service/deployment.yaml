@@ -112,7 +112,7 @@ spec:
                 -Djava.awt.headless=true
           startupProbe:
             httpGet:
-              path: /health/ready
+              path: /health/live
               port: http
             periodSeconds: 5
             timeoutSeconds: 3

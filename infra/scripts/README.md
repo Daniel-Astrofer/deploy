@@ -1,34 +1,5 @@
-# Kerosene infra internal scripts
+# Documento movido para a documentação global
 
-Esta pasta contém helpers internos chamados pelos entrypoints públicos de
-`infra/`.
+O conteúdo normativo deste documento foi consolidado no repositório externo [kerosene-global-docs](../../../../kerosene-global-docs/operations/deploy/infra/scripts/README.md).
 
-## Interface pública
-
-Não chame scripts desta pasta diretamente no uso normal. Use:
-
-```bash
-bash infra/start.sh
-bash infra/stop.sh
-bash infra/recreate.sh
-bash infra/status.sh
-bash infra/logs.sh
-bash infra/test.sh
-```
-
-## Conteúdo
-
-```text
-quorum.sh          Dispatcher interno da interface pública.
-images.sh          Helper interno para build/import de imagens locais.
-host-services.sh   Preflight systemd para containerd, Docker e kubelet.
-common.sh          Funções compartilhadas de Docker/Compose/env.
-backend-common.sh  Helper interno para scripts que precisam do backend local.
-flutter-common.sh  Helper interno para build Flutter controlado.
-local/             Compose legado e rotinas específicas de banco/log/reparo.
-```
-
-Scripts MCP ficam em `infra/mcp/`, não em Kubernetes.
-
-Classificação completa dos scripts e wrappers de compatibilidade:
-`docs/pt-BR/INDICE-DEPLOY.md`.
+Edite a cópia global; este arquivo local é mantido apenas como ponte de navegação.

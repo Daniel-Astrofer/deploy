@@ -1,0 +1,17 @@
+.git
+.github
+.local
+docs
+*.log
+.env
+.env.*
+**/logs
+**/data
+**/secrets
+!**/examples/secrets
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.macaroon
+infra/kubernetes/overlays/local-full/local-dev-secrets.yaml

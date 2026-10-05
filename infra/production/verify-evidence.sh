@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EVIDENCE_DIR="${1:?usage: verify-evidence.sh <evidence-dir> <gate>}"
-GATE="${2:?usage: verify-evidence.sh <evidence-dir> <gate>}"
+[[ "$#" -eq 2 ]] || { echo "usage: verify-evidence.sh <evidence-dir> <gate>" >&2; exit 2; }
+EVIDENCE_DIR="$1"
+GATE="$2"
 IDENTITY_REGEXP="${KEROSENE_EVIDENCE_CERTIFICATE_IDENTITY_REGEXP:?set trusted certificate identity regexp}"
 ISSUER_REGEXP="${KEROSENE_EVIDENCE_OIDC_ISSUER_REGEXP:?set trusted OIDC issuer regexp}"
 

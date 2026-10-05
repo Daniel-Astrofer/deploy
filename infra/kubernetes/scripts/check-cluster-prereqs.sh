@@ -10,7 +10,7 @@ echo "[*] Nodes"
 "$KUBECTL" get nodes -o wide
 
 echo "[*] Kerosene namespaces"
-"$KUBECTL" get namespace kerosene-local kerosene-staging kerosene-production 2>/dev/null || true
+"$KUBECTL" get namespace kerosene-production 2>/dev/null || true
 
 echo "[*] StorageClasses"
 if ! "$KUBECTL" get storageclass; then
