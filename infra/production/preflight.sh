@@ -8,6 +8,10 @@ source "$PRODUCTION_ROOT/lib/validation.sh"
 source "$PRODUCTION_ROOT/lib/security.sh"
 source "$PRODUCTION_ROOT/lib/rollout.sh"
 START=0
+if [[ "$#" -gt 1 || ( "$#" -eq 1 && "${1:-}" != "--start" ) ]]; then
+  echo "Usage: $0 [--start]" >&2
+  exit 2
+fi
 if [[ "${1:-}" == "--start" ]]; then
   START=1
   shift

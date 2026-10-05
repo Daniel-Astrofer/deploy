@@ -23,40 +23,43 @@ resolve_kerosene_repo() {
   local override="$1"
   local group="$2"
   local repository="$3"
-  local local_directory="$4"
-  local candidate
+  shift 3
+  local local_directories=("$@")
+  local candidate dir
 
   if [[ -n "${override}" ]]; then
     printf '%s\n' "${override}"
     return
   fi
 
-  for candidate in \
-    "${KEROSENE_WORKSPACE_ROOT}/${group}/${repository}" \
-    "${KEROSENE_WORKSPACE_ROOT}/${local_directory}" \
-    "${KEROSENE_WORKSPACE_ROOT}/${repository}" \
-    "${KEROSENE_WORKSPACE_ROOT}/${group}/${local_directory}"
-  do
-    if [[ -e "${candidate}/.git" ]]; then
-      printf '%s\n' "${candidate}"
-      return
-    fi
+  for dir in "${local_directories[@]}"; do
+    for candidate in \
+      "${KEROSENE_WORKSPACE_ROOT}/${dir}" \
+      "${KEROSENE_WORKSPACE_ROOT}/${group}/${repository}" \
+      "${KEROSENE_WORKSPACE_ROOT}/${repository}" \
+      "${KEROSENE_WORKSPACE_ROOT}/${group}/${dir}"
+    do
+      if [[ -e "${candidate}/.git" ]]; then
+        printf '%s\n' "${candidate}"
+        return
+      fi
+    done
   done
 
   # Return the current flat-layout location so callers emit one actionable
   # error instead of silently falling back to the archived monorepo.
-  printf '%s\n' "${KEROSENE_WORKSPACE_ROOT}/${local_directory}"
+  printf '%s\n' "${KEROSENE_WORKSPACE_ROOT}/${local_directories[0]}"
 }
 
 KEROSENE_DEPLOY_DIR="${REPO_ROOT}"
-CORE_DIR="$(resolve_kerosene_repo "${KEROSENE_CORE_DIR:-}" services kerosene-core core)"
+CORE_DIR="$(resolve_kerosene_repo "${KEROSENE_CORE_DIR:-${KEROSENE_USERS_AUTHENTICATION_DIR:-}}" services kerosene-core users-authentication core)"
 CLIENTS_DIR="$(resolve_kerosene_repo "${KEROSENE_CLIENTS_DIR:-}" platform kerosene-clients clients)"
 VAULT_DIR="$(resolve_kerosene_repo "${KEROSENE_VAULT_DIR:-}" services kerosene-vault vault)"
-NODE_DIR="$(resolve_kerosene_repo "${KEROSENE_NODE_DIR:-}" services kerosene-node node)"
+NODE_DIR="$(resolve_kerosene_repo "${KEROSENE_NODE_DIR:-${KEROSENE_DISCOVERYNG_NODE_DIR:-}}" services kerosene-node discoveryng-node discorveryng-node node)"
 CONTRACTS_DIR="$(resolve_kerosene_repo "${KEROSENE_CONTRACTS_DIR:-}" platform kerosene-contracts contracts)"
-ADMIN_DIR="$(resolve_kerosene_repo "${KEROSENE_ADMIN_DIR:-}" platform kerosene-admin admin)"
-RAILS_DIR="$(resolve_kerosene_repo "${KEROSENE_RAILS_DIR:-}" services kerosene-rails rails)"
-KFE_DIR="$(resolve_kerosene_repo "${KEROSENE_KFE_DIR:-}" services kerosene-kfe kfe)"
+ADMIN_DIR="$(resolve_kerosene_repo "${KEROSENE_ADMIN_DIR:-${KEROSENE_SERVER_ADMINISTRATION_DIR:-}}" platform kerosene-admin server-administration admin)"
+RAILS_DIR="$(resolve_kerosene_repo "${KEROSENE_RAILS_DIR:-${KEROSENE_FINANCIAL_RAILS_DIR:-}}" services kerosene-rails financial-rails rails)"
+KFE_DIR="$(resolve_kerosene_repo "${KEROSENE_KFE_DIR:-${KEROSENE_KRINSE_ENGINE_DIR:-}}" services kfe krinse-engine kfe)"
 SHARED_DIR="$(resolve_kerosene_repo "${KEROSENE_SHARED_DIR:-}" platform kerosene-shared shared)"
 KEROSENE_CORE_DIR="${CORE_DIR}"
 KEROSENE_CLIENTS_DIR="${CLIENTS_DIR}"
@@ -68,6 +71,17 @@ KEROSENE_RAILS_DIR="${RAILS_DIR}"
 KEROSENE_KFE_DIR="${KFE_DIR}"
 KEROSENE_SHARED_DIR="${SHARED_DIR}"
 
+USERS_AUTHENTICATION_DIR="${CORE_DIR}"
+DISCOVERYNG_NODE_DIR="${NODE_DIR}"
+FINANCIAL_RAILS_DIR="${RAILS_DIR}"
+KRINSE_ENGINE_DIR="${KFE_DIR}"
+SERVER_ADMINISTRATION_DIR="${ADMIN_DIR}"
+KEROSENE_USERS_AUTHENTICATION_DIR="${CORE_DIR}"
+KEROSENE_DISCOVERYNG_NODE_DIR="${NODE_DIR}"
+KEROSENE_FINANCIAL_RAILS_DIR="${RAILS_DIR}"
+KEROSENE_KRINSE_ENGINE_DIR="${KFE_DIR}"
+KEROSENE_SERVER_ADMINISTRATION_DIR="${ADMIN_DIR}"
+
 # Backward-compatible variable names used by existing Deploy helpers.
 BACKEND_DIR="${KEROSENE_BACKEND_DIR:-${CORE_DIR}}"
 FRONTEND_DIR="${KEROSENE_FRONTEND_DIR:-${CLIENTS_DIR}}"
@@ -78,6 +92,8 @@ export KEROSENE_CORE_DIR KEROSENE_CLIENTS_DIR KEROSENE_VAULT_DIR
 export KEROSENE_NODE_DIR KEROSENE_CONTRACTS_DIR
 export KEROSENE_ADMIN_DIR KEROSENE_RAILS_DIR
 export KEROSENE_KFE_DIR KEROSENE_SHARED_DIR
+export USERS_AUTHENTICATION_DIR DISCOVERYNG_NODE_DIR FINANCIAL_RAILS_DIR KRINSE_ENGINE_DIR SERVER_ADMINISTRATION_DIR
+export KEROSENE_USERS_AUTHENTICATION_DIR KEROSENE_DISCOVERYNG_NODE_DIR KEROSENE_FINANCIAL_RAILS_DIR KEROSENE_KRINSE_ENGINE_DIR KEROSENE_SERVER_ADMINISTRATION_DIR
 export BACKEND_DIR FRONTEND_DIR
 
 require_kerosene_repo() {

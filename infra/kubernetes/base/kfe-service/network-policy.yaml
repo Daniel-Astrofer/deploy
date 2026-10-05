@@ -65,7 +65,7 @@ spec:
               app: kerosene-bitcoin
       ports:
         - protocol: TCP
-          port: 8332
+          port: 18332
         - protocol: TCP
           port: 28332
         - protocol: TCP
@@ -82,3 +82,10 @@ spec:
           port: 10009
         - protocol: TCP
           port: 8080
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tor-onion
+      ports:
+        - protocol: TCP
+          port: 9050

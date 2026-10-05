@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-config
+  namespace: kerosene-local
+data:
+  # This manifest is deliberately a complete ConfigMap. `kubectl apply` replaces
+  # omitted keys, so keeping only the ticker override would remove SERVER_PORT and
+  # make Kubernetes' generated SERVER_PORT=tcp://... service variable win.
+  SPRING_PROFILES_ACTIVE: "docker"
+  SERVER_PORT: "8080"
+  KEROSENE_RUNTIME_ROLE: "core-service"
+  SERVER_SHUTDOWN: "graceful"
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: "45s"
+  FLYWAY_ENABLED: "true"
+  FLYWAY_BASELINE_ON_MIGRATE: "false"
+  SPRING_FLYWAY_ENABLED: "false"
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
+  MANAGEMENT_HEALTH_SHOW_DETAILS: "when_authorized"
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: "health,info,metrics,prometheus"
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  SPRING_DATA_REDIS_HOST: "kerosene-redis-headless"
+  SPRING_DATA_REDIS_PORT: "6379"
+  TOR_HEALTH_REQUIRED: "false"
+  LIGHTNING_LND_ENABLED: "true"
+  LIGHTNING_LND_HOST: "kerosene-lnd-headless"
+  LIGHTNING_LND_PORT: "10009"
+  LIGHTNING_LND_TLS_ENABLED: "false"
+  LIGHTNING_LND_TLS_INSECURE: "true"
+  LIGHTNING_LND_REST_ENABLED: "true"
+  LIGHTNING_LND_BASE_URL: "https://kerosene-lnd-headless:8080"
+  BITCOIN_NETWORK: "testnet3"
+  BITCOIN_RPC_ENABLED: "true"
+  BITCOIN_RPC_REQUIRED: "true"
+  BITCOIN_RPC_PRUNED_REQUIRED: "false"
+  BITCOIN_RPC_URL: "http://bitcoin-core:18332"
+  BITCOIN_RPC_WALLET: "kerosene"
+  TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
+  KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: "true"
+  BITCOIN_ZMQ_ENABLED: "true"
+  BITCOIN_ZMQ_RAWTX: "tcp://bitcoin-core:28333"
+  BITCOIN_ZMQ_HASHBLOCK: "tcp://bitcoin-core:28332"
+  REGION: "LOCAL"
+  APP_CORS_ALLOWED_ORIGINS: "http://placeholder.onion"
+  WEBAUTHN_ORIGINS: "android:apk-key-hash:kerosene,http://placeholder.onion"
+  AUDIT_SOLVENCY_ENFORCED: "false"
+  RELEASE_ATTESTATION_REQUIRED: "false"
+  RELEASE_REMOTE_ATTESTATION_ENABLED: "false"
+  QUORUM_ALLOW_LOCAL_SIMULATION: "true"
+  KFE_REMOTE_BASE_URL: "http://kfe-service:8080"
+  KFE_REMOTE_WALLET_PROVISIONING_ENABLED: "true"
+  KFE_VAULTMESH_REQUIRE_MTLS: "false"
+  KFE_VAULTMESH_TLS_ENABLED: "false"
+  SHARD_IDENTITY_PATH: "/tmp"
+  # Preserve the existing testnet database encryption identity. These values
+  # must move to an injected Secret before this profile can be promoted.
+  AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+  API_SECRET_AES_SECRET: "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE="
+  # JWT is injected from auth-jwt-signing by configure-local-auth.sh, never from this ConfigMap.
+  API_SECRET_PEPPER_SECRET: "kerosene-local-pepper-secret"
+  # The unauthenticated CoinGecko endpoint is rate-limited and the current JDK
+  # SOCKS path resolves it before handing traffic to Tor. Keep the server's
+  # cache/fallback active until remote-DNS egress is implemented.
+  TICKER_COINGECKO_ENABLED: "false"

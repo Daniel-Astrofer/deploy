@@ -1,7 +1,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # Kerosene Tor Node Dockerfile
 # ─────────────────────────────────────────────────────────────────────────────
-# Provides a Tor hidden service sidecar for all shard nodes (IS, CH, SG, Vault).
+# Provides a Tor hidden service sidecar for the Kerosene Vault and Node cells.
 # Pre-installs Tor at build time to avoid apt-get on every container startup.
 # The entrypoint.sh handles permissions, binary integrity check, and tor startup.
 # ═══════════════════════════════════════════════════════════════════════════════

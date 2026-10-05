@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MANIFEST="${1:?rendered manifest path is required}"
+[[ "$#" -eq 1 ]] || { echo "Usage: $0 <rendered-manifest>" >&2; exit 2; }
+MANIFEST="$1"
 [[ -f "$MANIFEST" ]] || {
   echo "Manifest not found: $MANIFEST" >&2
   exit 2
@@ -12,7 +13,31 @@ if grep -Eiq 'dealer_lab|static_token|x-vault-token|attestation_mode:[[:space:]]
   exit 3
 fi
 
-if ! grep -Eiq '(bitcoin[_.-]network|BITCOIN_NETWORK)[^[:alnum:]]*[:=][[:space:]\"]*testnet3' "$MANIFEST"; then
+has_testnet3_network() {
+  grep -Eiq '(bitcoin[_.-]network|BITCOIN_NETWORK)[^[:alnum:]]*[:=][[:space:]\"]*testnet3' "$MANIFEST" ||
+    awk '
+      /^[[:space:]]*-[[:space:]]*name:[[:space:]]*BITCOIN_NETWORK[[:space:]]*$/ {
+        awaiting_value = 1
+        next
+      }
+      awaiting_value && /^[[:space:]]*value:[[:space:]]*/ {
+        value = $0
+        sub(/^[[:space:]]*value:[[:space:]]*/, "", value)
+        gsub(/\047/, "", value)
+        gsub(/"/, "", value)
+        found = (tolower(value) == "testnet3")
+        exit
+      }
+      awaiting_value && /^[[:space:]]*-[[:space:]]*name:/ {
+        exit 1
+      }
+      END {
+        exit(found ? 0 : 1)
+      }
+    ' "$MANIFEST"
+}
+
+if ! has_testnet3_network; then
   echo "Production manifest must explicitly pin Bitcoin to testnet3." >&2
   exit 3
 fi

@@ -12,11 +12,13 @@ Modes:
   --logs          Current and previous logs. Default.
   --describe      kubectl describe pod.
   --shell         Start an ephemeral debug container attached to the target Pod.
+                  Requires DEBUG_IMAGE pinned by sha256 digest.
   --port-forward  Port-forward the component Service locally.
 
 Examples:
   $0 kerosene-production server --logs
-  $0 kerosene-production server --shell
+  DEBUG_IMAGE=registry.invalid/netshoot@sha256:<64-hex> \
+    $0 kerosene-production server --shell
   $0 kerosene-production server --port-forward
 USAGE
 }
@@ -25,10 +27,15 @@ NAMESPACE="${1:-}"
 COMPONENT="${2:-}"
 MODE="${3:---logs}"
 KUBECTL="${KUBECTL:-kubectl}"
-DEBUG_IMAGE="${DEBUG_IMAGE:-nicolaka/netshoot:latest}"
+DEBUG_IMAGE="${DEBUG_IMAGE:-}"
 
-if [[ -z "$NAMESPACE" || -z "$COMPONENT" ]]; then
+if [[ -z "$NAMESPACE" || -z "$COMPONENT" || "$#" -gt 3 ]]; then
   usage
+  exit 2
+fi
+
+if [[ "$MODE" == "--shell" && ! "$DEBUG_IMAGE" =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]]; then
+  echo "DEBUG_IMAGE must be set to an immutable image digest for --shell." >&2
   exit 2
 fi
 
@@ -62,7 +69,7 @@ case "$MODE" in
     Target container: $CONTAINER
     Debug image: $DEBUG_IMAGE
 
-    For production, prefer DEBUG_IMAGE pinned by digest instead of latest.
+    The debug image is pinned by digest.
 WARN
     "$KUBECTL" -n "$NAMESPACE" debug -it "$POD" \
       --target="$CONTAINER" \

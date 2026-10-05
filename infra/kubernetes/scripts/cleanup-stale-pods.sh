@@ -31,14 +31,17 @@ kubectl_cmd() {
   "$KUBECTL" "${KUBECTL_ARGS[@]}" "$@"
 }
 
-stale_pods="$(kubectl_cmd get pods --all-namespaces --no-headers 2>/dev/null \
+if ! stale_pods="$(kubectl_cmd get pods --all-namespaces --no-headers 2>/dev/null \
   | awk '{
     status=$4
     age=$6
     if ((status ~ /ImagePullBackOff|ErrImagePull|Error|CrashLoopBackOff/) && age ~ /d/) {
       print $1, $2, status, age
     }
-  }' || true)"
+  }')"; then
+  echo "[!] Unable to list Pods; no cleanup was attempted." >&2
+  exit 1
+fi
 
 if [[ -z "$stale_pods" ]]; then
   echo "[*] No stale pods found"

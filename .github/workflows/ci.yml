@@ -7,7 +7,10 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   compatibility:
@@ -16,21 +19,30 @@ jobs:
       component: deploy
 
   architecture:
-    runs-on: ubuntu-latest
+    name: Architecture guardrails
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: bash infra/scripts/check_architecture_guardrails.sh
 
   production-source-policy:
-    runs-on: ubuntu-latest
+    name: Production source policy
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: bash infra/production/check-source-policy.sh
 
   production-validation:
-    runs-on: ubuntu-latest
+    name: Production validation
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Validate runtime boundaries
         run: bash infra/scripts/validate-runtime-boundaries.sh
       - name: Test production manifest guardrails
@@ -41,4 +53,8 @@ jobs:
         run: bash infra/tests/mcp-compat-wrapper-test.sh
 
   security:
+    permissions:
+      contents: read
+      pull-requests: read # Required by dependency review on pull requests.
+      security-events: write # Required to upload SARIF security findings.
     uses: Daniel-Astrofer/.github/.github/workflows/security-scan.yml@2552ff2125c2d72accebe93804b8e139a52ded13

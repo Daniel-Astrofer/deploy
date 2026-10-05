@@ -43,7 +43,6 @@ spec:
       targetPort: sentinel
       protocol: TCP
 ---
----
 apiVersion: v1
 kind: Service
 metadata:
@@ -57,11 +56,11 @@ spec:
     app: kerosene-bitcoin
   ports:
     - name: rpc
-      port: 8332
+      port: 18332
       targetPort: rpc
       protocol: TCP
     - name: p2p
-      port: 8333
+      port: 18333
       targetPort: p2p
       protocol: TCP
     - name: zmq-rawblock
@@ -90,11 +89,11 @@ spec:
     app: kerosene-bitcoin
   ports:
     - name: rpc
-      port: 8332
+      port: 18332
       targetPort: rpc
       protocol: TCP
     - name: p2p
-      port: 8333
+      port: 18333
       targetPort: p2p
       protocol: TCP
     - name: zmq-rawblock
