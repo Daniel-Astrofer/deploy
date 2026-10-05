@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kfe-to-tor-only
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kfe-service
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tor-onion
+      ports:
+        - protocol: TCP
+          port: 9050
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tor-from-kfe
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tor-onion
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kfe-service
+      ports:
+        - protocol: TCP
+          port: 9050

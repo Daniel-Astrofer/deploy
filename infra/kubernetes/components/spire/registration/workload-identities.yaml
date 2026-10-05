@@ -1,0 +1,75 @@
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: kerosene-auth
+spec:
+  spiffeIDTemplate: spiffe://staging.kerosene.internal/service/auth
+  className: kerosene-staging
+  ttl: 1h
+  podSelector:
+    matchLabels:
+      kerosene.io/spiffe-role: auth
+  namespaceSelector:
+    matchLabels:
+      kerosene.io/spire-trust-domain: staging.kerosene.internal
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ .PodMeta.Namespace }}"
+    - "k8s:sa:server"
+    - "k8s:container-name:server"
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: kerosene-kfe
+spec:
+  spiffeIDTemplate: spiffe://staging.kerosene.internal/service/kfe
+  className: kerosene-staging
+  ttl: 1h
+  podSelector:
+    matchLabels:
+      kerosene.io/spiffe-role: kfe
+  namespaceSelector:
+    matchLabels:
+      kerosene.io/spire-trust-domain: staging.kerosene.internal
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ .PodMeta.Namespace }}"
+    - "k8s:sa:kfe-service"
+    - "k8s:container-name:kfe-service"
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: kerosene-vault
+spec:
+  spiffeIDTemplate: 'spiffe://staging.kerosene.internal/service/vault/node/{{ index .PodMeta.Labels "vault.kerosene.io/node-id" }}'
+  className: kerosene-staging
+  ttl: 1h
+  podSelector:
+    matchLabels:
+      kerosene.io/spiffe-role: vault
+  namespaceSelector:
+    matchLabels:
+      kerosene.io/spire-trust-domain: staging.kerosene.internal
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ .PodMeta.Namespace }}"
+    - "k8s:sa:vault"
+    - "k8s:container-name:vault"
+---
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: kerosene-node
+spec:
+  spiffeIDTemplate: 'spiffe://staging.kerosene.internal/service/node/plane/{{ index .PodMeta.Labels "kerosene.io/discovery-plane" }}/instance/{{ .PodMeta.Name }}'
+  className: kerosene-staging
+  ttl: 1h
+  podSelector:
+    matchLabels:
+      kerosene.io/spiffe-role: node
+  namespaceSelector:
+    matchLabels:
+      kerosene.io/spire-trust-domain: staging.kerosene.internal
+  workloadSelectorTemplates:
+    - "k8s:ns:{{ .PodMeta.Namespace }}"
+    - "k8s:sa:kerosene-node"
+    - "k8s:container-name:kerosene-node"

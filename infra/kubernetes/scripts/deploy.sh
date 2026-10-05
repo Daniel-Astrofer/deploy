@@ -1,0 +1,318 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Usage: $0 <local|staging|staging-spiffe|staging-vault|staging-vault-spiffe> [--dry-run]
+
+Optional:
+  SERVER_IMAGE=registry/server@sha256:...
+  KFE_SERVICE_IMAGE=registry/kfe-service@sha256:...
+  WEB_PAGE_IMAGE=registry/web-page@sha256:...
+  VAULT_IMAGE=registry/vault@sha256:...
+  NODE_IMAGE=registry/node@sha256:...
+  TOR_IMAGE=registry/tor@sha256:...
+
+  KUBECTL=kubectl
+  KUSTOMIZE=kustomize
+
+Production deploy overlays and helpers are intentionally outside this public tree.
+USAGE
+}
+
+ENVIRONMENT="${1:-}"
+DRY_RUN="${2:-}"
+
+if [[ -z "$ENVIRONMENT" || "$ENVIRONMENT" == "-h" || "$ENVIRONMENT" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+case "$ENVIRONMENT" in
+  local) NAMESPACE="kerosene-local"; PROFILE="local"; SPIFFE_SCOPE="" ;;
+  staging) NAMESPACE="kerosene-staging"; PROFILE="staging-core"; SPIFFE_SCOPE="" ;;
+  staging-spiffe) NAMESPACE="kerosene-staging"; PROFILE="staging-core"; SPIFFE_SCOPE="core" ;;
+  staging-vault) NAMESPACE="kerosene-staging-vault"; PROFILE="staging-vault"; SPIFFE_SCOPE="" ;;
+  staging-vault-spiffe) NAMESPACE="kerosene-staging-vault"; PROFILE="staging-vault"; SPIFFE_SCOPE="vault" ;;
+  production)
+    echo "Production overlay is not shipped in the public repository." >&2
+    echo "Use a private ops checkout for production deploys." >&2
+    exit 2
+    ;;
+  *) echo "Unsupported environment: $ENVIRONMENT" >&2; usage; exit 2 ;;
+esac
+
+if [[ -n "$DRY_RUN" && "$DRY_RUN" != "--dry-run" ]]; then
+  echo "Unsupported option: $DRY_RUN" >&2
+  usage
+  exit 2
+fi
+
+KUBECTL="${KUBECTL:-kubectl}"
+KUSTOMIZE_BIN="${KUSTOMIZE:-kustomize}"
+GITOPS_USER="system:serviceaccount:kerosene-gitops:kerosene-deployer"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+K8S_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+OVERLAY="$K8S_ROOT/overlays/$ENVIRONMENT"
+
+if ! command -v "$KUBECTL" >/dev/null 2>&1; then
+  echo "kubectl not found. Set KUBECTL=/path/to/kubectl." >&2
+  exit 127
+fi
+
+if [[ -n "${SERVER_IMAGE:-}" || -n "${KFE_SERVICE_IMAGE:-}" || -n "${WEB_PAGE_IMAGE:-}" || -n "${VAULT_IMAGE:-}" || -n "${NODE_IMAGE:-}" || -n "${TOR_IMAGE:-}" ]]; then
+  if ! command -v "$KUSTOMIZE_BIN" >/dev/null 2>&1; then
+    echo "kustomize not found. It is required when setting images through environment variables." >&2
+    echo "Install kustomize or edit the overlay image tags manually and run with no image env vars." >&2
+    exit 127
+  fi
+fi
+
+if [[ ! -d "$OVERLAY" ]]; then
+  echo "Overlay not found: $OVERLAY" >&2
+  exit 2
+fi
+
+if [[ "$PROFILE" == "staging-core" ]]; then
+  for image_var in SERVER_IMAGE KFE_SERVICE_IMAGE WEB_PAGE_IMAGE NODE_IMAGE TOR_IMAGE; do
+    image_ref="${!image_var:-}"
+    if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
+      echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
+      exit 2
+    fi
+  done
+elif [[ "$PROFILE" == "staging-vault" ]]; then
+  for image_var in VAULT_IMAGE NODE_IMAGE TOR_IMAGE; do
+    image_ref="${!image_var:-}"
+    if [[ ! "$image_ref" =~ @sha256:[0-9a-f]{64}$ ]]; then
+      echo "Staging requires immutable ${image_var}=...@sha256:<64 lowercase hex chars>." >&2
+      exit 2
+    fi
+  done
+fi
+
+TMP_DIR="$(mktemp -d)"
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+
+cp -R "$K8S_ROOT" "$TMP_DIR/k8s"
+WORK_OVERLAY="$TMP_DIR/k8s/overlays/$ENVIRONMENT"
+
+if [[ -n "${SERVER_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/server=${SERVER_IMAGE}")
+fi
+if [[ -n "${KFE_SERVICE_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/kfe-service=${KFE_SERVICE_IMAGE}")
+fi
+if [[ -n "${WEB_PAGE_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/web-page=${WEB_PAGE_IMAGE}")
+fi
+if [[ -n "${VAULT_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/vault=${VAULT_IMAGE}")
+fi
+if [[ -n "${NODE_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/node=${NODE_IMAGE}")
+fi
+if [[ -n "${TOR_IMAGE:-}" ]]; then
+  (cd "$WORK_OVERLAY" && "$KUSTOMIZE_BIN" edit set image "kerosene/tor=${TOR_IMAGE}")
+fi
+
+MANIFEST="$TMP_DIR/manifest.yaml"
+"$KUBECTL" kustomize "$WORK_OVERLAY" > "$MANIFEST"
+
+if [[ "$PROFILE" == "staging-core" ]]; then
+  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/validate-staging-runtime.sh" "$MANIFEST"
+fi
+
+echo "[*] Validating rendered manifest for namespace $NAMESPACE..."
+"$KUBECTL" apply --dry-run=client -f "$MANIFEST" >/dev/null
+
+if [[ -n "$SPIFFE_SCOPE" ]]; then
+  "$KUBECTL" get namespace "$NAMESPACE" >/dev/null 2>&1 || {
+    echo "[!] Namespace $NAMESPACE must be provisioned before a SPIFFE deployment." >&2
+    echo "[!] Install the SPIRE admission component and its reviewed namespace/image policy first." >&2
+    exit 1
+  }
+
+  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/preflight-staging-spire.sh" "$SPIFFE_SCOPE"
+
+  image_repository() {
+    local image_ref="$1"
+    printf '%s' "${image_ref%@sha256:*}"
+  }
+
+  require_approved_repository() {
+    local annotation="$1"
+    local image_ref="$2"
+    local approved expected
+    approved="$(
+      "$KUBECTL" get namespace "$NAMESPACE" \
+        -o "go-template={{ index .metadata.annotations \"${annotation}\" }}"
+    )"
+    expected="$(image_repository "$image_ref")"
+    if [[ -z "$approved" || "$approved" != "$expected" ]]; then
+      echo "[!] Namespace ${NAMESPACE} must approve ${expected} in annotation ${annotation}." >&2
+      echo "[!] Image repository allow-lists are provisioned before admission activation and are immutable." >&2
+      exit 1
+    fi
+  }
+
+  if [[ "$SPIFFE_SCOPE" == "core" ]]; then
+    require_approved_repository kerosene.io/approved-auth-image "$SERVER_IMAGE"
+    require_approved_repository kerosene.io/approved-kfe-image "$KFE_SERVICE_IMAGE"
+  else
+    require_approved_repository kerosene.io/approved-vault-image "$VAULT_IMAGE"
+  fi
+  require_approved_repository kerosene.io/approved-node-image "$NODE_IMAGE"
+  require_approved_repository kerosene.io/approved-tor-image "$TOR_IMAGE"
+fi
+
+if [[ "$DRY_RUN" == "--dry-run" ]]; then
+  echo "[*] Running server-side dry-run..."
+  if "$KUBECTL" get namespace "$NAMESPACE" >/dev/null 2>&1; then
+    if [[ -n "$SPIFFE_SCOPE" ]]; then
+      "$KUBECTL" --as="$GITOPS_USER" apply --server-side --dry-run=server \
+        --field-manager=kerosene-gitops -f "$MANIFEST"
+    else
+      "$KUBECTL" apply --server-side --dry-run=server -f "$MANIFEST"
+    fi
+  else
+    echo "[!] Namespace $NAMESPACE does not exist yet."
+    echo "[!] Kubernetes server-side dry-run does not create the namespace for later objects in the same dry-run batch."
+    echo "[!] Client validation passed. To run full server dry-run first, create the namespace with:"
+    echo "    $KUBECTL create namespace $NAMESPACE --dry-run=client -o yaml | $KUBECTL apply -f -"
+  fi
+  exit 0
+fi
+
+if [[ -z "$SPIFFE_SCOPE" ]]; then
+  echo "[*] Ensuring namespace exists..."
+  "$KUBECTL" create namespace "$NAMESPACE" --dry-run=client -o yaml | "$KUBECTL" apply -f -
+fi
+
+if [[ "$PROFILE" == "staging-core" ]]; then
+  echo "[*] Verifying independently provisioned Core secrets..."
+
+  require_secret_keys() {
+    local secret="$1"
+    shift
+    local present_keys
+    present_keys="$(
+      "$KUBECTL" -n "$NAMESPACE" get secret "$secret" \
+        -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'
+    )"
+    local key
+    for key in "$@"; do
+      grep -qx "$key" <<<"$present_keys" || {
+        echo "[!] Secret ${secret} is missing required key ${key}." >&2
+        exit 1
+      }
+    done
+  }
+
+  require_secret_keys server-secrets \
+    jwt-secret password-pepper aes-secret kfe-column-crypto-key \
+    shard-attestation-secret
+  if [[ "$SPIFFE_SCOPE" == "core" ]]; then
+    require_secret_keys kfe-service-secrets fee-quote-signing-secret
+  else
+    require_secret_keys server-secrets kfe-internal-shared-secret
+  fi
+  require_secret_keys kerosene-db-secrets \
+    jdbc-url application-user application-password
+  require_secret_keys kerosene-redis-secrets redis-password
+  require_secret_keys kerosene-bitcoin-secrets rpc-user rpc-password
+  require_secret_keys kerosene-lnd-secrets LIGHTNING_LND_MACAROON
+  require_secret_keys staging-smoke-credentials username password
+  require_secret_keys kerosene-node-genesis genesis-trust-bundle.json
+  require_secret_keys kerosene-node-mtls \
+    ca.crt server.crt server.key client-identity.pem client.crt client.pkcs8.key
+  require_secret_keys kerosene-node-identity identity.key member-id
+
+  jdbc_url="$(
+    "$KUBECTL" -n "$NAMESPACE" get secret kerosene-db-secrets \
+      -o jsonpath='{.data.jdbc-url}' | base64 --decode
+  )"
+  if [[ "$jdbc_url" != jdbc:postgresql://kerosene-db-headless:* ]]; then
+    echo "[!] kerosene-db-secrets jdbc-url must target staging-owned kerosene-db-headless." >&2
+    exit 1
+  fi
+
+elif [[ "$PROFILE" == "staging-vault" ]]; then
+  echo "[*] Verifying independently provisioned Vault secrets..."
+  require_secret_keys() {
+    local secret="$1"
+    shift
+    local present_keys
+    present_keys="$(
+      "$KUBECTL" -n "$NAMESPACE" get secret "$secret" \
+        -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'
+    )"
+    local key
+    for key in "$@"; do
+      grep -qx "$key" <<<"$present_keys" || {
+        echo "[!] Secret ${secret} is missing required key ${key}." >&2
+        exit 1
+      }
+    done
+  }
+  require_secret_keys vault-secrets data-passphrase attestation-root
+  require_secret_keys vault-mtls-certs \
+    ca.crt vault-server.crt vault-server.key vault-client.crt vault-client.key
+  require_secret_keys kerosene-node-genesis genesis-trust-bundle.json
+  require_secret_keys kerosene-node-mtls \
+    ca.crt server.crt server.key client-identity.pem client.crt client.pkcs8.key
+  require_secret_keys kerosene-node-identity identity.key member-id
+fi
+
+echo "[*] Applying manifest..."
+APPLY_ARGS=(apply --server-side)
+if [[ "${KEROSENE_FORCE_CONFLICTS:-0}" == "1" ]]; then
+  echo "[!] KEROSENE_FORCE_CONFLICTS=1: overriding server-side apply ownership conflicts." >&2
+  APPLY_ARGS+=(--force-conflicts)
+fi
+if [[ -n "$SPIFFE_SCOPE" ]]; then
+  "$KUBECTL" --as="$GITOPS_USER" "${APPLY_ARGS[@]}" \
+    --field-manager=kerosene-gitops -f "$MANIFEST"
+else
+  "$KUBECTL" "${APPLY_ARGS[@]}" -f "$MANIFEST"
+fi
+
+if [[ "$PROFILE" == "staging-core" ]]; then
+  echo "[*] Waiting for Core workloads..."
+  echo "[*] Waiting for staging-owned stateful dependencies..."
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-postgres --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-redis --timeout=5m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-bitcoin --timeout=30m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-lnd --timeout=15m
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/staging-tor --timeout=10m
+fi
+if [[ "$PROFILE" != "staging-vault" ]]; then
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/server --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/kfe-service --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/web-page --timeout=5m
+fi
+if [[ "$PROFILE" == "staging-core" ]]; then
+  if [[ "${KEROSENE_SKIP_STAGING_SMOKES:-0}" == "1" ]]; then
+    echo "[!] KEROSENE_SKIP_STAGING_SMOKES=1: post-deploy gates were explicitly skipped." >&2
+  else
+    KUBECTL="$KUBECTL" KEROSENE_STAGING_NAMESPACE="$NAMESPACE" \
+      bash "$SCRIPT_DIR/smoke-staging.sh"
+  fi
+elif [[ "$PROFILE" == "staging-vault" ]]; then
+  echo "[*] Waiting for the independent Vault and its Tor transport..."
+  "$KUBECTL" -n "$NAMESPACE" rollout status statefulset/vault-tor --timeout=10m
+  "$KUBECTL" -n "$NAMESPACE" rollout status deployment/vault --timeout=10m
+  KUBECTL="$KUBECTL" KEROSENE_STAGING_VAULT_NAMESPACE="$NAMESPACE" \
+    bash "$SCRIPT_DIR/smoke-staging-vault.sh"
+fi
+
+# Local (and any cluster with helm) also keeps Grafana + Prometheus up with the server.
+if [[ "$PROFILE" == "local" || "${KEROSENE_ENSURE_MONITORING:-0}" == "1" ]]; then
+  echo "[*] Ensuring Grafana + Prometheus (monitoring namespace)"
+  KUBECTL="$KUBECTL" bash "$SCRIPT_DIR/ensure-local-monitoring.sh" || {
+    echo "[!] Monitoring stack ensure failed (non-fatal for core API)." >&2
+  }
+fi
+
+echo "[+] $ENVIRONMENT deploy completed."

@@ -1,0 +1,81 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-mesh
+  labels:
+    app.kubernetes.io/component: vault-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  policyTypes:
+    - Ingress
+  ingress:
+    # KFE → vault-1:7801 (signing / intent gateway)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kfe-service
+      ports:
+        - port: 7801
+          protocol: TCP
+    # vault↔vault:7801 (DKG, reshare, mesh health, anti-nonce)
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - port: 7801
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-mesh-egress
+  labels:
+    app.kubernetes.io/component: vault-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  policyTypes:
+    - Egress
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+    # vault→vault mesh egress
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - port: 7801
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kfe-to-vault-mesh
+  labels:
+    app.kubernetes.io/component: vault-mesh
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kfe-service
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - port: 7801
+          protocol: TCP

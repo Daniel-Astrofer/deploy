@@ -1,0 +1,482 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kerosene-spiffe-workloads
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        kerosene.io/workload-identity-boundary: enforced
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["daemonsets", "deployments", "replicasets", "statefulsets"]
+        scope: Namespaced
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["cronjobs", "jobs"]
+        scope: Namespaced
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "pods/ephemeralcontainers", "replicationcontrollers"]
+        scope: Namespaced
+  variables:
+    - name: template
+      expression: >-
+        object.kind == 'Pod'
+          ? object
+          : (object.kind == 'CronJob'
+            ? object.spec.jobTemplate.spec.template
+            : object.spec.template)
+    - name: labels
+      expression: >-
+        has(variables.template.metadata.labels)
+          ? variables.template.metadata.labels
+          : {}
+    - name: oldLabels
+      expression: >-
+        oldObject == null
+          ? {}
+          : (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {})
+    - name: podSpec
+      expression: variables.template.spec
+    - name: containers
+      expression: variables.podSpec.containers
+    - name: initContainers
+      expression: >-
+        has(variables.podSpec.initContainers) ? variables.podSpec.initContainers : []
+    - name: volumes
+      expression: >-
+        has(variables.podSpec.volumes) ? variables.podSpec.volumes : []
+    - name: serviceAccount
+      expression: >-
+        has(variables.podSpec.serviceAccountName)
+          ? variables.podSpec.serviceAccountName
+          : 'default'
+    - name: role
+      expression: >-
+        'kerosene.io/spiffe-role' in variables.labels
+          ? variables.labels['kerosene.io/spiffe-role']
+          : ''
+    - name: sensitive
+      expression: >-
+        variables.role != '' ||
+        'kerosene.io/discovery-plane' in variables.labels ||
+        'vault.kerosene.io/node-id' in variables.labels ||
+        variables.serviceAccount in ['server', 'kfe-service', 'vault', 'kerosene-node'] ||
+        variables.volumes.exists(v, has(v.csi) && v.csi.driver == 'csi.spiffe.io') ||
+        variables.containers.exists(c,
+          has(c.volumeMounts) && c.volumeMounts.exists(m,
+            m.name == 'spiffe-workload-api' || m.mountPath == '/run/spire/sockets')) ||
+        variables.initContainers.exists(c,
+          has(c.volumeMounts) && c.volumeMounts.exists(m,
+            m.name == 'spiffe-workload-api' || m.mountPath == '/run/spire/sockets'))
+    - name: namespaceAnnotations
+      expression: >-
+        has(namespaceObject.metadata.annotations)
+          ? namespaceObject.metadata.annotations
+          : {}
+  validations:
+    - expression: >-
+        object.kind == 'Pod' ||
+        request.userInfo.username == 'system:serviceaccount:kerosene-gitops:kerosene-deployer' ||
+        ((request.userInfo.username in [
+            'system:kube-controller-manager',
+            'system:serviceaccount:kube-system:deployment-controller'] &&
+          object.kind == 'ReplicaSet' &&
+            has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o, o.controller == true && o.kind == 'Deployment')) ||
+         (request.userInfo.username in [
+            'system:kube-controller-manager',
+            'system:serviceaccount:kube-system:cronjob-controller'] &&
+          object.kind == 'Job' &&
+            has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o, o.controller == true && o.kind == 'CronJob')))
+      message: Only the Kerosene GitOps identity or the exact built-in owner controller may write workload controllers.
+    - expression: >-
+        object.kind != 'Pod' || request.operation != 'CREATE' || !variables.sensitive ||
+        ((variables.role in ['auth', 'kfe', 'vault'] &&
+          request.userInfo.username in [
+            'system:kube-controller-manager',
+            'system:serviceaccount:kube-system:replicaset-controller'] &&
+          has(object.metadata.ownerReferences) &&
+          object.metadata.ownerReferences.exists(o, o.controller == true && o.kind == 'ReplicaSet')) ||
+         (variables.role == 'node' &&
+          request.userInfo.username in [
+            'system:kube-controller-manager',
+            'system:serviceaccount:kube-system:statefulset-controller'] &&
+          has(object.metadata.ownerReferences) &&
+          object.metadata.ownerReferences.exists(o, o.controller == true && o.kind == 'StatefulSet')))
+      message: Direct creation of a SPIFFE-sensitive Pod is forbidden.
+    - expression: >-
+        object.kind != 'Pod' || request.operation != 'UPDATE' || !variables.sensitive ||
+        (((!('kerosene.io/spiffe-role' in variables.labels) && !('kerosene.io/spiffe-role' in variables.oldLabels)) ||
+          (('kerosene.io/spiffe-role' in variables.labels) && ('kerosene.io/spiffe-role' in variables.oldLabels) &&
+            variables.labels['kerosene.io/spiffe-role'] == variables.oldLabels['kerosene.io/spiffe-role'])) &&
+         ((!('kerosene.io/discovery-plane' in variables.labels) && !('kerosene.io/discovery-plane' in variables.oldLabels)) ||
+          (('kerosene.io/discovery-plane' in variables.labels) && ('kerosene.io/discovery-plane' in variables.oldLabels) &&
+            variables.labels['kerosene.io/discovery-plane'] == variables.oldLabels['kerosene.io/discovery-plane'])) &&
+         ((!('vault.kerosene.io/node-id' in variables.labels) && !('vault.kerosene.io/node-id' in variables.oldLabels)) ||
+          (('vault.kerosene.io/node-id' in variables.labels) && ('vault.kerosene.io/node-id' in variables.oldLabels) &&
+            variables.labels['vault.kerosene.io/node-id'] == variables.oldLabels['vault.kerosene.io/node-id'])))
+      message: SPIFFE identity labels on an admitted Pod are immutable.
+    - expression: >-
+        !variables.sensitive ||
+        variables.role in ['auth', 'kfe', 'vault', 'node']
+      message: A SPIFFE-sensitive workload must declare one supported kerosene.io/spiffe-role.
+    - expression: >-
+        !variables.sensitive ||
+        ((variables.role == 'auth' && namespaceObject.metadata.name == 'kerosene-staging' &&
+          variables.serviceAccount == 'server' &&
+          !('kerosene.io/discovery-plane' in variables.labels) &&
+          !('vault.kerosene.io/node-id' in variables.labels)) ||
+         (variables.role == 'kfe' && namespaceObject.metadata.name == 'kerosene-staging' &&
+          variables.serviceAccount == 'kfe-service' &&
+          !('kerosene.io/discovery-plane' in variables.labels) &&
+          !('vault.kerosene.io/node-id' in variables.labels)) ||
+         (variables.role == 'vault' && namespaceObject.metadata.name == 'kerosene-staging-vault' &&
+          variables.serviceAccount == 'vault' &&
+          'vault.kerosene.io/node-id' in variables.labels &&
+          variables.labels['vault.kerosene.io/node-id'] == 'staging-vault-1' &&
+          !('kerosene.io/discovery-plane' in variables.labels)) ||
+         (variables.role == 'node' && variables.serviceAccount == 'kerosene-node' &&
+          !('vault.kerosene.io/node-id' in variables.labels) &&
+          'kerosene.io/discovery-plane' in variables.labels &&
+          ((namespaceObject.metadata.name == 'kerosene-staging' &&
+            variables.labels['kerosene.io/discovery-plane'] == 'bank') ||
+           (namespaceObject.metadata.name == 'kerosene-staging-vault' &&
+            variables.labels['kerosene.io/discovery-plane'] == 'vault'))))
+      message: SPIFFE role, namespace, service account and node/plane labels do not match the registered identity.
+    - expression: >-
+        !variables.sensitive ||
+        ((variables.role == 'auth' &&
+          ((object.kind == 'Deployment' && object.metadata.name == 'server') ||
+           (object.kind == 'ReplicaSet' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'Deployment' && o.name == 'server') &&
+            object.metadata.name.startsWith('server-')) ||
+           (object.kind == 'Pod' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'ReplicaSet' && o.name.startsWith('server-'))))) ||
+         (variables.role == 'kfe' &&
+          ((object.kind == 'Deployment' && object.metadata.name == 'kfe-service') ||
+           (object.kind == 'ReplicaSet' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'Deployment' && o.name == 'kfe-service') &&
+            object.metadata.name.startsWith('kfe-service-')) ||
+           (object.kind == 'Pod' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'ReplicaSet' && o.name.startsWith('kfe-service-'))))) ||
+         (variables.role == 'vault' &&
+          ((object.kind == 'Deployment' && object.metadata.name == 'vault') ||
+           (object.kind == 'ReplicaSet' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'Deployment' && o.name == 'vault') &&
+            object.metadata.name.startsWith('vault-')) ||
+           (object.kind == 'Pod' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'ReplicaSet' && o.name.startsWith('vault-'))))) ||
+         (variables.role == 'node' && namespaceObject.metadata.name == 'kerosene-staging' &&
+          ((object.kind == 'StatefulSet' && object.metadata.name == 'staging-tor') ||
+           (object.kind == 'Pod' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'StatefulSet' && o.name == 'staging-tor')))) ||
+         (variables.role == 'node' && namespaceObject.metadata.name == 'kerosene-staging-vault' &&
+          ((object.kind == 'StatefulSet' && object.metadata.name == 'vault-tor') ||
+           (object.kind == 'Pod' && has(object.metadata.ownerReferences) &&
+            object.metadata.ownerReferences.exists(o,
+              o.controller == true && o.kind == 'StatefulSet' && o.name == 'vault-tor')))))
+      message: SPIFFE-sensitive workloads must use the reviewed controller and owner chain.
+    - expression: >-
+        !variables.sensitive ||
+        (has(variables.podSpec.automountServiceAccountToken) &&
+          variables.podSpec.automountServiceAccountToken == false &&
+         (!has(variables.podSpec.hostNetwork) || variables.podSpec.hostNetwork == false) &&
+         (!has(variables.podSpec.hostPID) || variables.podSpec.hostPID == false) &&
+         (!has(variables.podSpec.hostIPC) || variables.podSpec.hostIPC == false) &&
+         (!has(variables.podSpec.shareProcessNamespace) || variables.podSpec.shareProcessNamespace == false))
+      message: SPIFFE-sensitive workloads must disable API token automount and host namespace sharing.
+    - expression: >-
+        !variables.sensitive ||
+        (variables.volumes.filter(v, has(v.csi) && v.csi.driver == 'csi.spiffe.io').size() == 1 &&
+         variables.volumes.exists(v,
+           v.name == 'spiffe-workload-api' && has(v.csi) &&
+           v.csi.driver == 'csi.spiffe.io' && has(v.csi.readOnly) && v.csi.readOnly == true) &&
+         variables.containers.filter(c,
+           has(c.volumeMounts) && c.volumeMounts.exists(m,
+             m.name == 'spiffe-workload-api' || m.mountPath == '/run/spire/sockets')).size() == 1 &&
+         variables.containers.exists(c,
+           c.name == (variables.role == 'auth' ? 'server' :
+             (variables.role == 'kfe' ? 'kfe-service' :
+               (variables.role == 'vault' ? 'vault' : 'kerosene-node'))) &&
+           has(c.volumeMounts) &&
+           c.volumeMounts.filter(m,
+             m.name == 'spiffe-workload-api' && m.mountPath == '/run/spire/sockets' &&
+             has(m.readOnly) && m.readOnly == true).size() == 1) &&
+         variables.initContainers.all(c,
+           !has(c.volumeMounts) || c.volumeMounts.all(m,
+             m.name != 'spiffe-workload-api' && m.mountPath != '/run/spire/sockets')))
+      message: The SPIFFE CSI socket must be mounted read-only and only by the registered application container.
+    - expression: >-
+        !variables.sensitive ||
+        ((variables.role == 'auth' && variables.containers.size() == 1 &&
+          variables.containers.all(c, c.name == 'server')) ||
+         (variables.role == 'kfe' && variables.containers.size() == 1 &&
+          variables.containers.all(c, c.name == 'kfe-service')) ||
+         (variables.role == 'vault' && variables.containers.size() == 1 &&
+          variables.containers.all(c, c.name == 'vault')) ||
+         (variables.role == 'node' && variables.containers.size() == 2 &&
+          variables.containers.exists(c, c.name == 'tor') &&
+          variables.containers.exists(c, c.name == 'kerosene-node')))
+      message: Unexpected sidecars are forbidden on SPIFFE-sensitive workloads.
+    - expression: >-
+        !variables.sensitive ||
+        (variables.containers.all(c, c.image.matches('^.+@sha256:[0-9a-f]{64}$')) &&
+         variables.initContainers.all(c, c.image.matches('^.+@sha256:[0-9a-f]{64}$')) &&
+         ((variables.role != 'auth') ||
+          ('kerosene.io/approved-auth-image' in variables.namespaceAnnotations &&
+           variables.containers.all(c,
+             c.image.startsWith(variables.namespaceAnnotations['kerosene.io/approved-auth-image'] + '@sha256:')))) &&
+         ((variables.role != 'kfe') ||
+          ('kerosene.io/approved-kfe-image' in variables.namespaceAnnotations &&
+           variables.containers.all(c,
+             c.image.startsWith(variables.namespaceAnnotations['kerosene.io/approved-kfe-image'] + '@sha256:')))) &&
+         ((variables.role != 'vault') ||
+          ('kerosene.io/approved-vault-image' in variables.namespaceAnnotations &&
+           variables.containers.all(c,
+             c.image.startsWith(variables.namespaceAnnotations['kerosene.io/approved-vault-image'] + '@sha256:')))) &&
+         ((variables.role != 'node') ||
+          ('kerosene.io/approved-node-image' in variables.namespaceAnnotations &&
+           'kerosene.io/approved-tor-image' in variables.namespaceAnnotations &&
+           variables.containers.exists(c,
+             c.name == 'kerosene-node' &&
+             c.image.startsWith(variables.namespaceAnnotations['kerosene.io/approved-node-image'] + '@sha256:')) &&
+           variables.containers.exists(c,
+             c.name == 'tor' &&
+             c.image.startsWith(variables.namespaceAnnotations['kerosene.io/approved-tor-image'] + '@sha256:')) &&
+           ((namespaceObject.metadata.name == 'kerosene-staging' &&
+             variables.initContainers.size() == 1 &&
+             variables.initContainers[0].name == 'fix-tor-permissions' &&
+             variables.initContainers[0].image == 'docker.io/library/busybox:1.37.0@sha256:9db7b59979c38555a39def84a31fb98b5296952f9e3afd4f6f11f05b07adfab0') ||
+            (namespaceObject.metadata.name == 'kerosene-staging-vault' &&
+             variables.initContainers.size() == 0)))))
+      message: SPIFFE-sensitive workloads must use immutable images from the namespace allow-list.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kerosene-spiffe-workloads
+spec:
+  policyName: kerosene-spiffe-workloads
+  validationActions: [Deny, Audit]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kerosene-spiffe-ephemeral-containers
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        kerosene.io/workload-identity-boundary: enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["pods/ephemeralcontainers"]
+        scope: Namespaced
+  validations:
+    - expression: >-
+        !has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0
+      message: Ephemeral containers are forbidden in a SPIFFE identity-boundary namespace.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kerosene-spiffe-ephemeral-containers
+spec:
+  policyName: kerosene-spiffe-ephemeral-containers
+  validationActions: [Deny, Audit]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kerosene-spiffe-service-accounts
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    namespaceSelector:
+      matchLabels:
+        kerosene.io/workload-identity-boundary: enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["serviceaccounts"]
+        scope: Namespaced
+  matchConditions:
+    - name: reserved-service-account
+      expression: >-
+        (request.operation == 'DELETE' ? oldObject.metadata.name : object.metadata.name)
+          in ['server', 'kfe-service', 'vault', 'kerosene-node']
+  validations:
+    - expression: request.userInfo.username == 'system:serviceaccount:kerosene-gitops:kerosene-deployer'
+      message: Reserved SPIFFE service accounts are managed only by the Kerosene GitOps identity.
+    - expression: >-
+        request.operation == 'DELETE' ||
+        (has(object.automountServiceAccountToken) && object.automountServiceAccountToken == false)
+      message: Reserved SPIFFE service accounts must disable API token automount.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kerosene-spiffe-service-accounts
+spec:
+  policyName: kerosene-spiffe-service-accounts
+  validationActions: [Deny, Audit]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kerosene-spiffe-registrations
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    resourceRules:
+      - apiGroups: ["spire.spiffe.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["clusterspiffeids"]
+        scope: Cluster
+  validations:
+    - expression: >-
+        request.userInfo.username == 'system:serviceaccount:kerosene-gitops:kerosene-deployer' ||
+        (request.operation == 'UPDATE' &&
+         request.userInfo.username == 'system:serviceaccount:spire-server:spire-server' &&
+         object.metadata.name == oldObject.metadata.name && object.spec == oldObject.spec)
+      message: ClusterSPIFFEID specs are managed only by GitOps; SPIRE may update reconciliation metadata without changing the spec.
+    - expression: >-
+        (request.operation == 'DELETE' ? oldObject.metadata.name : object.metadata.name)
+          in ['kerosene-auth', 'kerosene-kfe', 'kerosene-vault', 'kerosene-node']
+      message: Unknown ClusterSPIFFEID registration name.
+    - expression: >-
+        request.operation == 'DELETE' ||
+        (object.spec.className == 'kerosene-staging' && object.spec.ttl == '1h' &&
+         has(object.spec.namespaceSelector.matchLabels) &&
+         object.spec.namespaceSelector.matchLabels.size() == 1 &&
+         object.spec.namespaceSelector.matchLabels['kerosene.io/spire-trust-domain'] == 'staging.kerosene.internal' &&
+         (!has(object.spec.namespaceSelector.matchExpressions) ||
+          object.spec.namespaceSelector.matchExpressions.size() == 0) &&
+         has(object.spec.podSelector.matchLabels) &&
+         object.spec.podSelector.matchLabels.size() == 1 &&
+         (!has(object.spec.podSelector.matchExpressions) ||
+          object.spec.podSelector.matchExpressions.size() == 0) &&
+         (!has(object.spec.admin) || object.spec.admin == false) &&
+         (!has(object.spec.downstream) || object.spec.downstream == false) &&
+         (!has(object.spec.autoPopulateDNSNames) || object.spec.autoPopulateDNSNames == false) &&
+         (!has(object.spec.fallback) || object.spec.fallback == false) &&
+         (!has(object.spec.federatesWith) || object.spec.federatesWith.size() == 0) &&
+         (!has(object.spec.dnsNameTemplates) || object.spec.dnsNameTemplates.size() == 0) &&
+         (!has(object.spec.jwtTtl) || object.spec.jwtTtl == '') &&
+         (!has(object.spec.hint) || object.spec.hint == ''))
+      message: ClusterSPIFFEID class, TTL or namespace/pod selector scope drifted.
+    - expression: >-
+        request.operation == 'DELETE' ||
+        ((object.metadata.name == 'kerosene-auth' &&
+          object.spec.spiffeIDTemplate == 'spiffe://staging.kerosene.internal/service/auth' &&
+          object.spec.podSelector.matchLabels['kerosene.io/spiffe-role'] == 'auth' &&
+          object.spec.workloadSelectorTemplates == [
+            'k8s:ns:{{ .PodMeta.Namespace }}', 'k8s:sa:server', 'k8s:container-name:server']) ||
+         (object.metadata.name == 'kerosene-kfe' &&
+          object.spec.spiffeIDTemplate == 'spiffe://staging.kerosene.internal/service/kfe' &&
+          object.spec.podSelector.matchLabels['kerosene.io/spiffe-role'] == 'kfe' &&
+          object.spec.workloadSelectorTemplates == [
+            'k8s:ns:{{ .PodMeta.Namespace }}', 'k8s:sa:kfe-service', 'k8s:container-name:kfe-service']) ||
+         (object.metadata.name == 'kerosene-vault' &&
+          object.spec.spiffeIDTemplate == 'spiffe://staging.kerosene.internal/service/vault/node/{{ index .PodMeta.Labels "vault.kerosene.io/node-id" }}' &&
+          object.spec.podSelector.matchLabels['kerosene.io/spiffe-role'] == 'vault' &&
+          object.spec.workloadSelectorTemplates == [
+            'k8s:ns:{{ .PodMeta.Namespace }}', 'k8s:sa:vault', 'k8s:container-name:vault']) ||
+         (object.metadata.name == 'kerosene-node' &&
+          object.spec.spiffeIDTemplate == 'spiffe://staging.kerosene.internal/service/node/plane/{{ index .PodMeta.Labels "kerosene.io/discovery-plane" }}/instance/{{ .PodMeta.Name }}' &&
+          object.spec.podSelector.matchLabels['kerosene.io/spiffe-role'] == 'node' &&
+          object.spec.workloadSelectorTemplates == [
+            'k8s:ns:{{ .PodMeta.Namespace }}', 'k8s:sa:kerosene-node', 'k8s:container-name:kerosene-node']))
+      message: ClusterSPIFFEID identity template or workload selectors do not match the reviewed registration.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kerosene-spiffe-registrations
+spec:
+  policyName: kerosene-spiffe-registrations
+  validationActions: [Deny, Audit]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kerosene-spiffe-namespaces
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Equivalent
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["namespaces"]
+        scope: Cluster
+  matchConditions:
+    - name: kerosene-identity-namespace
+      expression: >-
+        (request.operation != 'DELETE' &&
+         (object.metadata.name in ['kerosene-staging', 'kerosene-staging-vault'] ||
+          (has(object.metadata.labels) &&
+           (('kerosene.io/spire-trust-domain' in object.metadata.labels) ||
+            ('kerosene.io/workload-identity-boundary' in object.metadata.labels))))) ||
+        (request.operation != 'CREATE' && has(oldObject.metadata.labels) &&
+          (('kerosene.io/spire-trust-domain' in oldObject.metadata.labels) ||
+           ('kerosene.io/workload-identity-boundary' in oldObject.metadata.labels)))
+  validations:
+    - expression: >-
+        request.operation == 'DELETE' ||
+        (object.metadata.name in ['kerosene-staging', 'kerosene-staging-vault'] &&
+         has(object.metadata.labels) &&
+         'kerosene.io/spire-trust-domain' in object.metadata.labels &&
+         object.metadata.labels['kerosene.io/spire-trust-domain'] == 'staging.kerosene.internal' &&
+         'kerosene.io/workload-identity-boundary' in object.metadata.labels &&
+         object.metadata.labels['kerosene.io/workload-identity-boundary'] == 'enforced')
+      message: Only the reviewed Kerosene namespaces may join the SPIRE trust domain and they must remain admission protected.
+    - expression: >-
+        request.userInfo.username == 'system:serviceaccount:kerosene-gitops:kerosene-deployer'
+      message: SPIRE trust-domain namespace labels are managed only by the Kerosene GitOps identity.
+    - expression: >-
+        request.operation != 'UPDATE' ||
+        [
+          'kerosene.io/approved-auth-image',
+          'kerosene.io/approved-kfe-image',
+          'kerosene.io/approved-vault-image',
+          'kerosene.io/approved-node-image',
+          'kerosene.io/approved-tor-image'
+        ].all(key,
+          !has(oldObject.metadata.annotations) || !(key in oldObject.metadata.annotations) ||
+          (has(object.metadata.annotations) && key in object.metadata.annotations &&
+           object.metadata.annotations[key] == oldObject.metadata.annotations[key]))
+      message: Approved SPIFFE workload image repositories are immutable after first assignment.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kerosene-spiffe-namespaces
+spec:
+  policyName: kerosene-spiffe-namespaces
+  validationActions: [Deny, Audit]
