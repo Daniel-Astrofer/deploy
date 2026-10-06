@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""Pinned, fail-closed whole-Cell acceptance verifier."""
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+
+COMPONENTS = {"admin", "bitcoin", "core", "kfe", "lnd", "node", "postgres", "redis", "tor", "vault", "web-page"}
+SCENARIOS = {"releaseObserved", "planReviewed", "maintenanceDrained", "rolloutCompleted",
+             "interruptionRecovered", "restoreQualified", "nodeQuorumReady", "vaultQuorumReady",
+             "operatorResumeGuarded"}
+CONTAINER_COMPONENT = {
+    "bitcoind": "bitcoin", "server": "core", "kfe-service": "kfe", "lnd": "lnd",
+    "kerosene-node": "node", "postgres": "postgres", "redis": "redis", "tor": "tor",
+    "vault": "vault", "web-page": "web-page",
+}
+DIGEST = re.compile(r"sha256:[0-9a-f]{64}$")
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+
+
+def evidence(value):
+    return {"passed": True, "evidenceDigest": "sha256:" + hashlib.sha256(canonical(value)).hexdigest()}
+
+
+def read_json(path, label, limit=4 * 1024 * 1024):
+    info = path.lstat()
+    if (path.is_symlink() or not stat.S_ISREG(info.st_mode) or info.st_size > limit or
+            info.st_uid != os.getuid() or info.st_mode & 0o077):
+        raise RuntimeError(label + " is not a bounded owner-only regular file")
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key")
+            result[key] = value
+        return result
+
+    return json.loads(path.read_bytes(), object_pairs_hook=unique,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+
+
+def require_private_dir(path, label):
+    info = path.lstat()
+    if path.is_symlink() or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise RuntimeError(label + " must be an owner-only directory and not a symlink")
+
+
+def run(command, timeout=120):
+    result = subprocess.run(command, capture_output=True, timeout=timeout)
+    if result.returncode:
+        detail = result.stderr.decode(errors="replace")[-1000:]
+        raise RuntimeError("command failed: " + " ".join(command) + ("; " + detail if detail else ""))
+    return result.stdout
+
+
+def kubectl_prefix(args):
+    if not Path(args.kubeconfig).is_absolute():
+        raise RuntimeError("kubeconfig must be absolute")
+    return ["kubectl", "--kubeconfig", args.kubeconfig, "--context", args.context, "--request-timeout=30s"]
+
+
+def strict_json(raw):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate Kubernetes JSON field")
+            result[key] = value
+        return result
+    return json.loads(raw, object_pairs_hook=unique,
+                      parse_constant=lambda value: (_ for _ in ()).throw(ValueError(value)))
+
+
+def kube_json(prefix, arguments):
+    return strict_json(run(prefix + arguments))
+
+
+def selector_for(item):
+    selector = item.get("spec", {}).get("selector", {})
+    labels = selector.get("matchLabels")
+    if not isinstance(labels, dict) or not labels or selector.get("matchExpressions"):
+        raise RuntimeError("workload requires an exact matchLabels selector")
+    for key, value in labels.items():
+        if (not isinstance(key, str) or not isinstance(value, str) or not key or not value or
+                any(char in key + value for char in ",=\x00\r\n")):
+            raise RuntimeError("workload selector contains an unsafe label")
+    return ",".join(key + "=" + labels[key] for key in sorted(labels))
+
+
+def workload_ready(item):
+    metadata, spec, status = item.get("metadata", {}), item.get("spec", {}), item.get("status", {})
+    desired = spec.get("replicas", 1)
+    if (not isinstance(desired, int) or desired < 1 or status.get("observedGeneration") != metadata.get("generation") or
+            status.get("readyReplicas", 0) != desired):
+        return False
+    if item.get("kind") == "Deployment":
+        return status.get("updatedReplicas", 0) == desired and status.get("availableReplicas", 0) == desired
+    if item.get("kind") == "StatefulSet":
+        return (status.get("updatedReplicas", 0) == desired and
+                status.get("currentRevision") == status.get("updateRevision") and
+                isinstance(status.get("currentRevision"), str))
+    return False
+
+
+def normalize_runtime(records):
+    if not isinstance(records, list):
+        raise RuntimeError("rollout runtime evidence is invalid")
+    normalized = []
+    for record in records:
+        if not isinstance(record, dict) or set(record) != {"workloadUid", "revision", "podUid", "images"}:
+            raise RuntimeError("rollout runtime evidence fields differ")
+        images = record["images"]
+        if not isinstance(images, list) or any(not isinstance(image, dict) or set(image) != {"name", "imageID"} for image in images):
+            raise RuntimeError("rollout image evidence is invalid")
+        normalized.append({**record, "images": sorted(images, key=lambda image: image["name"])})
+    return sorted(normalized, key=lambda record: record["podUid"])
+
+
+def ready_workloads(prefix):
+    observed = {name: [] for name in COMPONENTS - {"admin"}}
+    vault_workloads = []
+    for namespace in ("kerosene-staging", "kerosene-staging-vault"):
+        resources = kube_json(prefix, ["-n", namespace, "get", "deployments,statefulsets", "-o", "json"])
+        for item in resources.get("items", []):
+            if not workload_ready(item):
+                raise RuntimeError("workload is not fully ready and updated")
+            metadata = item.get("metadata", {})
+            identity = [namespace, item.get("kind"), metadata.get("name"), metadata.get("uid")]
+            names = {container.get("name") for container in item.get("spec", {}).get("template", {}).get("spec", {}).get("containers", [])}
+            mapped = {CONTAINER_COMPONENT[name] for name in names if name in CONTAINER_COMPONENT}
+            selector = selector_for(item)
+            pod_list = kube_json(prefix, ["-n", namespace, "get", "pods", "-l", selector, "-o", "json"])
+            pod_records = []
+            for pod in pod_list.get("items", []):
+                conditions = {entry.get("type"): entry.get("status") for entry in pod.get("status", {}).get("conditions", [])}
+                statuses = (pod.get("status", {}).get("containerStatuses", []) +
+                            pod.get("status", {}).get("initContainerStatuses", []))
+                if (pod.get("status", {}).get("phase") != "Running" or conditions.get("Ready") != "True" or
+                        not statuses or any(not entry.get("imageID") for entry in statuses)):
+                    raise RuntimeError("workload has a pod without complete runtime identity")
+                revision = (metadata.get("annotations", {}).get("deployment.kubernetes.io/revision")
+                            if item.get("kind") == "Deployment" else item.get("status", {}).get("updateRevision"))
+                if not isinstance(revision, str) or not revision:
+                    raise RuntimeError("workload lacks a current rollout revision")
+                pod_records.append({"workloadUid": metadata.get("uid"), "revision": revision,
+                                    "podUid": pod.get("metadata", {}).get("uid"),
+                                    "images": sorted(({"name": entry["name"], "imageID": entry["imageID"]}
+                                                      for entry in statuses), key=lambda entry: entry["name"])})
+                for component, container_name in (("node", "kerosene-node"), ("vault", "vault")):
+                    if container_name in names:
+                        run(prefix + ["-n", namespace, "exec", pod["metadata"]["name"], "-c", container_name,
+                                      "--", "/usr/local/bin/kerosene-" + component, "--health-probe"], timeout=30)
+            if len(pod_records) != item.get("spec", {}).get("replicas", 1):
+                raise RuntimeError("workload pod inventory differs from desired replicas")
+            record = {"identity": identity, "runtime": normalize_runtime(pod_records)}
+            for component in mapped:
+                observed[component].append(record)
+            if "vault" in mapped:
+                vault_workloads.append({"namespace": namespace, "kind": item["kind"], "name": metadata["name"],
+                                        "uid": metadata["uid"], "selector": selector})
+    missing = sorted(name for name, records in observed.items() if not records)
+    if missing:
+        raise RuntimeError("live Cell lacks components: " + ", ".join(missing))
+    return observed, vault_workloads
+
+
+def pvc_uids(prefix, workload):
+    pods = kube_json(prefix, ["-n", workload["namespace"], "get", "pods", "-l", workload["selector"], "-o", "json"])
+    claims = {volume.get("persistentVolumeClaim", {}).get("claimName")
+              for item in pods.get("items", []) for volume in item.get("spec", {}).get("volumes", [])}
+    claims.discard(None)
+    return {claim: kube_json(prefix, ["-n", workload["namespace"], "get", "pvc", claim, "-o", "json"])["metadata"]["uid"]
+            for claim in claims}
+
+
+def interrupt_vault(prefix, vault_workloads):
+    if len(vault_workloads) < 3:
+        raise RuntimeError("acceptance requires three independent Vault workloads")
+    quorum_members = [item for item in vault_workloads if re.fullmatch(r"vault-[1-9][0-9]*", item["name"])]
+    candidates = quorum_members if len(quorum_members) >= 3 else vault_workloads
+    workload = sorted(candidates, key=lambda item: (item["namespace"], item["name"]))[-1]
+    before = pvc_uids(prefix, workload)
+    if not before:
+        raise RuntimeError("selected Vault has no persistent identity")
+    pods = kube_json(prefix, ["-n", workload["namespace"], "get", "pods", "-l", workload["selector"], "-o", "json"])["items"]
+    if len(pods) != 1:
+        raise RuntimeError("selected Vault does not have exactly one pod")
+    run(prefix + ["-n", workload["namespace"], "delete", "pod", pods[0]["metadata"]["name"],
+                  "--wait=true", "--timeout=120s"], 150)
+    resource = ("deployment/" if workload["kind"] == "Deployment" else "statefulset/") + workload["name"]
+    run(prefix + ["-n", workload["namespace"], "rollout", "status", resource, "--timeout=240s"], 270)
+    after = pvc_uids(prefix, workload)
+    if after != before:
+        raise RuntimeError("Vault persistent identity changed during interruption")
+    return {"member": [workload["namespace"], workload["kind"], workload["name"], workload["uid"]],
+            "persistentVolumeUids": after}
+
+
+def one_event(events, phase):
+    matches = [event for event in events if event.get("phase") == phase]
+    if len(matches) != 1 or not isinstance(matches[0].get("evidence"), dict):
+        raise RuntimeError("required lifecycle checkpoint is missing or ambiguous: " + phase)
+    return matches[0]["evidence"]
+
+
+def verify(args):
+    if not DIGEST.fullmatch(args.release_digest) or args.sequence < 0:
+        raise RuntimeError("invalid acceptance invocation")
+    supplied_root = Path(args.cell_dir)
+    if not supplied_root.is_absolute() or supplied_root.is_symlink():
+        raise RuntimeError("Cell directory must be absolute and not a symlink")
+    root = supplied_root.resolve()
+    require_private_dir(root, "Cell directory")
+    require_private_dir(root / "state", "Cell state directory")
+    config = read_json(root / "cell.json", "Cell configuration")
+    state = read_json(root / "state/update-state.json", "Cell update journal")
+    if (config.get("cellId"), config.get("autoActivateVaultSigners")) != (args.cell_id, False):
+        raise RuntimeError("Cell identity or signer policy differs")
+    expected_state = (args.release_digest, args.sequence, args.change_id, args.operator_id, "verified")
+    actual_state = (state.get("updateId"), state.get("sequence"), state.get("changeId"), state.get("operatorId"), state.get("status"))
+    if actual_state != expected_state or state.get("manualRecoveryRequired"):
+        raise RuntimeError("update journal binding or status differs")
+    prefix = kubectl_prefix(args)
+    cluster = kube_json(prefix, ["get", "namespace", "kube-system", "-o", "json"])["metadata"]["uid"]
+    if cluster != args.cluster_uid:
+        raise RuntimeError("cluster UID differs")
+    components, vaults = ready_workloads(prefix)
+    events = state.get("events", [])
+    admin = one_event(events, "admin-installed")
+    if admin.get("cellId") != args.cell_id:
+        raise RuntimeError("Admin installation receipt has a different Cell identity")
+    plan = one_event(events, "release-plan-verified")
+    expected_plan = {"releaseLockCanonicalDigest": args.release_digest, "sequence": args.sequence,
+                     "changeId": args.change_id, "operatorId": args.operator_id}
+    if any(plan.get(key) != value for key, value in expected_plan.items()):
+        raise RuntimeError("release-plan checkpoint binding differs")
+    maintenance = [event for event in events if event.get("phase") in
+                   {"kfe-maintenance-verified", "initial-install-no-prior-traffic"}]
+    if len(maintenance) != 1 or maintenance[0].get("evidence", {}).get("changeId") != args.change_id:
+        raise RuntimeError("maintenance or initial-install checkpoint is missing or ambiguous")
+    stored = state.get("evidence", {})
+    if set(stored) != {"tuf", "bft", "vaultCompatibility", "bankObservers", "snapshot", "recovery"}:
+        raise RuntimeError("release observation evidence is incomplete")
+    if not stored["snapshot"].get("restoreTested") or not stored["recovery"].get("signaturesVerified"):
+        raise RuntimeError("signed restore and recovery evidence is absent")
+    phases = [event.get("phase") for event in events]
+    if "legacy-smokes-passed" not in phases or "operator-resume-performed" in phases:
+        raise RuntimeError("rollout journal or operator-resume guard differs")
+    ready_events = [event for event in events if isinstance(event.get("phase"), str) and event["phase"].startswith("ready:")]
+    ready = sorted(event["phase"] for event in ready_events)
+    journal = {}
+    for event in ready_events:
+        identity = tuple(event["phase"].removeprefix("ready:").split("/", 2))
+        if identity in journal:
+            raise RuntimeError("rollout journal contains an ambiguous workload checkpoint")
+        journal[identity] = normalize_runtime(event.get("evidence", {}).get("runtime"))
+    live_records = {tuple(record["identity"][:3]): record for records in components.values() for record in records}
+    if not live_records or set(live_records) != set(journal):
+        raise RuntimeError("rollout journal does not cover the exact live workload set")
+    for identity, record in live_records.items():
+        if journal[identity] != record["runtime"]:
+            raise RuntimeError("live workload runtime identity differs from rollout evidence")
+    interruption = interrupt_vault(prefix, vaults)
+    recovered, _ = ready_workloads(prefix)
+    component_checks = {name: evidence(records) for name, records in components.items()}
+    component_checks["admin"] = evidence(admin)
+    scenarios = {
+        "releaseObserved": evidence(stored), "planReviewed": evidence(plan),
+        "maintenanceDrained": evidence(maintenance[0]), "rolloutCompleted": evidence(ready),
+        "interruptionRecovered": evidence({"interruption": interruption, "components": recovered}),
+        "restoreQualified": evidence({"snapshot": stored["snapshot"], "recovery": stored["recovery"]}),
+        "nodeQuorumReady": evidence(recovered["node"]), "vaultQuorumReady": evidence(recovered["vault"]),
+        "operatorResumeGuarded": evidence({"autoActivateVaultSigners": False, "resumePerformed": False}),
+    }
+    if set(component_checks) != COMPONENTS or set(scenarios) != SCENARIOS:
+        raise RuntimeError("acceptance coverage differs")
+    return {"schema": "kerosene.cell-acceptance/v1", "cellId": args.cell_id, "clusterUid": args.cluster_uid,
+            "releaseLockCanonicalDigest": args.release_digest, "sequence": args.sequence,
+            "changeId": args.change_id, "operatorId": args.operator_id,
+            "observedAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+            "components": component_checks, "scenarios": scenarios, "financialReadinessVerified": True,
+            "autoActivateVaultSigners": False, "operatorResumeRequired": True, "operatorResumePerformed": False}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command", required=True)
+    command = sub.add_parser("verify")
+    for name in ("cell-dir", "cell-id", "cluster-uid", "kubeconfig", "context", "release-digest",
+                 "sequence", "change-id", "operator-id"):
+        command.add_argument("--" + name, required=True)
+    args = parser.parse_args()
+    if args.command != "verify" or not re.fullmatch(r"0|[1-9][0-9]*", args.sequence):
+        raise RuntimeError("invalid acceptance invocation")
+    args.sequence = int(args.sequence)
+    print(json.dumps(verify(args), sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (RuntimeError, OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
+        print("acceptance failed: " + str(error), file=sys.stderr)
+        raise SystemExit(78)

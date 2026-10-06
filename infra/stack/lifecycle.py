@@ -1100,6 +1100,14 @@ def execute(stack, artifact, summary, args, checkpoint):
                                  getattr(args, "recover_initial_install", False))
     postwrite_initial_recovery = bool(getattr(args, "_postwrite_initial_recovery", False))
     initial_install = fresh_install or prewrite_initial_recovery or postwrite_initial_recovery
+    if not args.dry_run:
+        checkpoint("release-plan-verified", {
+            "releaseLockCanonicalDigest": summary.get("_canonicalDigest", stack.canonical_digest(getattr(args, "_release", {}))),
+            "sequence": summary["sequence"],
+            "changeId": getattr(args, "change_id", None),
+            "operatorId": getattr(args, "operator_id", None),
+            "operation": getattr(args, "command", None),
+        })
     if initial_install:
         if fresh_install or prewrite_initial_recovery:
             verify_empty_installation(stack, kubectl)
@@ -1113,8 +1121,15 @@ def execute(stack, artifact, summary, args, checkpoint):
                 operation = "inspect-recovery" if prewrite_initial_recovery else "consume"
                 admission = consume_initial_admission(stack, config, summary, args, operation)
                 checkpoint("initial-admission-recovered" if operation == "inspect-recovery" else "initial-admission-consumed", admission)
+        if not args.dry_run:
+            checkpoint("initial-install-no-prior-traffic", {
+                "changeId": getattr(args, "change_id", None),
+                "operation": getattr(args, "command", None),
+            })
     else:
         verify_external_secrets(stack, kubectl, required_secret_references(stack, artifact))
+        if not args.dry_run:
+            checkpoint("kfe-maintenance-verified", verify_maintenance(stack, args))
     if not args.dry_run:
         receipt = admin_install.install(stack, args.cell_dir, config["cellId"], summary, artifact["admin"]["config"],
                                        stack.canonical_digest(args._release), run,
