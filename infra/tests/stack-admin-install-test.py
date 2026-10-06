@@ -415,8 +415,14 @@ class InstallationTest(unittest.TestCase):
         # Only exercise failure journaling: all authorization/external gates
         # are mocks, not valid evidence or a way to run the installed CLI.
         with ExitStack() as mocks:
-            for name in ["verify_deployment", "require_execution_capabilities", "verify_maintenance", "verify_recovery_plan"]:
+            for name in ["verify_deployment", "require_execution_capabilities", "verify_maintenance"]:
                 mocks.enter_context(patch.object(stack.lifecycle, name))
+            mocks.enter_context(patch.object(stack.lifecycle, "verify_recovery_plan", return_value={
+                "schema": "kerosene.tested-recovery-plan/v1",
+                "testEvidenceDigest": "sha256:" + "a" * 64,
+                "signaturesVerified": 2,
+                "testedAt": "2026-10-06T00:00:00Z",
+            }))
             mocks.enter_context(patch.object(stack, "verify_tuf_authorization", return_value={}))
             mocks.enter_context(patch.object(stack, "verify_consensus_authorization", return_value={}))
             mocks.enter_context(patch.object(stack, "verify_vault_compatibility_attestation", return_value={}))
@@ -430,6 +436,7 @@ class InstallationTest(unittest.TestCase):
         self.assertTrue(state["manualRecoveryRequired"])
         self.assertEqual(state["phase"], "failed")
         self.assertEqual(state["failure"], "Admin installation input validation failed")
+        self.assertEqual(state["evidence"]["recovery"]["signaturesVerified"], 2)
         self.assertFalse(self.target().exists())
 
     @unittest.skipUnless(os.environ.get("JCTL_ADMIN_INSTALL_TEST_DIST"), "explicit built Admin distribution required")

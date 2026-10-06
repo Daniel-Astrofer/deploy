@@ -2123,8 +2123,9 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
         if (not args.dry_run and args.command != "install" and not initial_recovery and
                 not postwrite_initial_recovery):
             lifecycle.verify_maintenance(sys.modules[__name__], args)
+        recovery_result = None
         if not args.dry_run:
-            lifecycle.verify_recovery_plan(sys.modules[__name__], release, summary, args)
+            recovery_result = lifecycle.verify_recovery_plan(sys.modules[__name__], release, summary, args)
         observer_result = verify_bank_observer_report(
             release,
             summary,
@@ -2161,6 +2162,7 @@ def apply_locked_release(release: dict[str, Any], summary: dict[str, Any], args:
             "vaultCompatibility": vault_result,
             "bankObservers": observer_result,
             "snapshot": snapshot_result,
+            "recovery": recovery_result,
         },
         "startedAt": dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
     }
