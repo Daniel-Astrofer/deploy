@@ -30,6 +30,20 @@ candidate. Independently install the governance and whole-Cell acceptance
 verifiers and approve their binary digests. Private keys, sessions and Kubernetes credentials stay outside
 the release archive and update journal.
 
+After creating the owner-only bootstrap directory and placing its public trust
+files there, the repository's reviewed controller sources can be installed with:
+
+```sh
+chmod 700 /protected/bootstrap-a
+infra/install-stack-controllers --bootstrap-dir /protected/bootstrap-a
+```
+
+The command builds the Go consensus verifier with `-mod=readonly -trimpath`,
+copies the whole-Cell verifier, refuses symlinks/shared permissions/existing
+targets, and prints both SHA-256 digests. Review and approve those digests through
+the independent release process before `kerosene-stack init`; the installer does
+not create trust anchors, signatures, credentials or release authority.
+
 ```sh
 chmod 700 /protected/bootstrap-a /protected/operation-a
 infra/kerosene-stack init --cell-dir /protected/cell-a \

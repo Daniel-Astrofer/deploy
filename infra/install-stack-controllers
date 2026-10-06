@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+usage() {
+  echo "Usage: infra/install-stack-controllers --bootstrap-dir ABSOLUTE_OWNER_ONLY_DIRECTORY" >&2
+}
+
+if [[ $# -ne 2 || "$1" != "--bootstrap-dir" || "$2" != /* ]]; then
+  usage
+  exit 64
+fi
+
+bootstrap_dir="$2"
+if [[ -L "$bootstrap_dir" || ! -d "$bootstrap_dir" ]]; then
+  echo "bootstrap directory must exist and must not be a symlink" >&2
+  exit 78
+fi
+
+tmp_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf -- "$tmp_dir"
+}
+trap cleanup EXIT
+
+(cd "$ROOT/infra/governance" && go build -mod=readonly -trimpath -o "$tmp_dir/kerosene-release-consensus" .)
+cp -- "$ROOT/infra/kerosene-cell-acceptance" "$tmp_dir/kerosene-cell-acceptance"
+chmod 0700 "$tmp_dir/kerosene-release-consensus" "$tmp_dir/kerosene-cell-acceptance"
+
+python3 - "$bootstrap_dir" "$tmp_dir/kerosene-release-consensus" "$tmp_dir/kerosene-cell-acceptance" <<'PY'
+import hashlib
+import os
+from pathlib import Path
+import shutil
+import stat
+import sys
+
+destination = Path(sys.argv[1])
+info = destination.lstat()
+if (destination.is_symlink() or not stat.S_ISDIR(info.st_mode) or
+        info.st_uid != os.getuid() or info.st_mode & 0o077):
+    raise SystemExit("bootstrap directory must be owner-only and owned by the current user")
+
+installed = []
+try:
+    for source_text in sys.argv[2:]:
+        source = Path(source_text)
+        target = destination / source.name
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o700)
+        try:
+            with source.open("rb") as reader, os.fdopen(descriptor, "wb", closefd=False) as writer:
+                shutil.copyfileobj(reader, writer, length=1024 * 1024)
+                writer.flush()
+                os.fsync(writer.fileno())
+        finally:
+            os.close(descriptor)
+        installed.append(target)
+    directory_fd = os.open(destination, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+except BaseException:
+    for target in installed:
+        target.unlink(missing_ok=True)
+    raise
+
+for target in installed:
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    print(f"{digest}  {target}")
+PY
