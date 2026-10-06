@@ -395,7 +395,20 @@ complete Cell execution.
 Real `--apply` is explicitly blocked before mutation until all of these
 implementation capabilities exist and their integration tests pass:
 
-1. Live independent Vault rebuild/SBOM/provenance qualification for the gate now integrated into apply.
+1. Live independent Vault rebuild/SBOM/provenance qualification is complete.
+   On 2026-10-06, `infra/tests/stack-vault-rebuild-provenance-test.py`
+   created two isolated contexts from Vault commit
+   `87a91c122b495d4f4c205d76d65d538804c3f68d`, rebuilt both without layer
+   reuse using digest-pinned Rust and Debian bases, and verified the source,
+   Git tree and Dockerfile bindings in each OCI image. Both builds produced
+   executable digest
+   `sha256:70f60cfed984acc0df5e1fa4aa5d281da2b7189a29ea65f044cafdcfea498db0`
+   and the same deterministic 89-package SPDX inventory digest
+   `sha256:eb7f2747533e92598c270fda23bc915a2c491a71c27a40ff2a1fdb416dde1a23`.
+   The evidence explicitly sets `releaseAuthorization=false`; it qualifies the
+   rebuild mechanism and provenance gate without activating a signer or
+   approving a particular deployment. This removed
+   `vault-live-rebuild-provenance-not-qualified`.
 2. Live qualification of the integrated Node/Vault replica-by-replica protocol
    is complete.
    The controller now requires one replica per workload, distinct approved

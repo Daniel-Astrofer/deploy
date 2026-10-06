@@ -244,8 +244,15 @@ refusal before restoration. On 2026-10-06 a subsequent integrated qualification
 ran the real two-plane Node protocol and three-member Vault protocol together
 over Tor and mTLS, completed distributed-wire DKG, retained 2-of-3 availability
 while one Vault member was absent, and recovered that member with its onion
-identity unchanged. The combined Node/Vault protocol blocker was removed;
-complete-Cell acceptance and independent Vault rebuild/provenance remain blocked.
+identity unchanged. The combined Node/Vault protocol blocker was removed.
+
+On 2026-10-06, two cache-independent OCI builds from the exact committed Vault
+tree also produced an identical Vault executable and identical deterministic
+SPDX package set while binding source commit, Git tree and canonical Dockerfile
+digest into each image. This qualified the independent Vault rebuild/SBOM/
+provenance mechanism and removed its execution blocker without treating the
+qualification as release authorization. Complete-Cell acceptance remains
+blocked.
 
 ## Remaining work for the complete service
 
@@ -275,9 +282,9 @@ complete-Cell acceptance and independent Vault rebuild/provenance remain blocked
    installation and ordered migrations with tested data recovery. The integrated
    replica-by-replica Node/Vault protocol is now qualified on the Kind cluster
    with independent persistent identities and quorum-preserving interruption
-   and recovery. Independent Vault rebuild/provenance and the separate
-   complete-Cell acceptance blocker still prevent apply and prevent legacy
-   smokes being mistaken for whole-service qualification.
+   and recovery. The separate complete-Cell acceptance blocker still prevents
+   apply and prevents legacy smokes being mistaken for whole-service
+   qualification.
 6. **Real restore qualification:** resolve retained WFFC pilot binding failure,
    obtain authorized lab capacity, run the actual ten-volume restore CLI and
    qualify failure/recovery matrices including genuine LND state. No live final

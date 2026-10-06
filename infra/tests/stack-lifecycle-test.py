@@ -27,6 +27,9 @@ class DeploymentTest(unittest.TestCase):
     def test_integrated_node_vault_protocol_is_qualified(self):
         self.assertNotIn("node-vault-live-protocol-quorum-not-qualified", lifecycle.EXECUTION_BLOCKERS)
 
+    def test_independent_vault_rebuild_provenance_is_qualified(self):
+        self.assertNotIn("vault-live-rebuild-provenance-not-qualified", lifecycle.EXECUTION_BLOCKERS)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)

@@ -35,7 +35,6 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 # Remove a blocker only with the corresponding implementation and integration
 # test; signed evidence cannot implement an absent runtime safety mechanism.
 EXECUTION_BLOCKERS = (
-    "vault-live-rebuild-provenance-not-qualified",
     "complete-cell-live-acceptance-not-qualified",
 )
 
