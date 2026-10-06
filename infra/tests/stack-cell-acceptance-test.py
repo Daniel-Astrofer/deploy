@@ -2,6 +2,7 @@
 """Unit tests for the pinned whole-Cell acceptance verifier."""
 import importlib.machinery
 import importlib.util
+import copy
 import json
 import os
 from pathlib import Path
@@ -56,7 +57,7 @@ class AcceptanceTest(unittest.TestCase):
         vaults.append({"namespace": "kerosene-staging-vault", "kind": "Deployment", "name": "vault",
                        "uid": "singleton", "selector": "instance=vault"})
         with patch.object(acceptance, "pvc_uids", return_value={"data": "pvc-uid"}), \
-             patch.object(acceptance, "kube_json", return_value={"items": [{"metadata": {"name": "vault-3-pod"}}]}), \
+             patch.object(acceptance, "kube_json", return_value={"items": [{"metadata": {"name": "vault-3-pod", "uid": "old-pod"}}]}), \
              patch.object(acceptance, "run") as run:
             result = acceptance.interrupt_vault(["kubectl"], vaults)
         self.assertEqual(result["member"][2], "vault-3")
@@ -104,14 +105,18 @@ class AcceptanceTest(unittest.TestCase):
                           for name in acceptance.COMPONENTS - {"admin"}}
             components["vault"] = [{"identity": ["kerosene-staging-vault", "Deployment", "vault", "uid"],
                                     "runtime": runtime}]
+            recovered = copy.deepcopy(components)
+            recovered["vault"][0]["runtime"][0]["podUid"] = "recovered-pod"
             vaults = [{"namespace": "kerosene-staging-vault", "kind": "Deployment", "name": f"vault-{index}",
                        "uid": f"uid-{index}", "selector": f"instance=vault-{index}"} for index in range(3)]
             args = SimpleNamespace(cell_dir=directory, cell_id="cell-a", cluster_uid="cluster-a",
                                    kubeconfig="/private/kubeconfig", context="context-a", release_digest=digest,
                                    sequence=7, change_id="change-a", operator_id="operator-a")
             with patch.object(acceptance, "kube_json", return_value={"metadata": {"uid": "cluster-a"}}), \
-                 patch.object(acceptance, "ready_workloads", side_effect=[(components, vaults), (components, vaults)]), \
-                 patch.object(acceptance, "interrupt_vault", return_value={"member": ["vault-3"]}):
+                 patch.object(acceptance, "ready_workloads", side_effect=[(components, vaults), (recovered, vaults)]), \
+                 patch.object(acceptance, "interrupt_vault", return_value={
+                     "member": ["kerosene-staging-vault", "Deployment", "vault", "uid"],
+                     "deletedPodUid": "pod"}):
                 report = acceptance.verify(args)
             self.assertEqual(set(report["components"]), acceptance.COMPONENTS)
             self.assertEqual(set(report["scenarios"]), acceptance.SCENARIOS)

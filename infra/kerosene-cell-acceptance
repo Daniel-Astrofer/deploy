@@ -126,6 +126,19 @@ def normalize_runtime(records):
     return sorted(normalized, key=lambda record: record["podUid"])
 
 
+def stable_runtime(components):
+    result = {}
+    for records in components.values():
+        for record in records:
+            identity = tuple(record["identity"])
+            stable = sorted((entry["revision"], canonical(entry["images"]).decode())
+                            for entry in record["runtime"])
+            previous = result.setdefault(identity, stable)
+            if previous != stable:
+                raise RuntimeError("component views disagree on workload runtime identity")
+    return result
+
+
 def ready_workloads(prefix):
     observed = {name: [] for name in COMPONENTS - {"admin"}}
     vault_workloads = []
@@ -203,6 +216,7 @@ def interrupt_vault(prefix, vault_workloads):
     if after != before:
         raise RuntimeError("Vault persistent identity changed during interruption")
     return {"member": [workload["namespace"], workload["kind"], workload["name"], workload["uid"]],
+            "deletedPodUid": pods[0]["metadata"]["uid"],
             "persistentVolumeUids": after}
 
 
@@ -272,6 +286,12 @@ def verify(args):
             raise RuntimeError("live workload runtime identity differs from rollout evidence")
     interruption = interrupt_vault(prefix, vaults)
     recovered, _ = ready_workloads(prefix)
+    if stable_runtime(recovered) != stable_runtime(components):
+        raise RuntimeError("workload revision or image identity changed during Vault interruption")
+    interrupted = next((record for records in recovered.values() for record in records
+                        if record["identity"] == interruption["member"]), None)
+    if interrupted is None or interruption["deletedPodUid"] in {entry["podUid"] for entry in interrupted["runtime"]}:
+        raise RuntimeError("selected Vault pod was not replaced during interruption")
     component_checks = {name: evidence(records) for name, records in components.items()}
     component_checks["admin"] = evidence(admin)
     scenarios = {
