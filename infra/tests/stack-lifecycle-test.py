@@ -24,6 +24,9 @@ lifecycle = stack.lifecycle
 
 
 class DeploymentTest(unittest.TestCase):
+    def test_integrated_node_vault_protocol_is_qualified(self):
+        self.assertNotIn("node-vault-live-protocol-quorum-not-qualified", lifecycle.EXECUTION_BLOCKERS)
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
@@ -66,7 +69,8 @@ class DeploymentTest(unittest.TestCase):
                               "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
                               "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
                               "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
-                              "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
+                              "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
+                              "KEROSENE_CHALLENGE_TTL_MS": "300000"}
                     container["env"] = [{"name": key, "value": value} for key, value in values.items()]
                     container["env"].extend([
                         {"name": "KEROSENE_GENESIS_ENDPOINTS", "valueFrom": {"configMapKeyRef": {"name": "node-" + plane + "-bootstrap", "key": "genesis-endpoints"}}},
@@ -85,6 +89,7 @@ class DeploymentTest(unittest.TestCase):
                     container["env"].extend([
                         {"name": "VAULT_SEED_PEERS", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "seed-peers"}}},
                         {"name": "VAULT_AUDIT_PUBKEY_ALLOWLIST", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "audit-pubkeys"}}},
+                        {"name": "VAULT_TLS_PEER_SPIFFE_ID", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "tls-peer-spiffe-ids"}}},
                         {"name": "VAULT_ATTESTATION_ROOT", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "attestation-root"}}},
                         {"name": "VAULT_DATA_PASSPHRASE", "valueFrom": {"secretKeyRef": {"name": instance + "-runtime", "key": "data-passphrase"}}},
                         {"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "vault-probe", "key": "url"}}}])

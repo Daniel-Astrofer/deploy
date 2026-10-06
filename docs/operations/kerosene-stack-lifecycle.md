@@ -397,15 +397,14 @@ Real `--apply` is explicitly blocked before mutation until all of these
 implementation capabilities exist and their integration tests pass:
 
 1. Live independent Vault rebuild/SBOM/provenance qualification for the gate now integrated into apply.
-2. Live qualification of the integrated Node/Vault replica-by-replica protocol.
+2. Live qualification of the integrated Node/Vault replica-by-replica protocol
+   is complete.
    The controller now requires one replica per workload, distinct approved
    persistent identities, all peers ready before and after every mutation, the
    Vault release threshold, and UID/resourceVersion update preconditions. The
    opt-in Kind qualification exercises real Deployments, PVC identities,
    controller revisions, one-at-a-time sequencing, unavailable-member refusal
-   and recovery. `node-vault-live-protocol-quorum-not-qualified` remains until
-   the same run uses the real two-plane Node and three-member Vault protocols,
-   not readiness-only qualification containers.
+   and recovery.
 
    On 2026-10-04, `infra/tests/stack-vault-protocol-kind-test.py` additionally
    qualified the actual production Vault binary in three fresh Deployments with
@@ -414,18 +413,28 @@ implementation capabilities exist and their integration tests pass:
    member reported `local_ready=true`, `financial_ready=true`,
    `configured_members=3` and `required_threshold=2`; a distributed-wire DKG
    then completed with each round authenticated as its originating Vault. This
-   closes the Vault protocol portion only. It neither qualifies the two Node
-   planes nor removes the combined blocker.
+   closed the standalone Vault protocol portion.
 
    The same date, `infra/tests/stack-node-protocol-kind-test.py` qualified the
    production Node binary in six fresh Deployments: three Bank and three Vault
    members, each with a distinct PVC-backed identity, onion and mTLS leaf. Both
    planes accepted independent 2-of-3 signed membership manifests and
    threshold-signed state snapshots. All six reported member, quorum and
-   financial readiness; the Vault plane rejected a Bank manifest. This closes
-   the standalone two-plane Node protocol portion. The combined blocker remains
-   until one rollout qualification preserves both Node planes and the Vault
-   signing quorum together through interruption and recovery.
+   financial readiness; the Vault plane rejected a Bank manifest. This closed
+   the standalone two-plane Node protocol portion.
+
+   On 2026-10-06 the same qualification was extended to run both production
+   binaries together. Six Nodes retained distinct PVC-backed onion and
+   cryptographic identities while all three Vault-plane pods also ran the real
+   Vault binary. Operational certificate names were kept separate from the full
+   Node member hashes authenticated in SPIFFE URI SANs. The run proved both
+   2-of-3 Node planes, all three financially ready Vaults, cross-plane manifest
+   rejection, authenticated distributed-wire DKG, continued Bank availability
+   and Vault quorum after removing one Vault member, and recovery with its onion
+   identity unchanged. The emitted
+   `kerosene.node-vault-protocol-kind-qualification/v1` evidence therefore
+   qualified the integrated protocol and removed
+   `node-vault-live-protocol-quorum-not-qualified`.
 3. Live qualification of the integrated complete-Cell verifier contract. Its
    bootstrap-pinned executable must bind the Cell, cluster UID, release,
    sequence, change and operator; prove every release component plus rollout,

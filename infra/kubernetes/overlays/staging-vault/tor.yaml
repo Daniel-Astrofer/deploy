@@ -98,6 +98,8 @@ spec:
               value: /onion/hostname
             - name: KEROSENE_NODE_ONION_PORT
               value: "8800"
+            - name: KEROSENE_CHALLENGE_TTL_MS
+              value: "300000"
             - name: KEROSENE_IDENTITY_KEY_PATH
               value: /etc/kerosene/node-identity/identity.key
             - name: KEROSENE_PEER_STORE

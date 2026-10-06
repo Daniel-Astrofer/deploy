@@ -36,7 +36,6 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 # test; signed evidence cannot implement an absent runtime safety mechanism.
 EXECUTION_BLOCKERS = (
     "vault-live-rebuild-provenance-not-qualified",
-    "node-vault-live-protocol-quorum-not-qualified",
     "complete-cell-live-acceptance-not-qualified",
 )
 
@@ -215,7 +214,7 @@ def verify_vault_runtime_contract(stack, artifact, summary):
                 "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe", "BITCOIN_NETWORK": "testnet3",
                 "VAULT_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
                 "VAULT_SHARE_STORE": "aead_disk", "VAULT_DATA_DIR": "/var/lib/kerosene-vault"}
-    protected = {"VAULT_SEED_PEERS", "VAULT_AUDIT_PUBKEY_ALLOWLIST",
+    protected = {"VAULT_SEED_PEERS", "VAULT_AUDIT_PUBKEY_ALLOWLIST", "VAULT_TLS_PEER_SPIFFE_ID",
                  "VAULT_ATTESTATION_ROOT", "VAULT_DATA_PASSPHRASE"}
     observed = 0
     try:
@@ -278,7 +277,8 @@ def verify_node_runtime_contract(stack, artifact, summary):
               "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
               "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
               "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
-              "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050"}
+              "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
+              "KEROSENE_CHALLENGE_TTL_MS": "300000"}
     references = {"KEROSENE_GENESIS_ENDPOINTS", "KEROSENE_DISCOVERY_MIRRORS"}
     resources = {(resource.get("metadata", {}).get("namespace"), resource.get("kind"),
                   resource.get("metadata", {}).get("name")): resource

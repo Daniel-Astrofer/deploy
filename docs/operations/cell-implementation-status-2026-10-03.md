@@ -240,8 +240,12 @@ The critical rollout executor also passed an opt-in live Kind qualification:
 one Node and three Vault Deployment identities were rolled one at a time over
 real bound PVCs; all PVC UIDs remained stable; each complete group recovered
 before the next mutation; and scaling one Vault unavailable caused a fail-closed
-refusal before restoration. This qualifies Kubernetes orchestration mechanics,
-not real Node/Vault cryptographic quorum, which remains an explicit blocker.
+refusal before restoration. On 2026-10-06 a subsequent integrated qualification
+ran the real two-plane Node protocol and three-member Vault protocol together
+over Tor and mTLS, completed distributed-wire DKG, retained 2-of-3 availability
+while one Vault member was absent, and recovered that member with its onion
+identity unchanged. The combined Node/Vault protocol blocker was removed;
+complete-Cell acceptance and independent Vault rebuild/provenance remain blocked.
 
 ## Remaining work for the complete service
 
@@ -267,15 +271,13 @@ not real Node/Vault cryptographic quorum, which remains an explicit blocker.
    provenance, independently authorized signatures and durable Vault/mirror fetching
    with Byzantine-safe availability. The prior offline publisher is not a build or
    distribution/reconciliation service.
-5. **Installation/update execution:** qualify the integrated offline Admin OCI installation, ordered migrations
-   with tested data recovery and the integrated replica-by-replica Node/Vault
-   protocol on a real cluster. It validates independent persistent identities,
-   requires the complete group ready around each mutation and applies one
-   controller with UID/resourceVersion preconditions before continuing. The
-   execution capability blockers remain present (Admin now reports
-   integrated-but-not-qualified); do not remove them as flags. A separate
-   complete-Cell acceptance blocker also prevents legacy smokes being mistaken
-   for whole-service qualification.
+5. **Installation/update execution:** qualify the integrated offline Admin OCI
+   installation and ordered migrations with tested data recovery. The integrated
+   replica-by-replica Node/Vault protocol is now qualified on the Kind cluster
+   with independent persistent identities and quorum-preserving interruption
+   and recovery. Independent Vault rebuild/provenance and the separate
+   complete-Cell acceptance blocker still prevent apply and prevent legacy
+   smokes being mistaken for whole-service qualification.
 6. **Real restore qualification:** resolve retained WFFC pilot binding failure,
    obtain authorized lab capacity, run the actual ten-volume restore CLI and
    qualify failure/recovery matrices including genuine LND state. No live final

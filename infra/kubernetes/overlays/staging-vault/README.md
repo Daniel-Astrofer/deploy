@@ -7,7 +7,9 @@ signing remains unavailable until the configured constitution reaches quorum.
 Required secrets are provisioned independently:
 
 - `vault.kerosene.io/node-id` pod label: public, non-secret Vault node ID
-- `vault-secrets`: `data-passphrase`, `attestation-root`
+- `vault-secrets`: `data-passphrase`, `attestation-root`, and the explicit
+  comma-separated `tls-peer-spiffe-ids` allowlist matching the Vault peer
+  certificate URI SANs
 - `vault-mtls-certs`: `ca.crt`, `vault-server.crt`,
   `vault-server.key`, `vault-client.crt`, `vault-client.key`
 - `kerosene-node-genesis`: `genesis-trust-bundle.json`
