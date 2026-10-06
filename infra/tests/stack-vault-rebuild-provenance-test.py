@@ -66,6 +66,56 @@ def normalized_spdx(document):
     return sorted(packages)
 
 
+def build_spdx(tag, commit, archive_digest, binary_digest, epoch):
+    query = "${binary:Package}\t${Version}\t${Architecture}\n"
+    raw = run([
+        "docker", "run", "--rm", "--entrypoint", "dpkg-query", tag,
+        "-W", "-f=" + query,
+    ], timeout=60).stdout.decode()
+    records = []
+    for line in raw.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 3 or not all(fields):
+            raise RuntimeError("runtime package inventory is malformed")
+        records.append((fields[0], fields[1], fields[2]))
+    if not records:
+        raise RuntimeError("runtime package inventory is empty")
+    packages = [{
+        "SPDXID": "SPDXRef-Package-" + hashlib.sha256(
+            (name + "\0" + version + "\0" + architecture).encode()).hexdigest()[:24],
+        "name": name,
+        "versionInfo": version,
+        "supplier": "Organization: Debian",
+        "downloadLocation": "NOASSERTION",
+        "filesAnalyzed": False,
+        "externalRefs": [{
+            "referenceCategory": "PACKAGE-MANAGER",
+            "referenceType": "purl",
+            "referenceLocator": f"pkg:deb/debian/{name}@{version}?arch={architecture}",
+        }],
+    } for name, version, architecture in sorted(records)]
+    packages.append({
+        "SPDXID": "SPDXRef-Package-kerosene-vault",
+        "name": "kerosene-vault",
+        "versionInfo": commit,
+        "supplier": "Organization: Kerosene",
+        "downloadLocation": "NOASSERTION",
+        "filesAnalyzed": True,
+        "checksums": [{"algorithm": "SHA256", "checksumValue": binary_digest.removeprefix("sha256:")}],
+        "externalRefs": [],
+    })
+    created = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(int(epoch)))
+    return {
+        "spdxVersion": "SPDX-2.3",
+        "dataLicense": "CC0-1.0",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "kerosene-vault-" + commit,
+        "documentNamespace": "https://kerosene.invalid/spdx/vault/" + archive_digest.removeprefix("sha256:"),
+        "creationInfo": {"created": created, "creators": ["Tool: kerosene-vault-rebuild-qualification"]},
+        "packages": packages,
+    }
+
+
 def inspect_image(tag):
     raw = run(["docker", "image", "inspect", tag], timeout=60).stdout
     records = json.loads(raw)
@@ -101,15 +151,13 @@ def build_once(source, dockerfile, commit, tree, archive_digest, recipe_digest, 
     ], timeout=60).stdout.decode().split()[0]
     if not re.fullmatch(r"[0-9a-f]{64}", binary):
         raise RuntimeError("Vault executable digest is malformed")
-    sbom_raw = run(["docker", "sbom", "--format", "spdx-json", tag], timeout=600).stdout
-    sbom = json.loads(sbom_raw)
+    binary_digest = "sha256:" + binary
+    sbom = build_spdx(tag, commit, archive_digest, binary_digest, epoch)
     packages = normalized_spdx(sbom)
-    if not packages:
-        raise RuntimeError("Vault image SBOM is empty")
     return {
         "imageId": image["Id"],
-        "binaryDigest": "sha256:" + binary,
-        "sbomDigest": sha256(json.dumps(packages, sort_keys=True, separators=(",", ":")).encode()),
+        "binaryDigest": binary_digest,
+        "sbomDigest": sha256(json.dumps(sbom, sort_keys=True, separators=(",", ":")).encode()),
         "packageCount": len(packages),
     }
 
