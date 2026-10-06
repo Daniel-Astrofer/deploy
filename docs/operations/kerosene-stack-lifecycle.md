@@ -150,9 +150,8 @@ staging/clearnet profile before Admin installation or any Kubernetes write.
 
 The contract does not generate Tor identities, peer rosters, audit keys,
 measurement pins or mTLS credentials. Those remain independently provisioned
-bootstrap inputs. The Node/Vault live-protocol blocker remains until the Tor
-sidecar/onion identity layout and both Node planes pass the real sequential
-rollout qualification.
+bootstrap inputs. The Tor sidecar/onion identity layout and both Node planes now
+pass the real integrated sequential protocol qualification described below.
 
 `import-artifact` only integrity-checks and caches/extracts inert bytes. See
 [release archive](release-archive.md) for offline import, size limits, mirror
