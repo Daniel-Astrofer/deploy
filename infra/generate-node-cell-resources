@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Generate six Node workloads from public signed bootstrap documents."""
+
+import argparse
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "stack"))
+import archive
+import node_resources
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--genesis", required=True)
+for plane in ("bank", "vault"):
+    parser.add_argument(f"--{plane}-membership", required=True)
+    parser.add_argument(f"--{plane}-attestation", required=True)
+    parser.add_argument(f"--{plane}-snapshot", required=True)
+parser.add_argument("--output", required=True, help="new Kubernetes List JSON; never overwritten")
+args = parser.parse_args()
+
+try:
+    genesis = node_resources.document(args.genesis, "genesis")
+    planes = {plane: node_resources.document(getattr(args, plane + "_membership"), plane + " membership")
+              for plane in ("bank", "vault")}
+    snapshots = {}
+    for plane in ("bank", "vault"):
+        attestation = node_resources.document(getattr(args, plane + "_attestation"), plane + " attestation")
+        with archive.open_regular(getattr(args, plane + "_snapshot")) as stream:
+            payload = stream.read(node_resources.MAX_DOCUMENT + 1)
+        if len(payload) > node_resources.MAX_DOCUMENT:
+            raise archive.ArchiveError(plane + " snapshot byte limit exceeded")
+        snapshots[plane] = (attestation, payload)
+    node_resources.write(node_resources.generate(genesis, planes, snapshots), args.output)
+except (archive.ArchiveError, OSError, ValueError, KeyError, TypeError) as error:
+    print(f"generation failed: {error}", file=sys.stderr)
+    raise SystemExit(65)

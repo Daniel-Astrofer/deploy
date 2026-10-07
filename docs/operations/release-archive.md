@@ -136,7 +136,8 @@ without applying it to a cluster:
 ```sh
 infra/render-cell-deployment \
   --images /srv/operator/cell-images.json \
-  --resources /srv/operator/complete-cell.yaml \
+  --resources /srv/operator/complete-cell-foundation.yaml \
+  --resources /srv/operator/node-resources.json \
   --admin-config /srv/operator/admin-public.json \
   --output /srv/operator/materials/deployment.json
 ```
@@ -150,6 +151,27 @@ substitutes the selected digests, runs the installed lifecycle validator and
 writes canonical JSON as a new read-only file. It prints the exact deployment
 digest and every computed component configuration digest for the candidate
 selection. It never contacts or mutates a cluster.
+
+The six Node resources are generated from public, signed ceremony outputs;
+private Node, Onion and mTLS keys remain external Secret references:
+
+```sh
+infra/generate-node-cell-resources \
+  --genesis /srv/operator/ceremony/genesis.json \
+  --bank-membership /srv/operator/ceremony/bank-membership.json \
+  --bank-attestation /srv/operator/ceremony/bank-state-attestation.json \
+  --bank-snapshot /srv/operator/ceremony/bank-state.bin \
+  --vault-membership /srv/operator/ceremony/vault-membership.json \
+  --vault-attestation /srv/operator/ceremony/vault-state-attestation.json \
+  --vault-snapshot /srv/operator/ceremony/vault-state.bin \
+  --output /srv/operator/node-resources.json
+```
+
+The generator verifies one network, distinct v3 Onion endpoints, equal signed
+2-of-3 planes and each state payload's hash and membership binding. It emits
+the Vault-plane namespace, immutable public ConfigMaps, six PVCs and six
+single-member Node/Tor Deployments. Repeating `--resources` composes these with
+the application foundation in one validated `deployment.json`.
 
 ```json
 {

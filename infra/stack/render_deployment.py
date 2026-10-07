@@ -98,7 +98,11 @@ def render(stack, package_release, image_path, resources_path, admin_path, outpu
     executable = kubectl or shutil.which("kubectl")
     if not executable:
         raise ArchiveError("kubectl is required only as a local YAML decoder")
-    resources = normalize_resources(decode_yaml(executable, resources_path), selected)
+    resource_paths = resources_path if isinstance(resources_path, (list, tuple)) else [resources_path]
+    decoded = []
+    for path in resource_paths:
+        decoded.extend(decode_yaml(executable, path))
+    resources = normalize_resources(decoded, selected)
     deployment = {"schema": lifecycle.SCHEMA, "environment": "staging-cell",
                   "resources": resources,
                   "admin": {"image": selected["admin"]["image"], "config": admin}}

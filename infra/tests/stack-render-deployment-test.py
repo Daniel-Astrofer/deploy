@@ -74,6 +74,18 @@ class RenderDeploymentTest(unittest.TestCase):
         with self.assertRaisesRegex(archive.ArchiveError, "placeholder"):
             render_deployment.normalize_resources([resource], selected)
 
+    def test_composes_multiple_reviewed_resource_files(self):
+        output = self.root / "composed.json"
+        namespaces = [
+            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging"}},
+            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kerosene-staging-vault"}}]
+        with patch.object(render_deployment, "decode_yaml", side_effect=[[namespaces[0]], [namespaces[1]]]) as decode:
+            render_deployment.render(stack, package, self.images,
+                                     [self.resources, self.resources], self.admin, output,
+                                     kubectl="/not-executed")
+        self.assertEqual(decode.call_count, 2)
+        self.assertEqual(len(json.loads(output.read_bytes())["resources"]), 2)
+
     def test_rejects_unknown_fields_and_unpinned_images(self):
         document = json.loads(self.images.read_text())
         document["unexpected"] = True

@@ -24,7 +24,8 @@ package_spec.loader.exec_module(package)
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--images", required=True, help="kerosene.cell-images/v1 with pinned OCI digests")
-parser.add_argument("--resources", required=True, help="local multi-document Kubernetes YAML")
+parser.add_argument("--resources", required=True, action="append",
+                    help="local Kubernetes YAML/JSON; repeat to compose reviewed planes")
 parser.add_argument("--admin-config", required=True, help="public Admin configuration JSON")
 parser.add_argument("--output", required=True, help="new deployment.json; never overwritten")
 args = parser.parse_args()
