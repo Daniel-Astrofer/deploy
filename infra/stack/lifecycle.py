@@ -259,7 +259,7 @@ def verify_vault_runtime_contract(stack, artifact, summary):
 
 
 def verify_node_runtime_contract(stack, artifact, summary):
-    """Require one persistent Tor-only discovery Node for each Cell plane."""
+    """Require an independent persistent Tor-only Node quorum in each plane."""
     if "node" not in summary.get("services", {}):
         return
     node_image = summary["services"]["node"]["image"]
@@ -282,7 +282,7 @@ def verify_node_runtime_contract(stack, artifact, summary):
     resources = {(resource.get("metadata", {}).get("namespace"), resource.get("kind"),
                   resource.get("metadata", {}).get("name")): resource
                  for resource in artifact["resources"]}
-    observed = {}
+    observed = {"bank": [], "vault": []}
     try:
         for resource in artifact["resources"]:
             if resource["kind"] not in WORKLOADS:
@@ -300,7 +300,7 @@ def verify_node_runtime_contract(stack, artifact, summary):
                         raise ValueError("Node runtime mode differs")
                 plane = environment.get("KEROSENE_DISCOVERY_PLANE", {}).get("value")
                 expected_namespace = "kerosene-staging" if plane == "bank" else "kerosene-staging-vault"
-                if plane not in {"bank", "vault"} or plane in observed or resource["metadata"]["namespace"] != expected_namespace:
+                if plane not in observed or resource["metadata"]["namespace"] != expected_namespace:
                     raise ValueError("Node plane identity differs")
                 onion_path = environment.get("KEROSENE_NODE_ONION_HOSTNAME_PATH", {}).get("value")
                 onion_port = environment.get("KEROSENE_NODE_ONION_PORT", {}).get("value")
@@ -343,9 +343,10 @@ def verify_node_runtime_contract(stack, artifact, summary):
                         not isinstance(data.get("attestation.json"), str) or
                         not isinstance(data.get("snapshot.bin", binary.get("snapshot.bin")), str)):
                     raise ValueError("Node state snapshot source is absent, mutable or incomplete")
-                observed[plane] = resource
-        if set(observed) != {"bank", "vault"}:
-            raise ValueError("both Node planes are required")
+                observed[plane].append(resource)
+        expected_members = summary["vaultCompatibility"]["members"]
+        if any(len(observed[plane]) != expected_members for plane in ("bank", "vault")):
+            raise ValueError("both Node planes require the complete independent member set")
     except (ValueError, TypeError, KeyError, AttributeError):
         raise stack.ApplyBlockedError(
             "Node manifest is incompatible with the two-plane Tor/mTLS runtime") from None
@@ -910,8 +911,10 @@ def critical_replica_topology(stack, artifact, summary):
     expected_vaults = summary["vaultCompatibility"]["members"]
     if len(groups["vault"]) != expected_vaults:
         raise stack.ApplyBlockedError(f"approved topology requires exactly {expected_vaults} independent Vault workloads")
-    if not groups["node"]:
-        raise stack.ApplyBlockedError("approved topology requires at least one persistent Node workload")
+    expected_nodes = expected_vaults * 2
+    if len(groups["node"]) != expected_nodes:
+        raise stack.ApplyBlockedError(
+            f"approved topology requires exactly {expected_nodes} independent Node workloads")
     for component in groups:
         groups[component].sort(key=lambda item: identity(item["resource"]))
     return groups

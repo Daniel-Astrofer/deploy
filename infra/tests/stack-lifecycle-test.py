@@ -34,6 +34,8 @@ class DeploymentTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
         self.release = json.loads((ROOT / "stack/examples/release-lock-v2.example.json").read_text())
+        self.node_names = {"node-bank", "node-bank-2", "node-bank-3",
+                           "node-vault", "node-vault-2", "node-vault-3"}
         resources = [{"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": namespace}}
                      for namespace in ("kerosene-staging", "kerosene-staging-vault")]
         resources.append({"apiVersion": "v1", "kind": "ConfigMap",
@@ -49,8 +51,10 @@ class DeploymentTest(unittest.TestCase):
         for name, service in self.release["services"].items():
             if name == "admin":
                 continue
-            instances = ([{"name": "node-bank", "plane": "bank", "namespace": "kerosene-staging"},
-                          {"name": "node-vault", "plane": "vault", "namespace": "kerosene-staging-vault"}]
+            instances = ([{"name": "node-" + plane + ("" if index == 1 else "-" + str(index)),
+                           "plane": plane,
+                           "namespace": "kerosene-staging" if plane == "bank" else "kerosene-staging-vault"}
+                          for plane in ("bank", "vault") for index in range(1, 4)]
                          if name == "node" else
                          [{"name": instance, "namespace": "kerosene-staging"}
                           for instance in ([name] if name != "vault" else ["vault-1", "vault-2", "vault-3"])])
@@ -477,7 +481,7 @@ class DeploymentTest(unittest.TestCase):
         self.artifact["resources"].reverse()
         groups = lifecycle.workload_phases(stack, self.artifact, self.summary)
         self.assertEqual([{r["metadata"]["name"] for r in group} for group in groups],
-                         [{"postgres", "redis", "tor", "node-bank", "node-vault"}, {"bitcoin"}, {"lnd"},
+                         [{"postgres", "redis", "tor", *self.node_names}, {"bitcoin"}, {"lnd"},
                           {"vault-1", "vault-2", "vault-3"}, {"core", "kfe"}, {"web-page"}])
 
     def test_multiple_vault_workloads_preserve_inventory(self):
@@ -493,11 +497,23 @@ class DeploymentTest(unittest.TestCase):
         topology = lifecycle.critical_replica_topology(stack, self.artifact, self.summary)
         self.assertEqual([item["resource"]["metadata"]["name"] for item in topology["vault"]],
                          ["vault-1", "vault-2", "vault-3"])
-        self.assertEqual(len({item["storage"] for members in topology.values() for item in members}), 5)
+        self.assertEqual(len({item["storage"] for members in topology.values() for item in members}), 9)
         vault_two = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-2")
         vault_two["spec"]["template"]["spec"]["volumes"][0]["persistentVolumeClaim"]["claimName"] = "vault-1-data"
         with self.assertRaisesRegex(stack.ApplyBlockedError, "persistent identity is shared"):
             lifecycle.critical_replica_topology(stack, self.artifact, self.summary)
+
+    def test_each_node_plane_requires_three_independent_controllers(self):
+        for missing in ("node-bank-3", "node-vault-3"):
+            changed = copy.deepcopy(self.artifact)
+            changed["resources"] = [resource for resource in changed["resources"]
+                                    if resource["metadata"].get("name") != missing]
+            with self.subTest(missing=missing), self.assertRaisesRegex(
+                    stack.ApplyBlockedError, "two-plane Tor/mTLS"):
+                lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+            with self.subTest(topology=missing), self.assertRaisesRegex(
+                    stack.ApplyBlockedError, "exactly 6 independent Node"):
+                lifecycle.critical_replica_topology(stack, changed, self.summary)
 
     def test_critical_topology_rejects_grouped_or_missing_vault_members(self):
         vault = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-1")
@@ -580,7 +596,8 @@ class DeploymentTest(unittest.TestCase):
         second["metadata"].update(name="vault-tor", namespace="kerosene-staging-vault")
         self.artifact["resources"].append(second)
         first = lifecycle.workload_phases(stack, self.artifact, self.summary)[0]
-        self.assertEqual({r["metadata"]["name"] for r in first}, {"postgres", "redis", "tor", "node-vault", "vault-tor"})
+        self.assertEqual({r["metadata"]["name"] for r in first},
+                         {"postgres", "redis", "tor", "vault-tor", *self.node_names - {"node-bank"}})
 
     def test_cross_phase_colocation_is_rejected_not_misordered(self):
         bitcoin = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "bitcoin")
@@ -595,7 +612,7 @@ class DeploymentTest(unittest.TestCase):
             lifecycle.workload_phases(stack, self.artifact, self.summary)
 
     def test_init_container_does_not_satisfy_service_inventory(self):
-        for node in (r for r in self.artifact["resources"] if r["metadata"]["name"] in {"node-bank", "node-vault"}):
+        for node in (r for r in self.artifact["resources"] if r["metadata"]["name"] in self.node_names):
             pod = node["spec"]["template"]["spec"]
             pod["initContainers"] = pod["containers"]
             pod["containers"] = [{"name": "tor", "image": self.summary["services"]["tor"]["image"]}]
@@ -604,7 +621,7 @@ class DeploymentTest(unittest.TestCase):
 
     def test_missing_or_ambiguous_component_identity_blocks(self):
         changed = copy.deepcopy(self.artifact)
-        changed["resources"] = [r for r in changed["resources"] if r["metadata"]["name"] not in {"node-bank", "node-vault"}]
+        changed["resources"] = [r for r in changed["resources"] if r["metadata"]["name"] not in self.node_names]
         with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components: node"):
             lifecycle.workload_phases(stack, changed, self.summary)
         summary = copy.deepcopy(self.summary)
@@ -630,8 +647,8 @@ class DeploymentTest(unittest.TestCase):
             self.assertEqual(len(smokes), 2)
             for command in smokes:
                 self.assertEqual(command[-4:], ["--cell-binding", "/bound-kubectl", "/protected/cell.conf", "cell-a"])
-            self.assertEqual(critical_ready.call_count, 10)
-            self.assertEqual([call.args[4] for call in critical_ready.call_args_list], [2] * 10)
+            self.assertEqual(critical_ready.call_count, 18)
+            self.assertEqual([call.args[4] for call in critical_ready.call_args_list], [6] * 12 + [2] * 6)
         self.assertIn(("kfe-maintenance-verified", maintenance_evidence), checkpoints)
         for name in ["core", "kfe"]:
             for consumer in ["core", "kfe"]:
@@ -644,7 +661,7 @@ class DeploymentTest(unittest.TestCase):
 
     def test_invalid_phase_blocks_before_any_kubernetes_write(self):
         from types import SimpleNamespace
-        self.artifact["resources"] = [r for r in self.artifact["resources"] if r["metadata"]["name"] not in {"node-bank", "node-vault"}]
+        self.artifact["resources"] = [r for r in self.artifact["resources"] if r["metadata"]["name"] not in self.node_names]
         with patch.object(lifecycle, "load_config", return_value={}), patch.object(lifecycle, "verify_bootstrap_trust"), patch.object(lifecycle, "kubectl_command", return_value=["bound-kubectl"]), patch.object(lifecycle, "verify_external_secrets"), patch.object(lifecycle, "apply_resource") as apply, patch.dict(lifecycle.os.environ, {}, clear=True):
             with self.assertRaisesRegex(stack.ApplyBlockedError, "missing runtime components"):
                 lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=True, cell_dir="unit-only"), lambda *_: None)
@@ -677,7 +694,8 @@ class DeploymentTest(unittest.TestCase):
                      self.assertRaisesRegex(stack.ApplyBlockedError, "before the next Cell phase"):
                     lifecycle.execute(stack, self.artifact, self.summary, SimpleNamespace(dry_run=False, cell_dir="unit-only", _release={}), lambda *_: None)
                 runtime_names = {r["metadata"]["name"] for r in applied if r["kind"] in lifecycle.WORKLOADS}
-                self.assertEqual(runtime_names, set() if completed_phases == 0 else {"postgres", "redis", "tor", "node-bank", "node-vault"})
+                self.assertEqual(runtime_names, set() if completed_phases == 0 else
+                                 {"postgres", "redis", "tor", *self.node_names})
 
     def test_initial_install_cannot_fall_through_to_update_maintenance(self):
         from types import SimpleNamespace

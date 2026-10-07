@@ -266,8 +266,10 @@ then web-page. Each phase is submitted before its workloads are awaited;
 in particular Core/KFE reciprocal integration references must not serialize
 their initial submission. Every preceding phase must become Kubernetes-ready
 before the next is submitted. This is an ordering policy, not proof of RPC,
-financial readiness or consensus health. Multiple Node/Vault workloads remain
-in the inventory; this does not implement their replica-by-replica update.
+financial readiness or consensus health. The approved topology contains six
+independent Node controllers (three Bank and three Vault plane) and three
+independent Vault controllers. Critical controllers are updated one at a time,
+with the complete group rechecked before and after every mutation.
 Each approved Node plane now also receives an immutable, read-only
 `node-<plane>-state` ConfigMap at `/etc/kerosene/node-state`. It contains the
 threshold-signed `StateSnapshotAttestationV1` and the exact payload bound by its
@@ -317,8 +319,8 @@ container entrypoint exits after a command. It is not a permanent Deployment;
 the planner rejects using it as one. The web client is a separate component.
 Node/Tor colocation is supported in the first phase, matching both canonical
 plane manifests and their shared onion identity volumes. The approved manifest
-must contain exactly one persistent Node in each of the `bank` and `vault`
-planes, in their respective namespaces, with loopback-only Node and SOCKS
+must contain exactly three independently persisted Nodes in each of the `bank`
+and `vault` planes, in their respective namespaces, with loopback-only Node and SOCKS
 listeners plus externally referenced discovery bootstrap. Vault/Tor colocation
 is required in the Vault phase so its production-only loopback listener is not
 exposed over cluster networking. No fallback to a

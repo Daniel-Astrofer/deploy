@@ -112,8 +112,10 @@ class PublicationTest(unittest.TestCase):
                       "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}}]
         for name, service in self.release["services"].items():
             if name != "admin":
-                instances = ([{"name": "node-bank", "plane": "bank", "namespace": "kerosene-staging"},
-                              {"name": "node-vault", "plane": "vault", "namespace": "kerosene-staging-vault"}]
+                instances = ([{"name": "node-" + plane + ("" if index == 1 else "-" + str(index)),
+                               "plane": plane,
+                               "namespace": "kerosene-staging" if plane == "bank" else "kerosene-staging-vault"}
+                              for plane in ("bank", "vault") for index in range(1, 4)]
                              if name == "node" else
                              [{"name": instance, "namespace": "kerosene-staging"}
                               for instance in ([name] if name != "vault" else ["vault-1", "vault-2", "vault-3"])])
