@@ -116,6 +116,11 @@ class PublicationTest(unittest.TestCase):
                      {"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
                       "metadata": {"name": "node-vault-membership", "namespace": "kerosene-staging-vault"},
                       "data": {"manifest.json": json.dumps({"network_id": self.release["network"]["id"], "plane": "vault"})}}]
+        for namespace in ("kerosene-staging", "kerosene-staging-vault"):
+            resources.append({"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                              "metadata": {"name": "node-genesis", "namespace": namespace},
+                              "data": {"genesis-trust-bundle.json": json.dumps({
+                                  "network_id": self.release["network"]["id"]})}})
         for name, service in self.release["services"].items():
             if name != "admin":
                 instances = ([{"name": "node-" + plane + ("" if index == 1 else "-" + str(index)),
@@ -131,6 +136,9 @@ class PublicationTest(unittest.TestCase):
                     container = {"name": name, "image": service["image"]}
                     if name == "node":
                         plane = instance_spec["plane"]
+                        resources.append({"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                                          "metadata": {"name": instance + "-tor", "namespace": namespace},
+                                          "data": {"torrc": self.stack.lifecycle.NODE_TORRC}})
                         values = {"KEROSENE_NETWORK_ID": self.release["network"]["id"],
                                   "KEROSENE_DISCOVERY_PLANE": plane, "KEROSENE_NODE_LISTEN_ADDR": "127.0.0.1:8800",
                                   "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/onion/hostname",
@@ -183,17 +191,23 @@ class PublicationTest(unittest.TestCase):
                         tor["volumeMounts"] = [
                             {"name": "identity-data", "mountPath": "/var/lib/tor"},
                             {"name": "onion-public", "mountPath": "/onion"},
+                            {"name": "tor-config", "mountPath": "/etc/tor/torrc", "subPath": "torrc", "readOnly": True},
                             {"name": "tor-identity", "mountPath": "/etc/kerosene/tor-identity", "readOnly": True}]
                         container["volumeMounts"] = [
                             {"name": "identity-data", "mountPath": "/var/lib/kerosene"},
                             {"name": "onion-public", "mountPath": "/onion", "readOnly": True},
                             {"name": "node-identity", "mountPath": "/var/lib/kerosene/identity.key", "subPath": "identity.key", "readOnly": True},
+                            {"name": "node-genesis", "mountPath": "/etc/kerosene/node-genesis", "readOnly": True},
+                            {"name": "node-mtls", "mountPath": "/etc/kerosene/node-mtls", "readOnly": True},
                             {"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True},
                             {"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True}]
                         pod_spec["volumes"] = [
                             {"name": "identity-data", "persistentVolumeClaim": {"claimName": instance + "-data"}},
                             {"name": "onion-public", "emptyDir": {}},
                             {"name": "node-identity", "secret": {"secretName": instance + "-identity", "defaultMode": 256, "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}},
+                            {"name": "node-genesis", "configMap": {"name": "node-genesis"}},
+                            {"name": "node-mtls", "secret": {"secretName": instance + "-mtls", "defaultMode": 256, "items": [{"key": key, "path": key, "mode": 256} for key in ("ca.crt", "client-identity.pem", "server.crt", "server.key")]}},
+                            {"name": "tor-config", "configMap": {"name": instance + "-tor"}},
                             {"name": "tor-identity", "secret": {"secretName": instance + "-onion-identity", "defaultMode": 256, "items": [{"key": key, "path": key, "mode": 256} for key in ("hostname", "hs_ed25519_public_key", "hs_ed25519_secret_key")]}},
                             {"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}},
                             {"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}}]

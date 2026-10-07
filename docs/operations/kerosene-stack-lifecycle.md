@@ -292,6 +292,11 @@ persistent volume, accepts an identical restart and refuses any mismatch. Its
 entrypoint cannot be overridden by the deployment. Consequently the onion
 endpoint signed into membership is reproducible across install, restart and
 recovery without embedding its private key in Git or the release archive.
+The runtime contract also binds each member to an immutable network-matching
+`node-genesis` ConfigMap, a member-specific `<workload>-mtls` Secret and an
+immutable `<workload>-tor` ConfigMap with the exact loopback-only Node hidden
+service. All referenced key names and file modes are checked during preflight;
+missing files cannot be deferred until a failed rollout.
 Each approved Node plane now also receives an immutable, read-only
 `node-<plane>-state` ConfigMap at `/etc/kerosene/node-state`. It contains the
 threshold-signed `StateSnapshotAttestationV1` and the exact payload bound by its

@@ -42,6 +42,10 @@ class DeploymentTest(unittest.TestCase):
                           "metadata": {"name": "vault-probe", "namespace": "kerosene-staging"},
                           "data": {"url": "https://localhost:7801/v1/local-health"}})
         for plane, namespace in (("bank", "kerosene-staging"), ("vault", "kerosene-staging-vault")):
+            resources.append({"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                              "metadata": {"name": "node-genesis", "namespace": namespace},
+                              "data": {"genesis-trust-bundle.json": json.dumps({
+                                  "network_id": self.release["network"]["id"]})}})
             resources.append({"apiVersion": "v1", "kind": "ConfigMap",
                               "metadata": {"name": "node-" + plane + "-bootstrap", "namespace": namespace},
                               "data": {"genesis-endpoints": "", "mirrors": ""}})
@@ -68,6 +72,9 @@ class DeploymentTest(unittest.TestCase):
                 container = {"name": name, "image": service["image"]}
                 if name == "node":
                     plane = instance_spec["plane"]
+                    resources.append({"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                                      "metadata": {"name": instance + "-tor", "namespace": namespace},
+                                      "data": {"torrc": lifecycle.NODE_TORRC}})
                     values = {"KEROSENE_NETWORK_ID": self.release["network"]["id"],
                               "KEROSENE_DISCOVERY_PLANE": plane, "KEROSENE_NODE_LISTEN_ADDR": "127.0.0.1:8800",
                               "KEROSENE_NODE_ONION_HOSTNAME_PATH": "/onion/hostname",
@@ -122,13 +129,19 @@ class DeploymentTest(unittest.TestCase):
                         tor["volumeMounts"] = [
                             {"name": "identity-data", "mountPath": "/var/lib/tor"},
                             {"name": "onion-public", "mountPath": "/onion"},
+                            {"name": "tor-config", "mountPath": "/etc/tor/torrc", "subPath": "torrc", "readOnly": True},
                             {"name": "tor-identity", "mountPath": "/etc/kerosene/tor-identity", "readOnly": True}]
                         container["volumeMounts"].append({"name": "onion-public", "mountPath": "/onion", "readOnly": True})
                         container["volumeMounts"].append({"name": "node-identity", "mountPath": "/var/lib/kerosene/identity.key", "subPath": "identity.key", "readOnly": True})
+                        container["volumeMounts"].append({"name": "node-genesis", "mountPath": "/etc/kerosene/node-genesis", "readOnly": True})
+                        container["volumeMounts"].append({"name": "node-mtls", "mountPath": "/etc/kerosene/node-mtls", "readOnly": True})
                         container["volumeMounts"].append({"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True})
                         container["volumeMounts"].append({"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True})
                         pod_spec["volumes"].append({"name": "onion-public", "emptyDir": {}})
                         pod_spec["volumes"].append({"name": "node-identity", "secret": {"secretName": instance + "-identity", "defaultMode": 256, "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}})
+                        pod_spec["volumes"].append({"name": "node-genesis", "configMap": {"name": "node-genesis"}})
+                        pod_spec["volumes"].append({"name": "node-mtls", "secret": {"secretName": instance + "-mtls", "defaultMode": 256, "items": [{"key": key, "path": key, "mode": 256} for key in ("ca.crt", "client-identity.pem", "server.crt", "server.key")]}})
+                        pod_spec["volumes"].append({"name": "tor-config", "configMap": {"name": instance + "-tor"}})
                         pod_spec["volumes"].append({"name": "tor-identity", "secret": {"secretName": instance + "-onion-identity", "defaultMode": 256, "items": [{"key": key, "path": key, "mode": 256} for key in ("hostname", "hs_ed25519_public_key", "hs_ed25519_secret_key")]}})
                         pod_spec["volumes"].append({"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}})
                         pod_spec["volumes"].append({"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}})
@@ -289,6 +302,29 @@ class DeploymentTest(unittest.TestCase):
             else:
                 mount = next(item for item in tor["volumeMounts"] if item["name"] == "identity-data")
                 mount["name"] = "other-data"
+            with self.subTest(mutation=mutation), \
+                    self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+                lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+    def test_node_runtime_contract_requires_genesis_mtls_and_tor_configuration(self):
+        lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        for mutation in ("mutable-genesis", "foreign-mtls", "changed-torrc"):
+            changed = copy.deepcopy(self.artifact)
+            bank = next(r for r in changed["resources"]
+                        if r["metadata"].get("name") == "node-bank")
+            pod = bank["spec"]["template"]["spec"]
+            if mutation == "mutable-genesis":
+                genesis = next(r for r in changed["resources"]
+                               if r["metadata"].get("name") == "node-genesis" and
+                               r["metadata"].get("namespace") == "kerosene-staging")
+                genesis["immutable"] = False
+            elif mutation == "foreign-mtls":
+                volume = next(item for item in pod["volumes"] if item["name"] == "node-mtls")
+                volume["secret"]["secretName"] = "shared-mtls"
+            else:
+                tor = next(r for r in changed["resources"]
+                           if r["metadata"].get("name") == "node-bank-tor")
+                tor["data"]["torrc"] += "SocksPort 9051\n"
             with self.subTest(mutation=mutation), \
                     self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
                 lifecycle.verify_node_runtime_contract(stack, changed, self.summary)

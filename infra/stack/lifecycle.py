@@ -30,6 +30,9 @@ WORKLOADS = {"Deployment", "StatefulSet"}
 KINDS = WORKLOADS | {"Namespace", "ConfigMap", "Service", "ServiceAccount", "NetworkPolicy", "PersistentVolumeClaim", "PodDisruptionBudget", "HorizontalPodAutoscaler"}
 DATABASE_PLAN_NAME = "kerosene-cell-database-plan"
 DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql")
+NODE_TORRC = ("SocksPort 0.0.0.0:9050\nDataDirectory /var/lib/tor\n"
+              "HiddenServiceDir /var/lib/tor/node\nHiddenServiceVersion 3\n"
+              "HiddenServicePort 8800 127.0.0.1:8800\nLog notice stdout\n")
 
 # These are implementation capabilities, never caller-supplied declarations.
 # Remove a blocker only with the corresponding implementation and integration
@@ -377,6 +380,46 @@ def verify_node_runtime_contract(stack, artifact, summary):
                             "secretName": expected_onion_name, "defaultMode": 256,
                             "items": onion_items}}:
                     raise ValueError("Tor authorized identity source differs")
+                expected_tor_name = resource["metadata"]["name"] + "-tor"
+                if tor_mounts.get("tor-config") != {
+                        "name": "tor-config", "mountPath": "/etc/tor/torrc",
+                        "subPath": "torrc", "readOnly": True}:
+                    raise ValueError("Node Tor configuration mount differs")
+                if volumes.get("tor-config") != {
+                        "name": "tor-config", "configMap": {"name": expected_tor_name}}:
+                    raise ValueError("Node Tor configuration source differs")
+                tor_config = resources.get(
+                    (resource["metadata"]["namespace"], "ConfigMap", expected_tor_name))
+                if (not isinstance(tor_config, dict) or tor_config.get("immutable") is not True or
+                        tor_config.get("data") != {"torrc": NODE_TORRC}):
+                    raise ValueError("Node Tor configuration is absent, mutable or incompatible")
+                if mounts.get("node-genesis") != {
+                        "name": "node-genesis", "mountPath": "/etc/kerosene/node-genesis",
+                        "readOnly": True}:
+                    raise ValueError("Node genesis trust is not mounted read-only")
+                if volumes.get("node-genesis") != {
+                        "name": "node-genesis", "configMap": {"name": "node-genesis"}}:
+                    raise ValueError("Node genesis trust source differs")
+                genesis = resources.get(
+                    (resource["metadata"]["namespace"], "ConfigMap", "node-genesis"))
+                genesis_json = genesis.get("data", {}).get("genesis-trust-bundle.json") \
+                    if isinstance(genesis, dict) else None
+                genesis_document = json.loads(genesis_json) if isinstance(genesis_json, str) else None
+                if (not isinstance(genesis, dict) or genesis.get("immutable") is not True or
+                        not isinstance(genesis_document, dict) or
+                        genesis_document.get("network_id") != summary["networkId"]):
+                    raise ValueError("Node genesis trust is absent, mutable or incompatible")
+                mtls_items = [{"key": key, "path": key, "mode": 256} for key in
+                              ("ca.crt", "client-identity.pem", "server.crt", "server.key")]
+                if mounts.get("node-mtls") != {
+                        "name": "node-mtls", "mountPath": "/etc/kerosene/node-mtls",
+                        "readOnly": True}:
+                    raise ValueError("Node mTLS material is not mounted read-only")
+                if volumes.get("node-mtls") != {
+                        "name": "node-mtls", "secret": {
+                            "secretName": resource["metadata"]["name"] + "-mtls",
+                            "defaultMode": 256, "items": mtls_items}}:
+                    raise ValueError("Node mTLS source differs")
                 expected_state_name = "node-" + plane + "-state"
                 expected_membership_name = "node-" + plane + "-membership"
                 if mounts.get("initial-membership") != {
