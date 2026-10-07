@@ -173,6 +173,24 @@ the Vault-plane namespace, immutable public ConfigMaps, six PVCs and six
 single-member Node/Tor Deployments. Repeating `--resources` composes these with
 the application foundation in one validated `deployment.json`.
 
+The three independent Vault workloads are generated without DKG shares or
+credentials. The reviewed software measurement is public; all authority stays
+in per-member external Secrets:
+
+```sh
+infra/generate-vault-cell-resources \
+  --network-id kerosene-staging \
+  --measurement-pin REVIEWED_64_LOWERCASE_HEX \
+  --output /srv/operator/vault-resources.json
+```
+
+This emits three PVC-backed Vault/Tor Deployments, immutable Tor configuration
+and an authenticated local-health target. Each member references its own mTLS,
+Onion and runtime Secrets. Runtime Secret keys cover peers, audit allowlist,
+SPIFFE identities, attestation root, encrypted-share passphrase and the
+corresponding Vault-plane Node URL. Add the output as another `--resources`
+argument to the renderer.
+
 ```json
 {
   "schema": "kerosene.cell-images/v1",

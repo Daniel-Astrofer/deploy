@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+"""Generate three independent Vault/Tor workloads with external authority."""
+
+import argparse
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "stack"))
+import archive
+import vault_resources
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--network-id", required=True)
+parser.add_argument("--measurement-pin", required=True,
+                    help="reviewed lowercase SHA-256 software measurement")
+parser.add_argument("--output", required=True, help="new Kubernetes List JSON; never overwritten")
+args = parser.parse_args()
+try:
+    vault_resources.write(vault_resources.generate(args.network_id, args.measurement_pin), args.output)
+except (archive.ArchiveError, OSError, ValueError, KeyError, TypeError) as error:
+    print(f"generation failed: {error}", file=sys.stderr)
+    raise SystemExit(65)
