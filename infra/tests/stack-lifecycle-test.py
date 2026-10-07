@@ -48,6 +48,10 @@ class DeploymentTest(unittest.TestCase):
             resources.append({"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
                               "metadata": {"name": "node-" + plane + "-state", "namespace": namespace},
                               "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}})
+            resources.append({"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                              "metadata": {"name": "node-" + plane + "-membership", "namespace": namespace},
+                              "data": {"manifest.json": json.dumps({
+                                  "network_id": self.release["network"]["id"], "plane": plane})}})
         for name, service in self.release["services"].items():
             if name == "admin":
                 continue
@@ -74,6 +78,7 @@ class DeploymentTest(unittest.TestCase):
                               "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
                               "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
                               "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+                              "KEROSENE_INITIAL_MEMBERSHIP_MANIFEST_PATH": "/etc/kerosene/node-membership/manifest.json",
                               "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
                               "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
                               "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
@@ -110,8 +115,10 @@ class DeploymentTest(unittest.TestCase):
                     pod_spec["volumes"] = [{"name": "identity-data", "persistentVolumeClaim": {"claimName": claim}}]
                     if name == "node":
                         container["volumeMounts"].append({"name": "onion-public", "mountPath": "/onion", "readOnly": True})
+                        container["volumeMounts"].append({"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True})
                         container["volumeMounts"].append({"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True})
                         pod_spec["volumes"].append({"name": "onion-public", "emptyDir": {}})
+                        pod_spec["volumes"].append({"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}})
                         pod_spec["volumes"].append({"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}})
                     resources.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
                                       "metadata": {"name": claim, "namespace": namespace},
@@ -209,6 +216,29 @@ class DeploymentTest(unittest.TestCase):
         state["immutable"] = False
         with self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
             lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+    def test_node_runtime_contract_requires_immutable_plane_membership_file(self):
+        lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        for mutation in ("mutable", "wrong-plane", "directory-mount"):
+            changed = copy.deepcopy(self.artifact)
+            membership = next(r for r in changed["resources"]
+                              if r["metadata"].get("name") == "node-bank-membership")
+            bank = next(r for r in changed["resources"]
+                        if r["metadata"].get("name") == "node-bank")
+            node = bank["spec"]["template"]["spec"]["containers"][0]
+            if mutation == "mutable":
+                membership["immutable"] = False
+            elif mutation == "wrong-plane":
+                membership["data"]["manifest.json"] = json.dumps({
+                    "network_id": self.release["network"]["id"], "plane": "vault"})
+            else:
+                mount = next(item for item in node["volumeMounts"]
+                             if item["name"] == "initial-membership")
+                mount.pop("subPath")
+                mount["mountPath"] = "/etc/kerosene/node-membership"
+            with self.subTest(mutation=mutation), \
+                    self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+                lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
 
         changed = copy.deepcopy(self.artifact)
         bank = next(r for r in changed["resources"] if r["metadata"].get("name") == "node-bank")

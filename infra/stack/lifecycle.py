@@ -274,6 +274,7 @@ def verify_node_runtime_contract(stack, artifact, summary):
               "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
               "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
               "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+              "KEROSENE_INITIAL_MEMBERSHIP_MANIFEST_PATH": "/etc/kerosene/node-membership/manifest.json",
               "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
               "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
               "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
@@ -329,6 +330,25 @@ def verify_node_runtime_contract(stack, artifact, summary):
                 if volumes.get("onion-public") != {"name": "onion-public", "emptyDir": {}}:
                     raise ValueError("Node onion hostname publication volume differs")
                 expected_state_name = "node-" + plane + "-state"
+                expected_membership_name = "node-" + plane + "-membership"
+                if mounts.get("initial-membership") != {
+                        "name": "initial-membership",
+                        "mountPath": "/etc/kerosene/node-membership/manifest.json",
+                        "subPath": "manifest.json", "readOnly": True}:
+                    raise ValueError("Node membership manifest is not mounted as a read-only regular file")
+                if volumes.get("initial-membership") != {
+                        "name": "initial-membership",
+                        "configMap": {"name": expected_membership_name}}:
+                    raise ValueError("Node membership manifest source differs")
+                membership = resources.get(
+                    (resource["metadata"]["namespace"], "ConfigMap", expected_membership_name))
+                manifest_json = membership.get("data", {}).get("manifest.json") \
+                    if isinstance(membership, dict) else None
+                manifest = json.loads(manifest_json) if isinstance(manifest_json, str) else None
+                if (membership is None or membership.get("immutable") is not True or
+                        not isinstance(manifest, dict) or manifest.get("network_id") != summary["networkId"] or
+                        manifest.get("plane") != plane):
+                    raise ValueError("Node membership manifest source is absent, mutable or incompatible")
                 if mounts.get("state-snapshot") != {
                         "name": "state-snapshot", "mountPath": "/etc/kerosene/node-state",
                         "readOnly": True}:
@@ -347,7 +367,7 @@ def verify_node_runtime_contract(stack, artifact, summary):
         expected_members = summary["vaultCompatibility"]["members"]
         if any(len(observed[plane]) != expected_members for plane in ("bank", "vault")):
             raise ValueError("both Node planes require the complete independent member set")
-    except (ValueError, TypeError, KeyError, AttributeError):
+    except (ValueError, TypeError, KeyError, AttributeError, json.JSONDecodeError):
         raise stack.ApplyBlockedError(
             "Node manifest is incompatible with the two-plane Tor/mTLS runtime") from None
 

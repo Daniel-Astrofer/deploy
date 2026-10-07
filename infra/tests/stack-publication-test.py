@@ -109,7 +109,13 @@ class PublicationTest(unittest.TestCase):
                       "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}},
                      {"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
                       "metadata": {"name": "node-vault-state", "namespace": "kerosene-staging-vault"},
-                      "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}}]
+                      "data": {"attestation.json": "{}", "snapshot.bin": "synthetic-state"}},
+                     {"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                      "metadata": {"name": "node-bank-membership", "namespace": "kerosene-staging"},
+                      "data": {"manifest.json": json.dumps({"network_id": self.release["network"]["id"], "plane": "bank"})}},
+                     {"apiVersion": "v1", "kind": "ConfigMap", "immutable": True,
+                      "metadata": {"name": "node-vault-membership", "namespace": "kerosene-staging-vault"},
+                      "data": {"manifest.json": json.dumps({"network_id": self.release["network"]["id"], "plane": "vault"})}}]
         for name, service in self.release["services"].items():
             if name != "admin":
                 instances = ([{"name": "node-" + plane + ("" if index == 1 else "-" + str(index)),
@@ -135,6 +141,7 @@ class PublicationTest(unittest.TestCase):
                                   "KEROSENE_TLS_KEY_PATH": "/etc/kerosene/node-mtls/server.key",
                                   "KEROSENE_TLS_CLIENT_CA_PATH": "/etc/kerosene/node-mtls/ca.crt",
                                   "KEROSENE_TLS_CLIENT_IDENTITY_PEM": "/etc/kerosene/node-mtls/client-identity.pem",
+                                  "KEROSENE_INITIAL_MEMBERSHIP_MANIFEST_PATH": "/etc/kerosene/node-membership/manifest.json",
                                   "KEROSENE_STATE_SNAPSHOT_ATTESTATION_PATH": "/etc/kerosene/node-state/attestation.json",
                                   "KEROSENE_STATE_SNAPSHOT_PAYLOAD_PATH": "/etc/kerosene/node-state/snapshot.bin",
                                   "KEROSENE_TOR_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
@@ -170,9 +177,11 @@ class PublicationTest(unittest.TestCase):
                     if name == "node":
                         container["volumeMounts"] = [
                             {"name": "onion-public", "mountPath": "/onion", "readOnly": True},
+                            {"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True},
                             {"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True}]
                         pod_spec["volumes"] = [
                             {"name": "onion-public", "emptyDir": {}},
+                            {"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}},
                             {"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}}]
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
                                       "metadata": {"name": instance, "namespace": namespace},

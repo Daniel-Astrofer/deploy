@@ -270,6 +270,13 @@ financial readiness or consensus health. The approved topology contains six
 independent Node controllers (three Bank and three Vault plane) and three
 independent Vault controllers. Critical controllers are updated one at a time,
 with the complete group rechecked before and after every mutation.
+Each Node also receives the plane's immutable `node-<plane>-membership`
+ConfigMap. Its `manifest.json` key is mounted read-only with `subPath` at
+`/etc/kerosene/node-membership/manifest.json`, so the runtime sees a bounded
+regular file instead of Kubernetes' ConfigMap symlink. The Node validates the
+signed manifest against its genesis trust bundle and plane, then persists it
+before discovery and readiness. A mutable source, wrong network/plane, missing
+environment binding or directory mount blocks the deployment before apply.
 Each approved Node plane now also receives an immutable, read-only
 `node-<plane>-state` ConfigMap at `/etc/kerosene/node-state`. It contains the
 threshold-signed `StateSnapshotAttestationV1` and the exact payload bound by its
