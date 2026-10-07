@@ -1,0 +1,41 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kerosene-staging
+resources:
+  - namespace.yaml
+  - ../../base
+  - ../../components/staging-runtime
+patches:
+  - path: runtime-config.yaml
+  - path: delete-server-hpa.yaml
+  - path: delete-kfe-hpa.yaml
+  - target:
+      group: apps
+      version: v1
+      kind: StatefulSet
+      name: staging-lnd
+    patch: |-
+      - op: remove
+        path: /spec/template/spec/initContainers
+images:
+  - name: kerosene/server
+    newName: kerosene-cell.invalid/core
+    newTag: selected
+  - name: kerosene/kfe-service
+    newName: kerosene-cell.invalid/kfe
+    newTag: selected
+  - name: kerosene/web-page
+    newName: kerosene-cell.invalid/web-page
+    newTag: selected
+  - name: postgres
+    newName: kerosene-cell.invalid/postgres
+    newTag: selected
+  - name: redis
+    newName: kerosene-cell.invalid/redis
+    newTag: selected
+  - name: bitcoin/bitcoin
+    newName: kerosene-cell.invalid/bitcoin
+    newTag: selected
+  - name: lightninglabs/lnd
+    newName: kerosene-cell.invalid/lnd
+    newTag: selected

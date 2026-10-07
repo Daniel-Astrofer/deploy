@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-config
+data:
+  SPRING_PROFILES_ACTIVE: "staging"
+  BITCOIN_NETWORK: "testnet3"
+  REGION: "STAGING"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kfe-service-config
+data:
+  SPRING_PROFILES_ACTIVE: "staging,kfe"
+  BITCOIN_NETWORK: "testnet3"
+  REGION: "STAGING"

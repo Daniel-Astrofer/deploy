@@ -4,7 +4,7 @@ namespace: kerosene-staging
 resources:
   - ../../base
   - namespace.yaml
-  - staging-runtime.yaml
+  - ../../components/staging-runtime
   - staging-onion.yaml
   - core-tor-network-policy.yaml
 labels:
