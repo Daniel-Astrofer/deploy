@@ -177,10 +177,12 @@ class PublicationTest(unittest.TestCase):
                     if name == "node":
                         container["volumeMounts"] = [
                             {"name": "onion-public", "mountPath": "/onion", "readOnly": True},
+                            {"name": "node-identity", "mountPath": "/var/lib/kerosene/identity.key", "subPath": "identity.key", "readOnly": True},
                             {"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True},
                             {"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True}]
                         pod_spec["volumes"] = [
                             {"name": "onion-public", "emptyDir": {}},
+                            {"name": "node-identity", "secret": {"secretName": instance + "-identity", "defaultMode": 256, "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}},
                             {"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}},
                             {"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}}]
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",

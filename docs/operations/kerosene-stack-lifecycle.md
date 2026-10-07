@@ -277,6 +277,13 @@ regular file instead of Kubernetes' ConfigMap symlink. The Node validates the
 signed manifest against its genesis trust bundle and plane, then persists it
 before discovery and readiness. A mutable source, wrong network/plane, missing
 environment binding or directory mount blocks the deployment before apply.
+Every Node member additionally mounts exactly one external Secret named after
+its workload (`<workload>-identity`) at `/var/lib/kerosene/identity.key`. Only
+the `identity.key` item is projected, mode `0400`, read-only and with `subPath`.
+This keeps private root keys outside release artifacts while ensuring a fresh
+Cell starts with the identities already authorized by the signed roster;
+random first-boot identities cannot silently replace them. Secret preflight
+checks the six names and required keys without reading their values.
 Each approved Node plane now also receives an immutable, read-only
 `node-<plane>-state` ConfigMap at `/etc/kerosene/node-state`. It contains the
 threshold-signed `StateSnapshotAttestationV1` and the exact payload bound by its

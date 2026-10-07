@@ -329,6 +329,16 @@ def verify_node_runtime_contract(stack, artifact, summary):
                     raise ValueError("Node onion hostname is not mounted read-only")
                 if volumes.get("onion-public") != {"name": "onion-public", "emptyDir": {}}:
                     raise ValueError("Node onion hostname publication volume differs")
+                expected_identity_name = resource["metadata"]["name"] + "-identity"
+                if mounts.get("node-identity") != {
+                        "name": "node-identity", "mountPath": "/var/lib/kerosene/identity.key",
+                        "subPath": "identity.key", "readOnly": True}:
+                    raise ValueError("Node authorized identity is not mounted as a read-only file")
+                if volumes.get("node-identity") != {
+                        "name": "node-identity", "secret": {
+                            "secretName": expected_identity_name, "defaultMode": 256,
+                            "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}}:
+                    raise ValueError("Node authorized identity source differs")
                 expected_state_name = "node-" + plane + "-state"
                 expected_membership_name = "node-" + plane + "-membership"
                 if mounts.get("initial-membership") != {

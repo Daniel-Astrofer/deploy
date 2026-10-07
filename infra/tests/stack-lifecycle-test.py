@@ -115,9 +115,11 @@ class DeploymentTest(unittest.TestCase):
                     pod_spec["volumes"] = [{"name": "identity-data", "persistentVolumeClaim": {"claimName": claim}}]
                     if name == "node":
                         container["volumeMounts"].append({"name": "onion-public", "mountPath": "/onion", "readOnly": True})
+                        container["volumeMounts"].append({"name": "node-identity", "mountPath": "/var/lib/kerosene/identity.key", "subPath": "identity.key", "readOnly": True})
                         container["volumeMounts"].append({"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True})
                         container["volumeMounts"].append({"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True})
                         pod_spec["volumes"].append({"name": "onion-public", "emptyDir": {}})
+                        pod_spec["volumes"].append({"name": "node-identity", "secret": {"secretName": instance + "-identity", "defaultMode": 256, "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}})
                         pod_spec["volumes"].append({"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}})
                         pod_spec["volumes"].append({"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}})
                     resources.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
@@ -236,6 +238,27 @@ class DeploymentTest(unittest.TestCase):
                              if item["name"] == "initial-membership")
                 mount.pop("subPath")
                 mount["mountPath"] = "/etc/kerosene/node-membership"
+            with self.subTest(mutation=mutation), \
+                    self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+                lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+    def test_node_runtime_contract_requires_external_identity_per_member(self):
+        lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        for mutation in ("shared-secret", "writable", "missing-key"):
+            changed = copy.deepcopy(self.artifact)
+            bank = next(r for r in changed["resources"]
+                        if r["metadata"].get("name") == "node-bank")
+            pod = bank["spec"]["template"]["spec"]
+            node = pod["containers"][0]
+            if mutation == "shared-secret":
+                volume = next(item for item in pod["volumes"] if item["name"] == "node-identity")
+                volume["secret"]["secretName"] = "shared-node-identity"
+            elif mutation == "writable":
+                mount = next(item for item in node["volumeMounts"] if item["name"] == "node-identity")
+                mount["readOnly"] = False
+            else:
+                volume = next(item for item in pod["volumes"] if item["name"] == "node-identity")
+                volume["secret"]["items"][0]["key"] = "other.key"
             with self.subTest(mutation=mutation), \
                     self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
                 lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
