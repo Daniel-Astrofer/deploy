@@ -7,6 +7,7 @@ set -e
 
 TOR_LOG_FILE="/tmp/tor.log"
 TOR_READY_FILE="/tmp/tor-ready"
+HIDDEN_SERVICE_DIR=${KEROSENE_TOR_HIDDEN_SERVICE_DIR:-/var/lib/tor/kerosene_service}
 
 # Install Tor if not present
 if ! command -v tor > /dev/null 2>&1; then
@@ -52,22 +53,33 @@ fi
 # volume mounts. We must NOT fail on chown/chmod for those.
 mkdir -p /var/run/tor/socks
 mkdir -p /var/run/tor/control
-mkdir -p /var/lib/tor/kerosene_service/authorized_clients
+case "$HIDDEN_SERVICE_DIR" in
+  /var/lib/tor/*) ;;
+  *) echo "Invalid KEROSENE_TOR_HIDDEN_SERVICE_DIR" >&2; exit 1 ;;
+esac
+grep -Fq "HiddenServiceDir $HIDDEN_SERVICE_DIR" /etc/tor/torrc || {
+  echo "torrc does not bind the configured hidden-service directory" >&2
+  exit 1
+}
+if [ -n "${KEROSENE_TOR_IDENTITY_SOURCE:-}" ]; then
+  /usr/local/bin/seed-onion-identity
+fi
+mkdir -p "$HIDDEN_SERVICE_DIR/authorized_clients"
 # chown only top-level — avoid recursing into read-only mounted subdirs
 chown kerosene:kerosene /var/run/tor /var/run/tor/socks /var/run/tor/control 2>/dev/null || true
 chown kerosene:kerosene /var/lib/tor 2>/dev/null || true
-chown kerosene:kerosene /var/lib/tor/kerosene_service 2>/dev/null || true
-chown kerosene:kerosene /var/lib/tor/kerosene_service/authorized_clients 2>/dev/null || true
-chmod 700 /var/lib/tor/kerosene_service 2>/dev/null || true
+chown kerosene:kerosene "$HIDDEN_SERVICE_DIR" 2>/dev/null || true
+chown kerosene:kerosene "$HIDDEN_SERVICE_DIR/authorized_clients" 2>/dev/null || true
+chmod 700 "$HIDDEN_SERVICE_DIR" 2>/dev/null || true
 chmod 755 /var/run/tor/socks 2>/dev/null || true
 chmod 750 /var/run/tor/control 2>/dev/null || true
 
 # Authorized clients (stealth) — optional gate
-if [[ "${VAULT_TOR_AUTH_CLIENTS:-false}" == "true" ]]; then
+if [ "${VAULT_TOR_AUTH_CLIENTS:-false}" = "true" ]; then
   echo "==> Tor stealth auth enabled (VAULT_TOR_AUTH_CLIENTS=true)"
-  if ls /var/lib/tor/kerosene_service/authorized_clients/*.auth >/dev/null 2>&1; then
+  if ls "$HIDDEN_SERVICE_DIR"/authorized_clients/*.auth >/dev/null 2>&1; then
     echo "==> Found .auth files:"
-    ls -la /var/lib/tor/kerosene_service/authorized_clients/*.auth
+    ls -la "$HIDDEN_SERVICE_DIR"/authorized_clients/*.auth
     echo "==> The torrc must contain: HiddenServiceAuthorizeClient stealth kerosene_service"
   else
     echo "[!] VAULT_TOR_AUTH_CLIENTS=true but no .auth files found." >&2
@@ -78,7 +90,7 @@ fi
 
 echo "==> Starting Tor hidden service for Kerosene..."
 echo "==> Once connected, .onion address will be in:"
-echo "    /var/lib/tor/kerosene_service/hostname"
+echo "    $HIDDEN_SERVICE_DIR/hostname"
 echo ""
 
 # OnionBalance features removed for Push-Beaconing Architecture
@@ -93,6 +105,29 @@ TAIL_PID=$!
 # Tor will drop privileges to 65532 (User option in torrc) after starting as root.
 tor -f /etc/tor/torrc >"$TOR_LOG_FILE" 2>&1 &
 TOR_PID=$!
+
+if [ -n "${KEROSENE_TOR_IDENTITY_SOURCE:-}" ]; then
+  publish_path=${KEROSENE_TOR_ONION_PUBLISH_PATH:?KEROSENE_TOR_ONION_PUBLISH_PATH is required with an authorized identity}
+  [ "$publish_path" = /onion/hostname ] || {
+    echo "Invalid KEROSENE_TOR_ONION_PUBLISH_PATH" >&2
+    kill "$TOR_PID" 2>/dev/null || true
+    exit 1
+  }
+  while [ ! -s "$HIDDEN_SERVICE_DIR/hostname" ]; do
+    if ! kill -0 "$TOR_PID" 2>/dev/null; then
+      wait "$TOR_PID" || status=$?
+      exit "${status:-1}"
+    fi
+    sleep 1
+  done
+  if ! cmp -s "$KEROSENE_TOR_IDENTITY_SOURCE/hostname" "$HIDDEN_SERVICE_DIR/hostname"; then
+    echo "Tor-derived hostname differs from the authorized identity" >&2
+    kill "$TOR_PID" 2>/dev/null || true
+    wait "$TOR_PID" 2>/dev/null || true
+    exit 1
+  fi
+  install -m 0444 "$HIDDEN_SERVICE_DIR/hostname" "$publish_path"
+fi
 
 echo "==> Waiting for Tor to establish UDS socket..."
 # Only wait for socket if torrc configures a UDS SocksPort (vault has SocksPort 0)

@@ -284,6 +284,14 @@ This keeps private root keys outside release artifacts while ensuring a fresh
 Cell starts with the identities already authorized by the signed roster;
 random first-boot identities cannot silently replace them. Secret preflight
 checks the six names and required keys without reading their values.
+The co-located Tor sidecar likewise requires a unique external
+`<workload>-onion-identity` Secret containing `hostname`,
+`hs_ed25519_public_key` and `hs_ed25519_secret_key`. The approved Tor image
+validates their v3 formats, installs them atomically into the member's shared
+persistent volume, accepts an identical restart and refuses any mismatch. Its
+entrypoint cannot be overridden by the deployment. Consequently the onion
+endpoint signed into membership is reproducible across install, restart and
+recovery without embedding its private key in Git or the release archive.
 Each approved Node plane now also receives an immutable, read-only
 `node-<plane>-state` ConfigMap at `/etc/kerosene/node-state`. It contains the
 threshold-signed `StateSnapshotAttestationV1` and the exact payload bound by its

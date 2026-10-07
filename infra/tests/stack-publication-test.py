@@ -172,17 +172,29 @@ class PublicationTest(unittest.TestCase):
                                                        "timeoutSeconds": 6}
                     containers = [container]
                     if name in {"node", "vault"}:
-                        containers.append({"name": "tor", "image": self.release["services"]["tor"]["image"]})
+                        tor = {"name": "tor", "image": self.release["services"]["tor"]["image"]}
+                        containers.append(tor)
                     pod_spec = {"containers": containers}
                     if name == "node":
+                        tor["env"] = [
+                            {"name": "KEROSENE_TOR_IDENTITY_SOURCE", "value": "/etc/kerosene/tor-identity"},
+                            {"name": "KEROSENE_TOR_HIDDEN_SERVICE_DIR", "value": "/var/lib/tor/node"},
+                            {"name": "KEROSENE_TOR_ONION_PUBLISH_PATH", "value": "/onion/hostname"}]
+                        tor["volumeMounts"] = [
+                            {"name": "identity-data", "mountPath": "/var/lib/tor"},
+                            {"name": "onion-public", "mountPath": "/onion"},
+                            {"name": "tor-identity", "mountPath": "/etc/kerosene/tor-identity", "readOnly": True}]
                         container["volumeMounts"] = [
+                            {"name": "identity-data", "mountPath": "/var/lib/kerosene"},
                             {"name": "onion-public", "mountPath": "/onion", "readOnly": True},
                             {"name": "node-identity", "mountPath": "/var/lib/kerosene/identity.key", "subPath": "identity.key", "readOnly": True},
                             {"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True},
                             {"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True}]
                         pod_spec["volumes"] = [
+                            {"name": "identity-data", "persistentVolumeClaim": {"claimName": instance + "-data"}},
                             {"name": "onion-public", "emptyDir": {}},
                             {"name": "node-identity", "secret": {"secretName": instance + "-identity", "defaultMode": 256, "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}},
+                            {"name": "tor-identity", "secret": {"secretName": instance + "-onion-identity", "defaultMode": 256, "items": [{"key": key, "path": key, "mode": 256} for key in ("hostname", "hs_ed25519_public_key", "hs_ed25519_secret_key")]}},
                             {"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}},
                             {"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}}]
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",

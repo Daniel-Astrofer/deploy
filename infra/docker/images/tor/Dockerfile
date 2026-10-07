@@ -24,8 +24,11 @@ RUN mkdir -p /var/run/tor/socks /var/lib/tor/kerosene_service/authorized_clients
     chmod 700 /var/lib/tor/kerosene_service && \
     chmod 755 /var/run/tor/socks
 
-# The entrypoint.sh and torrc are mounted as read-only volumes at runtime
-# by docker-compose so we don't COPY them here — they can be edited without rebuild.
+COPY entrypoint.sh /entrypoint.sh
+COPY seed-onion-identity.sh /usr/local/bin/seed-onion-identity
+RUN chmod 0555 /entrypoint.sh /usr/local/bin/seed-onion-identity
+
+# A deployment supplies only torrc and external identity material at runtime.
 
 # Must run as root initially so Tor can drop privs to kerosene user internally
 USER root

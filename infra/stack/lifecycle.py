@@ -314,8 +314,12 @@ def verify_node_runtime_contract(stack, artifact, summary):
                             set(reference) - {"name", "key", "optional"} or not reference.get("name") or
                             not reference.get("key") or reference.get("optional", False) is not False):
                         raise ValueError("Node bootstrap input is not externally referenced")
-                if sum(peer.get("image") == tor_image for peer in pod_containers) != 1:
+                tor_peers = [peer for peer in pod_containers if peer.get("image") == tor_image]
+                if len(tor_peers) != 1:
                     raise ValueError("Node does not have one co-located approved Tor sidecar")
+                tor = tor_peers[0]
+                if tor.get("command") is not None or tor.get("args") is not None:
+                    raise ValueError("Node Tor sidecar bypasses the approved image entrypoint")
                 probe = container.get("readinessProbe", {})
                 if (probe.get("exec", {}).get("command") !=
                         ["/usr/local/bin/kerosene-node", "--health-probe"] or
@@ -323,10 +327,20 @@ def verify_node_runtime_contract(stack, artifact, summary):
                     raise ValueError("Node readiness is not authenticated by its binary")
                 pod = resource["spec"]["template"]["spec"]
                 mounts = {mount.get("name"): mount for mount in container.get("volumeMounts", [])}
+                tor_mounts = {mount.get("name"): mount for mount in tor.get("volumeMounts", [])}
                 volumes = {volume.get("name"): volume for volume in pod.get("volumes", [])}
+                if mounts.get("identity-data") != {
+                        "name": "identity-data", "mountPath": "/var/lib/kerosene"}:
+                    raise ValueError("Node persistent state mount differs")
+                if tor_mounts.get("identity-data") != {
+                        "name": "identity-data", "mountPath": "/var/lib/tor"}:
+                    raise ValueError("Node and Tor do not share persistent identity storage")
                 if mounts.get("onion-public") != {
                         "name": "onion-public", "mountPath": "/onion", "readOnly": True}:
                     raise ValueError("Node onion hostname is not mounted read-only")
+                if tor_mounts.get("onion-public") != {
+                        "name": "onion-public", "mountPath": "/onion"}:
+                    raise ValueError("Tor cannot publish the Node onion hostname")
                 if volumes.get("onion-public") != {"name": "onion-public", "emptyDir": {}}:
                     raise ValueError("Node onion hostname publication volume differs")
                 expected_identity_name = resource["metadata"]["name"] + "-identity"
@@ -339,6 +353,30 @@ def verify_node_runtime_contract(stack, artifact, summary):
                             "secretName": expected_identity_name, "defaultMode": 256,
                             "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}}:
                     raise ValueError("Node authorized identity source differs")
+                expected_onion_name = resource["metadata"]["name"] + "-onion-identity"
+                tor_environment = {entry.get("name"): entry for entry in tor.get("env", [])}
+                if tor_environment != {
+                        "KEROSENE_TOR_IDENTITY_SOURCE": {
+                            "name": "KEROSENE_TOR_IDENTITY_SOURCE",
+                            "value": "/etc/kerosene/tor-identity"},
+                        "KEROSENE_TOR_HIDDEN_SERVICE_DIR": {
+                            "name": "KEROSENE_TOR_HIDDEN_SERVICE_DIR",
+                            "value": "/var/lib/tor/node"},
+                        "KEROSENE_TOR_ONION_PUBLISH_PATH": {
+                            "name": "KEROSENE_TOR_ONION_PUBLISH_PATH",
+                            "value": "/onion/hostname"}}:
+                    raise ValueError("Tor authorized identity bootstrap differs")
+                if tor_mounts.get("tor-identity") != {
+                        "name": "tor-identity", "mountPath": "/etc/kerosene/tor-identity",
+                        "readOnly": True}:
+                    raise ValueError("Tor authorized identity is not mounted read-only")
+                onion_items = [{"key": key, "path": key, "mode": 256} for key in
+                               ("hostname", "hs_ed25519_public_key", "hs_ed25519_secret_key")]
+                if volumes.get("tor-identity") != {
+                        "name": "tor-identity", "secret": {
+                            "secretName": expected_onion_name, "defaultMode": 256,
+                            "items": onion_items}}:
+                    raise ValueError("Tor authorized identity source differs")
                 expected_state_name = "node-" + plane + "-state"
                 expected_membership_name = "node-" + plane + "-membership"
                 if mounts.get("initial-membership") != {

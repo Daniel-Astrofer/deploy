@@ -108,18 +108,28 @@ class DeploymentTest(unittest.TestCase):
                     container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}, "timeoutSeconds": 6}
                 pod_spec = {"containers": [container]}
                 if name in {"node", "vault"}:
-                    pod_spec["containers"].append({"name": "tor", "image": self.release["services"]["tor"]["image"]})
+                    tor = {"name": "tor", "image": self.release["services"]["tor"]["image"]}
+                    pod_spec["containers"].append(tor)
                 if name in {"node", "vault"}:
                     claim = instance + "-data"
                     container["volumeMounts"] = [{"name": "identity-data", "mountPath": "/var/lib/kerosene"}]
                     pod_spec["volumes"] = [{"name": "identity-data", "persistentVolumeClaim": {"claimName": claim}}]
                     if name == "node":
+                        tor["env"] = [
+                            {"name": "KEROSENE_TOR_IDENTITY_SOURCE", "value": "/etc/kerosene/tor-identity"},
+                            {"name": "KEROSENE_TOR_HIDDEN_SERVICE_DIR", "value": "/var/lib/tor/node"},
+                            {"name": "KEROSENE_TOR_ONION_PUBLISH_PATH", "value": "/onion/hostname"}]
+                        tor["volumeMounts"] = [
+                            {"name": "identity-data", "mountPath": "/var/lib/tor"},
+                            {"name": "onion-public", "mountPath": "/onion"},
+                            {"name": "tor-identity", "mountPath": "/etc/kerosene/tor-identity", "readOnly": True}]
                         container["volumeMounts"].append({"name": "onion-public", "mountPath": "/onion", "readOnly": True})
                         container["volumeMounts"].append({"name": "node-identity", "mountPath": "/var/lib/kerosene/identity.key", "subPath": "identity.key", "readOnly": True})
                         container["volumeMounts"].append({"name": "initial-membership", "mountPath": "/etc/kerosene/node-membership/manifest.json", "subPath": "manifest.json", "readOnly": True})
                         container["volumeMounts"].append({"name": "state-snapshot", "mountPath": "/etc/kerosene/node-state", "readOnly": True})
                         pod_spec["volumes"].append({"name": "onion-public", "emptyDir": {}})
                         pod_spec["volumes"].append({"name": "node-identity", "secret": {"secretName": instance + "-identity", "defaultMode": 256, "items": [{"key": "identity.key", "path": "identity.key", "mode": 256}]}})
+                        pod_spec["volumes"].append({"name": "tor-identity", "secret": {"secretName": instance + "-onion-identity", "defaultMode": 256, "items": [{"key": key, "path": key, "mode": 256} for key in ("hostname", "hs_ed25519_public_key", "hs_ed25519_secret_key")]}})
                         pod_spec["volumes"].append({"name": "initial-membership", "configMap": {"name": "node-" + instance_spec["plane"] + "-membership"}})
                         pod_spec["volumes"].append({"name": "state-snapshot", "configMap": {"name": "node-" + instance_spec["plane"] + "-state"}})
                     resources.append({"apiVersion": "v1", "kind": "PersistentVolumeClaim",
@@ -259,6 +269,26 @@ class DeploymentTest(unittest.TestCase):
             else:
                 volume = next(item for item in pod["volumes"] if item["name"] == "node-identity")
                 volume["secret"]["items"][0]["key"] = "other.key"
+            with self.subTest(mutation=mutation), \
+                    self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
+                lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
+
+    def test_node_runtime_contract_requires_authorized_onion_identity(self):
+        lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)
+        for mutation in ("shared-secret", "entrypoint-bypass", "unshared-state"):
+            changed = copy.deepcopy(self.artifact)
+            bank = next(r for r in changed["resources"]
+                        if r["metadata"].get("name") == "node-bank")
+            pod = bank["spec"]["template"]["spec"]
+            tor = next(item for item in pod["containers"] if item["name"] == "tor")
+            if mutation == "shared-secret":
+                volume = next(item for item in pod["volumes"] if item["name"] == "tor-identity")
+                volume["secret"]["secretName"] = "shared-onion-identity"
+            elif mutation == "entrypoint-bypass":
+                tor["command"] = ["tor"]
+            else:
+                mount = next(item for item in tor["volumeMounts"] if item["name"] == "identity-data")
+                mount["name"] = "other-data"
             with self.subTest(mutation=mutation), \
                     self.assertRaisesRegex(stack.ApplyBlockedError, "two-plane"):
                 lifecycle.verify_node_runtime_contract(stack, changed, self.summary)
