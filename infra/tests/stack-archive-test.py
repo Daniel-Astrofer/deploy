@@ -414,6 +414,33 @@ class PackageTest(LocalTest):
         with self.assertRaisesRegex(archive.ArchiveError, "not an approved service image"):
             self.assemble("unsafe-init")
 
+    def test_candidate_runtime_summary_requires_balanced_node_vault_topology(self):
+        import lifecycle
+        node_image = "registry.example.invalid/node@sha256:" + "1" * 64
+        vault_image = "registry.example.invalid/vault@sha256:" + "2" * 64
+        selected = {"node": {"image": node_image}, "vault": {"image": vault_image}}
+        resources = []
+        for plane in ("bank", "vault"):
+            for index in range(3):
+                resources.append({"kind": "Deployment", "spec": {"template": {"spec": {
+                    "containers": [{"image": node_image, "env": [
+                        {"name": "KEROSENE_NETWORK_ID", "value": "network-a"},
+                        {"name": "KEROSENE_DISCOVERY_PLANE", "value": plane}]}]}}}})
+        for _ in range(3):
+            resources.append({"kind": "Deployment", "spec": {"template": {"spec": {
+                "containers": [{"image": vault_image}]}}}})
+        summary = package.candidate_runtime_summary({"resources": resources}, selected, lifecycle)
+        self.assertEqual(summary["networkId"], "network-a")
+        self.assertEqual(summary["vaultCompatibility"], {"members": 3})
+
+        resources.pop()
+        with self.assertRaisesRegex(archive.ArchiveError, "counts differ"):
+            package.candidate_runtime_summary({"resources": resources}, selected, lifecycle)
+
+        resources = resources[:2] + resources[3:]
+        with self.assertRaisesRegex(archive.ArchiveError, "equal nonempty"):
+            package.candidate_runtime_summary({"resources": resources}, {"node": selected["node"]}, lifecycle)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

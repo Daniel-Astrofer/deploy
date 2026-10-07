@@ -192,6 +192,44 @@ def deployment_shape(value, services):
     # policy validation. This packager never interprets a manifest as instructions.
 
 
+def candidate_runtime_summary(deployment, selected, lifecycle):
+    """Derive untrusted topology facts needed for candidate self-consistency checks."""
+    summary = {"services": selected}
+    node = selected.get("node", {}).get("image")
+    vault = selected.get("vault", {}).get("image")
+    node_planes = {"bank": 0, "vault": 0}
+    network_ids = set()
+    vault_members = 0
+    for resource in deployment["resources"]:
+        if resource.get("kind") not in lifecycle.WORKLOADS:
+            continue
+        found_vault = False
+        for container in lifecycle.containers(resource):
+            if node is not None and container.get("image") == node:
+                environment = {entry.get("name"): entry.get("value")
+                               for entry in container.get("env", [])
+                               if set(entry) == {"name", "value"}}
+                plane = environment.get("KEROSENE_DISCOVERY_PLANE")
+                network = environment.get("KEROSENE_NETWORK_ID")
+                if plane not in node_planes or not isinstance(network, str):
+                    raise ArchiveError("candidate Node topology lacks literal plane/network identity")
+                node_planes[plane] += 1
+                network_ids.add(network)
+            if vault is not None and container.get("image") == vault:
+                found_vault = True
+        vault_members += int(found_vault)
+    if node is not None:
+        if len(network_ids) != 1 or node_planes["bank"] != node_planes["vault"] or not node_planes["bank"]:
+            raise ArchiveError("candidate requires equal nonempty Bank and Vault Node planes on one network")
+        summary["networkId"] = network_ids.pop()
+    members = node_planes["bank"] if node is not None else vault_members
+    if vault is not None and members != vault_members:
+        raise ArchiveError("candidate Node and Vault member counts differ")
+    if node is not None or vault is not None:
+        summary["vaultCompatibility"] = {"members": members}
+    return summary
+
+
 def lifecycle_configuration(raw, deployment, services):
     """Use only installed controller code, never a module from selected sources."""
     lifecycle_path = Path(__file__).with_name("lifecycle.py")
@@ -236,10 +274,11 @@ def lifecycle_configuration(raw, deployment, services):
             if "configDigest" in service and service["configDigest"] != computed:
                 raise ArchiveError("selected configuration digest mismatch: " + name)
             service["configDigest"] = computed
+        summary = candidate_runtime_summary(deployment, selected, lifecycle)
         with tempfile.TemporaryDirectory(prefix="kerosene-candidate-manifest-") as temporary:
             path = Path(temporary) / "deployment.json"
             write_new(path, raw)
-            lifecycle.verify_deployment(stack, {"services": selected}, {"services": selected}, str(path))
+            lifecycle.verify_deployment(stack, {"services": selected}, summary, str(path))
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise ArchiveError("installed lifecycle rejected candidate configuration: " + str(exc)) from exc
     if controller_tools != {name: file_record(path)["digest"] for name, path in controller_paths.items()}:
