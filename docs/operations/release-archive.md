@@ -130,6 +130,37 @@ The input contract is `kerosene.release-candidate-input.v1`. Unknown fields
 are rejected. This synthetic example requires actual full commits and actual
 material digests before use:
 
+The deployment file can be rendered reproducibly from reviewed Kubernetes YAML
+without applying it to a cluster:
+
+```sh
+infra/render-cell-deployment \
+  --images /srv/operator/cell-images.json \
+  --resources /srv/operator/complete-cell.yaml \
+  --admin-config /srv/operator/admin-public.json \
+  --output /srv/operator/materials/deployment.json
+```
+
+`cell-images.json` uses schema `kerosene.cell-images/v1` and maps every Cell
+service to one OCI reference pinned by digest. Workload YAML uses explicit
+`kerosene-cell.invalid/<service>:selected` placeholders; unselected, mutable or
+unknown workload images are rejected. The command uses `kubectl` only for
+bounded local YAML decoding, strips its synthetic last-applied annotation,
+substitutes the selected digests, runs the installed lifecycle validator and
+writes canonical JSON as a new read-only file. It prints the exact deployment
+digest and every computed component configuration digest for the candidate
+selection. It never contacts or mutates a cluster.
+
+```json
+{
+  "schema": "kerosene.cell-images/v1",
+  "services": {
+    "admin": {"image": "registry.example.invalid/admin@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+    "core": {"image": "registry.example.invalid/core@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}
+  }
+}
+```
+
 ```json
 {
   "schema": "kerosene.release-candidate-input.v1",

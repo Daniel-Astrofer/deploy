@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Create a canonical, lifecycle-validated deployment.json without applying it."""
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "stack"))
+import archive
+import render_deployment
+
+stack_loader = importlib.machinery.SourceFileLoader("render_stack", str(ROOT / "kerosene-stack"))
+stack_spec = importlib.util.spec_from_loader(stack_loader.name, stack_loader)
+stack = importlib.util.module_from_spec(stack_spec)
+sys.modules[stack_spec.name] = stack
+stack_loader.exec_module(stack)
+package_spec = importlib.util.spec_from_file_location("render_package", ROOT / "stack/package-release.py")
+package = importlib.util.module_from_spec(package_spec)
+package_spec.loader.exec_module(package)
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--images", required=True, help="kerosene.cell-images/v1 with pinned OCI digests")
+parser.add_argument("--resources", required=True, help="local multi-document Kubernetes YAML")
+parser.add_argument("--admin-config", required=True, help="public Admin configuration JSON")
+parser.add_argument("--output", required=True, help="new deployment.json; never overwritten")
+args = parser.parse_args()
+
+try:
+    result = render_deployment.render(stack, package, args.images, args.resources,
+                                      args.admin_config, args.output)
+except (archive.ArchiveError, stack.ReleaseValidationError, OSError, ValueError) as error:
+    print(f"render failed: {error}", file=sys.stderr)
+    raise SystemExit(65)
+print(json.dumps(result, indent=2, sort_keys=True))
