@@ -7,7 +7,8 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 65532 operator
+    && groupadd --gid 65532 kerosene \
+    && useradd --create-home --uid 65532 --gid 65532 kerosene
 COPY --from=build /src/target/release/kerosene-rsctl /usr/local/bin/kerosene-rsctl
 USER 65532:65532
 ENTRYPOINT ["kerosene-rsctl"]
