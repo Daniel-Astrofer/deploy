@@ -159,6 +159,13 @@ class RenderDeploymentTest(unittest.TestCase):
         self.assertEqual(len(workloads), 16)
         self.assertEqual(observed, selected)
         self.assertEqual(set(result["configurationDigests"]), set(services))
+        plan = render_deployment.lifecycle.initial_database_plan(stack, deployment)
+        self.assertEqual(plan["postgres"]["bootstrapSecret"]["name"],
+                         "kerosene-postgres-bootstrap")
+        self.assertEqual(plan["services"]["core"]["runtimeSecret"]["name"],
+                         "kerosene-core-db-secrets")
+        self.assertEqual(plan["services"]["kfe"]["runtimeSecret"]["name"],
+                         "kerosene-kfe-db-secrets")
         unsafe_foundation = self.root / "unsafe-foundation.yaml"
         unsafe_foundation.write_text(
             foundation.read_text().replace("automountServiceAccountToken: false",

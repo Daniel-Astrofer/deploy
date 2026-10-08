@@ -3,10 +3,12 @@ kind: Kustomization
 namespace: kerosene-staging
 resources:
   - namespace.yaml
+  - database-plan.yaml
   - ../../base
   - ../../components/staging-runtime
 patches:
   - path: runtime-config.yaml
+  - path: database-bindings.yaml
   - path: delete-server-hpa.yaml
   - path: delete-kfe-hpa.yaml
   - target:

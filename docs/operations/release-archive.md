@@ -176,6 +176,12 @@ paths; it never contains values. No Secret value, private key, DKG share or cred
 accepted or generated. `kubectl` is used only for local Kustomize/YAML decoding;
 the command never selects or contacts a cluster.
 
+The foundation includes the approved initial-database plan and binds PostgreSQL,
+Core and KFE to five distinct bootstrap, migration and runtime Secret identities.
+Its two SQL primitive digests are checked against the installed controller while
+rendering. Consequently the prepared manifest is eligible for the initial
+migration path; a structurally valid legacy manifest without this plan is not.
+
 After an independent ceremony or secret manager has populated those paths,
 copy the template outside the prepared read-only directory, keep the manifest
 and every referenced value file owner-only (`0600`), and provision them into the
