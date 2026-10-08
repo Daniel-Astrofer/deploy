@@ -2,11 +2,10 @@
 
 import re
 from archive import ArchiveError, canonical_bytes, write_new
+import lifecycle
 
 
-VAULT_TORRC = ("SocksPort 0.0.0.0:9050\nDataDirectory /var/lib/tor\n"
-               "HiddenServiceDir /var/lib/tor/vault\nHiddenServiceVersion 3\n"
-               "HiddenServicePort 7801 127.0.0.1:7801\nLog notice stdout\n")
+VAULT_TORRC = lifecycle.VAULT_TORRC
 
 
 def mode_items(keys):

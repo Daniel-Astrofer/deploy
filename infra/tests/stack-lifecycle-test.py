@@ -21,6 +21,7 @@ stack = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = stack
 loader.exec_module(stack)
 lifecycle = stack.lifecycle
+import vault_resources
 
 
 class DeploymentTest(unittest.TestCase):
@@ -57,7 +58,7 @@ class DeploymentTest(unittest.TestCase):
                               "data": {"manifest.json": json.dumps({
                                   "network_id": self.release["network"]["id"], "plane": plane})}})
         for name, service in self.release["services"].items():
-            if name == "admin":
+            if name in {"admin", "vault"}:
                 continue
             instances = ([{"name": "node-" + plane + ("" if index == 1 else "-" + str(index)),
                            "plane": plane,
@@ -149,6 +150,13 @@ class DeploymentTest(unittest.TestCase):
                                       "metadata": {"name": claim, "namespace": namespace},
                                       "spec": {"accessModes": ["ReadWriteOnce"], "resources": {"requests": {"storage": "1Gi"}}}})
                 resources.append({"apiVersion": "apps/v1", "kind": "Deployment", "metadata": {"name": instance, "namespace": namespace}, "spec": {"replicas": 1, "selector": {"matchLabels": {"app": instance}}, "template": {"metadata": {"labels": {"app": instance}}, "spec": pod_spec}}})
+        vault_items = vault_resources.generate(
+            self.release["network"]["id"], "a" * 64)["items"]
+        for resource in vault_items:
+            if resource["kind"] == "Deployment":
+                for runtime in resource["spec"]["template"]["spec"]["containers"]:
+                    runtime["image"] = self.release["services"][runtime["name"]]["image"]
+        resources.extend(vault_items)
         self.artifact = {"schema": lifecycle.SCHEMA, "environment": "staging-cell", "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://core.invalid"}}}
         for name, service in self.release["services"].items():
             service["configDigest"] = lifecycle.digest(lifecycle.component_config(self.artifact, service["image"], name))
@@ -172,12 +180,13 @@ class DeploymentTest(unittest.TestCase):
 
     def test_vault_probe_requires_url_in_approved_configuration(self):
         vault = next(r for r in self.artifact["resources"] if r["metadata"]["name"] == "vault-1")
-        container = vault["spec"]["template"]["spec"]["containers"][0]
+        container = next(item for item in vault["spec"]["template"]["spec"]["containers"]
+                         if item["name"] == "vault")
         container["readinessProbe"] = {"exec": {"command": ["/usr/local/bin/kerosene-vault", "--health-probe"]}, "timeoutSeconds": 6}
         container["env"] = [{"name": "VAULT_HEALTH_PROBE_URL", "valueFrom": {"configMapKeyRef": {"name": "probe", "key": "url"}}}]
         with self.assertRaises(stack.ApplyBlockedError):
             lifecycle.verify_vault_probe_configuration(stack, self.artifact)
-        config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"namespace": "kerosene-staging", "name": "probe"}, "data": {"url": "https://vault.example:7801/v1/local-health"}}
+        config = {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"namespace": "kerosene-staging-vault", "name": "probe"}, "data": {"url": "https://vault.example:7801/v1/local-health"}}
         self.artifact["resources"].append(config)
         lifecycle.verify_vault_probe_configuration(stack, self.artifact)
         for url in ("http://vault.example/v1/local-health", "https://user@vault.example/v1/local-health", "https://vault.example/", "https://vault.example/v1/local-health?x=1", "https://192.0.2.1/v1/local-health", "https://[::1]/v1/local-health", "https://2130706433/v1/local-health", "https://vault.example:0/v1/local-health"):
@@ -197,7 +206,8 @@ class DeploymentTest(unittest.TestCase):
     def test_vault_runtime_contract_rejects_removed_profiles_and_inline_authority(self):
         lifecycle.verify_vault_runtime_contract(stack, self.artifact, self.summary)
         vault = next(r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-1")
-        container = vault["spec"]["template"]["spec"]["containers"][0]
+        container = next(item for item in vault["spec"]["template"]["spec"]["containers"]
+                         if item["name"] == "vault")
         mutations = (("KEROSENE_ENV", {"name": "KEROSENE_ENV", "value": "staging"}),
                      ("VAULT_TRANSPORT", {"name": "VAULT_TRANSPORT", "value": "clearnet"}),
                      ("VAULT_LISTEN_ADDR", {"name": "VAULT_LISTEN_ADDR", "value": "0.0.0.0:7801"}),
@@ -212,10 +222,34 @@ class DeploymentTest(unittest.TestCase):
                 lifecycle.verify_vault_runtime_contract(stack, self.artifact, self.summary)
             container["env"] = copy.deepcopy(next(
                 r for r in self.artifact["resources"] if r["metadata"].get("name") == "vault-2"
-            )["spec"]["template"]["spec"]["containers"][0]["env"])
-        vault["spec"]["template"]["spec"]["containers"].pop()
+            )["spec"]["template"]["spec"]["containers"][1]["env"])
+        vault["spec"]["template"]["spec"]["containers"] = [container]
         with self.assertRaisesRegex(stack.ApplyBlockedError, "hardened production"):
             lifecycle.verify_vault_runtime_contract(stack, self.artifact, self.summary)
+
+    def test_vault_runtime_contract_binds_member_tor_storage_and_mtls(self):
+        lifecycle.verify_vault_runtime_contract(stack, self.artifact, self.summary)
+        for mutation in ("shared-onion", "entrypoint-bypass", "mutable-torrc", "foreign-mtls"):
+            changed = copy.deepcopy(self.artifact)
+            vault = next(item for item in changed["resources"]
+                         if item["kind"] == "Deployment" and item["metadata"]["name"] == "vault-1")
+            pod = vault["spec"]["template"]["spec"]
+            tor = next(item for item in pod["containers"] if item["name"] == "tor")
+            if mutation == "shared-onion":
+                volume = next(item for item in pod["volumes"] if item["name"] == "tor-identity")
+                volume["secret"]["secretName"] = "shared-onion"
+            elif mutation == "entrypoint-bypass":
+                tor["command"] = ["tor"]
+            elif mutation == "mutable-torrc":
+                config = next(item for item in changed["resources"]
+                              if item["kind"] == "ConfigMap" and item["metadata"]["name"] == "vault-1-tor")
+                config["immutable"] = False
+            else:
+                volume = next(item for item in pod["volumes"] if item["name"] == "vault-mtls")
+                volume["secret"]["secretName"] = "foreign-mtls"
+            with self.subTest(mutation=mutation), \
+                    self.assertRaisesRegex(stack.ApplyBlockedError, "hardened production"):
+                lifecycle.verify_vault_runtime_contract(stack, changed, self.summary)
 
     def test_node_runtime_contract_requires_two_loopback_tor_planes(self):
         lifecycle.verify_node_runtime_contract(stack, self.artifact, self.summary)

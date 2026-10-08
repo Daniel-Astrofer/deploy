@@ -27,6 +27,7 @@ INFRA = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(INFRA / "stack"))
 import publication as pub
 import archive
+import vault_resources
 
 
 def command(argv):
@@ -122,7 +123,7 @@ class PublicationTest(unittest.TestCase):
                               "data": {"genesis-trust-bundle.json": json.dumps({
                                   "network_id": self.release["network"]["id"]})}})
         for name, service in self.release["services"].items():
-            if name != "admin":
+            if name not in {"admin", "vault"}:
                 instances = ([{"name": "node-" + plane + ("" if index == 1 else "-" + str(index)),
                                "plane": plane,
                                "namespace": "kerosene-staging" if plane == "bank" else "kerosene-staging-vault"}
@@ -214,6 +215,12 @@ class PublicationTest(unittest.TestCase):
                     resources.append({"apiVersion": "apps/v1", "kind": "Deployment",
                                       "metadata": {"name": instance, "namespace": namespace},
                                       "spec": {"replicas": 1, "template": {"spec": pod_spec}}})
+        vault_items = vault_resources.generate(self.release["network"]["id"], "a" * 64)["items"]
+        for resource in vault_items:
+            if resource["kind"] == "Deployment":
+                for runtime in resource["spec"]["template"]["spec"]["containers"]:
+                    runtime["image"] = self.release["services"][runtime["name"]]["image"]
+        resources.extend(vault_items)
         self.deployment = {"schema": "kerosene.stack.deployment/v1", "environment": "staging-cell",
                            "resources": resources, "admin": {"image": self.release["services"]["admin"]["image"], "config": {"apiBaseUrl": "https://synthetic-core.invalid"}}}
         for name, service in self.release["services"].items():

@@ -33,6 +33,9 @@ DATABASE_SCRIPTS = ("create-service-databases.sql", "service-runtime-grants.sql"
 NODE_TORRC = ("SocksPort 0.0.0.0:9050\nDataDirectory /var/lib/tor\n"
               "HiddenServiceDir /var/lib/tor/node\nHiddenServiceVersion 3\n"
               "HiddenServicePort 8800 127.0.0.1:8800\nLog notice stdout\n")
+VAULT_TORRC = ("SocksPort 0.0.0.0:9050\nDataDirectory /var/lib/tor\n"
+               "HiddenServiceDir /var/lib/tor/vault\nHiddenServiceVersion 3\n"
+               "HiddenServicePort 7801 127.0.0.1:7801\nLog notice stdout\n")
 
 # These are implementation capabilities, never caller-supplied declarations.
 # Remove a blocker only with the corresponding implementation and integration
@@ -215,9 +218,14 @@ def verify_vault_runtime_contract(stack, artifact, summary):
                 "VAULT_GENESIS_N": str(summary["vaultCompatibility"]["members"]),
                 "VAULT_TLS_VERIFY_MODE": "onion_or_spiffe", "BITCOIN_NETWORK": "testnet3",
                 "VAULT_SOCKS_PROXY": "socks5h://127.0.0.1:9050",
-                "VAULT_SHARE_STORE": "aead_disk", "VAULT_DATA_DIR": "/var/lib/kerosene-vault"}
+                "VAULT_SHARE_STORE": "aead_disk", "VAULT_DATA_DIR": "/var/lib/kerosene-vault",
+                "VAULT_TLS_CERT_PATH": "/etc/kerosene/vault-mtls/server.crt",
+                "VAULT_TLS_KEY_PATH": "/etc/kerosene/vault-mtls/server.key",
+                "VAULT_TLS_CLIENT_CA_PATH": "/etc/kerosene/vault-mtls/ca.crt",
+                "VAULT_TLS_CLIENT_CERT_PATH": "/etc/kerosene/vault-mtls/client.crt",
+                "VAULT_TLS_CLIENT_KEY_PATH": "/etc/kerosene/vault-mtls/client.key"}
     protected = {"VAULT_SEED_PEERS", "VAULT_AUDIT_PUBKEY_ALLOWLIST", "VAULT_TLS_PEER_SPIFFE_ID",
-                 "VAULT_ATTESTATION_ROOT", "VAULT_DATA_PASSPHRASE"}
+                 "VAULT_ATTESTATION_ROOT", "VAULT_DATA_PASSPHRASE", "VAULT_KEROSENE_NODE_URL"}
     observed = 0
     try:
         for resource in artifact["resources"]:
@@ -229,8 +237,12 @@ def verify_vault_runtime_contract(stack, artifact, summary):
                     continue
                 observed += 1
                 tor_image = summary["services"]["tor"]["image"]
-                if sum(peer.get("image") == tor_image for peer in pod_containers) != 1:
+                tor_peers = [peer for peer in pod_containers if peer.get("image") == tor_image]
+                if len(tor_peers) != 1:
                     raise ValueError("Vault does not have one co-located approved Tor sidecar")
+                tor = tor_peers[0]
+                if tor.get("command") is not None or tor.get("args") is not None:
+                    raise ValueError("Vault Tor sidecar bypasses the approved image entrypoint")
                 entries = container.get("env", [])
                 if len(entries) != len({entry.get("name") for entry in entries}):
                     raise ValueError("duplicate Vault environment")
@@ -254,6 +266,51 @@ def verify_vault_runtime_contract(stack, artifact, summary):
                 probe = container.get("readinessProbe", {})
                 if probe.get("exec", {}).get("command") != ["/usr/local/bin/kerosene-vault", "--health-probe"]:
                     raise ValueError("Vault readiness is not authenticated by its binary")
+                pod = resource["spec"]["template"]["spec"]
+                mounts = {mount.get("name"): mount for mount in container.get("volumeMounts", [])}
+                tor_mounts = {mount.get("name"): mount for mount in tor.get("volumeMounts", [])}
+                volumes = {volume.get("name"): volume for volume in pod.get("volumes", [])}
+                if mounts.get("identity-data") != {
+                        "name": "identity-data", "mountPath": "/var/lib/kerosene-vault"}:
+                    raise ValueError("Vault persistent state mount differs")
+                if tor_mounts.get("identity-data") != {
+                        "name": "identity-data", "mountPath": "/var/lib/tor"}:
+                    raise ValueError("Vault and Tor do not share persistent identity storage")
+                if tor_mounts.get("onion-public") != {
+                        "name": "onion-public", "mountPath": "/onion"} or \
+                        volumes.get("onion-public") != {"name": "onion-public", "emptyDir": {}}:
+                    raise ValueError("Vault onion publication volume differs")
+                tor_environment = {entry.get("name"): entry for entry in tor.get("env", [])}
+                if tor_environment != {
+                        "KEROSENE_TOR_IDENTITY_SOURCE": {"name": "KEROSENE_TOR_IDENTITY_SOURCE", "value": "/etc/kerosene/tor-identity"},
+                        "KEROSENE_TOR_HIDDEN_SERVICE_DIR": {"name": "KEROSENE_TOR_HIDDEN_SERVICE_DIR", "value": "/var/lib/tor/vault"},
+                        "KEROSENE_TOR_ONION_PUBLISH_PATH": {"name": "KEROSENE_TOR_ONION_PUBLISH_PATH", "value": "/onion/hostname"}}:
+                    raise ValueError("Vault Tor identity bootstrap differs")
+                if tor_mounts.get("tor-identity") != {
+                        "name": "tor-identity", "mountPath": "/etc/kerosene/tor-identity", "readOnly": True}:
+                    raise ValueError("Vault Tor identity is not mounted read-only")
+                onion_items = [{"key": key, "path": key, "mode": 256} for key in
+                               ("hostname", "hs_ed25519_public_key", "hs_ed25519_secret_key")]
+                name = resource["metadata"]["name"]
+                if volumes.get("tor-identity") != {"name": "tor-identity", "secret": {
+                        "secretName": name + "-onion-identity", "defaultMode": 256, "items": onion_items}}:
+                    raise ValueError("Vault Tor identity source differs")
+                if tor_mounts.get("tor-config") != {
+                        "name": "tor-config", "mountPath": "/etc/tor/torrc", "subPath": "torrc", "readOnly": True} or \
+                        volumes.get("tor-config") != {"name": "tor-config", "configMap": {"name": name + "-tor"}}:
+                    raise ValueError("Vault Tor configuration mount differs")
+                tor_config = next((candidate for candidate in artifact["resources"]
+                                   if identity(candidate) == (resource["metadata"]["namespace"], "ConfigMap", name + "-tor")), None)
+                if (not isinstance(tor_config, dict) or tor_config.get("immutable") is not True or
+                        tor_config.get("data") != {"torrc": VAULT_TORRC}):
+                    raise ValueError("Vault Tor configuration is absent, mutable or incompatible")
+                mtls_items = [{"key": key, "path": key, "mode": 256} for key in
+                              ("ca.crt", "client-identity.pem", "client.crt", "client.key", "server.crt", "server.key")]
+                if mounts.get("vault-mtls") != {
+                        "name": "vault-mtls", "mountPath": "/etc/kerosene/vault-mtls", "readOnly": True} or \
+                        volumes.get("vault-mtls") != {"name": "vault-mtls", "secret": {
+                            "secretName": name + "-mtls", "defaultMode": 256, "items": mtls_items}}:
+                    raise ValueError("Vault mTLS source differs")
         if observed != summary["vaultCompatibility"]["members"]:
             raise ValueError("Vault runtime count differs")
     except (ValueError, TypeError, KeyError, AttributeError):

@@ -153,6 +153,15 @@ runtime contract. Every one of the three independent Vault controllers must use
 pin, loopback-only `127.0.0.1:7801`, and `onion_or_spiffe` peer verification.
 Each Vault controller must contain exactly one approved Tor sidecar and use its
 loopback SOCKS endpoint; Vault and Tor are one rollout unit.
+Each replica binds the Vault state directory and Tor hidden-service directory
+to the same replica-local persistent volume. Its pre-authorized v3 onion key is
+loaded from a read-only, member-specific Secret, while Tor publishes only the
+derived hostname through an ephemeral shared volume. The sidecar must retain
+the approved image entrypoint and consume the exact immutable, member-specific
+`torrc`; command overrides, mutable configuration, shared identity Secrets or
+foreign member names fail closed. Vault server/client certificates and CA are
+likewise projected read-only from that member's mTLS Secret, and the configured
+certificate paths are part of the approved runtime contract.
 The two peer onion endpoints and mesh-audit public-key allowlist are mandatory
 external Secret references, never inline manifest values. The attestation root
 and AEAD share passphrase are external Secret references as well. Readiness must invoke
