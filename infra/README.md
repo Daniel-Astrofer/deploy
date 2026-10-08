@@ -21,6 +21,7 @@ bash infra/test.sh
 PATH="$PWD/infra:$PATH" kerosene-stack update --release release-lock.json
 PATH="$PWD/infra:$PATH" kerosene-stack check-update --release release-lock.json ...
 infra/prepare-cell-deployment --config cell-preparation.json --output-dir prepared-cell
+infra/provision-cell-secrets --cell-dir cell --deployment prepared-cell/deployment.json --material private/cell-secret-material.json
 ```
 
 `infra/start.sh` é o caminho principal do quorum local. Ele usa Kubernetes
@@ -53,6 +54,9 @@ sem essas provas permanece somente em plano. Não ativa signers Vault. Veja
 seleção de imagens e os documentos assinados de bootstrap em um manifesto
 canônico dos 11 componentes. Ele não aplica recursos nem recebe segredos; veja
 [`docs/operations/release-archive.md`](../docs/operations/release-archive.md).
+`provision-cell-secrets` carrega somente arquivos privados previamente criados
+para o cluster fixado no Cell, cria Secrets imutáveis e nunca sobrescreve um
+Secret existente.
 
 ## Layout
 

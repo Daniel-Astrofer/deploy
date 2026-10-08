@@ -68,11 +68,15 @@ class PrepareCellTest(unittest.TestCase):
         receipt = json.loads(result.stdout)
         self.assertEqual(receipt["directory"], str(output))
         self.assertEqual({path.name for path in output.iterdir()},
-                         {"foundation.yaml", "nodes.json", "vaults.json", "deployment.json"})
+                         {"foundation.yaml", "nodes.json", "vaults.json", "deployment.json",
+                          "secret-material.template.json"})
         deployment = json.loads((output / "deployment.json").read_bytes())
         workloads = [item for item in deployment["resources"]
                      if item["kind"] in ("Deployment", "StatefulSet")]
         self.assertEqual(len(workloads), 16)
+        secret_template = json.loads((output / "secret-material.template.json").read_bytes())
+        self.assertEqual(secret_template["schema"], "kerosene.cell-secret-material/v1")
+        self.assertGreater(len(secret_template["secrets"]), 20)
         self.assertTrue(all(path.stat().st_mode & 0o222 == 0 for path in output.iterdir()))
         repeated = subprocess.run(command, stdin=subprocess.DEVNULL, capture_output=True,
                                   text=True, check=False, timeout=60)

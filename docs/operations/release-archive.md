@@ -168,11 +168,38 @@ Paths are relative to the configuration file unless absolute. The destination
 must not exist and is reserved atomically, so existing operator material is
 never replaced. The command locally renders the reviewed application
 foundation, generates both three-member Node planes and the three-member Vault
-plane, then lifecycle-validates all 11 components together. Its four read-only
-outputs are `foundation.yaml`, `nodes.json`, `vaults.json` and the canonical
-`deployment.json`. No Secret value, private key, DKG share or credential is
+plane, then lifecycle-validates all 11 components together. Its five read-only
+outputs are `foundation.yaml`, `nodes.json`, `vaults.json`, the canonical
+`deployment.json` and `secret-material.template.json`. The last file contains
+only the exact external Secret names, required key names and conventional local
+paths; it never contains values. No Secret value, private key, DKG share or credential is
 accepted or generated. `kubectl` is used only for local Kustomize/YAML decoding;
 the command never selects or contacts a cluster.
+
+After an independent ceremony or secret manager has populated those paths,
+copy the template outside the prepared read-only directory, keep the manifest
+and every referenced value file owner-only (`0600`), and provision them into the
+cluster explicitly bound by an initialized Cell:
+
+```sh
+infra/provision-cell-secrets \
+  --cell-dir /srv/operator/cells/bank-a \
+  --deployment /srv/operator/materials/prepared-cell/deployment.json \
+  --material /srv/operator/private/cell-secret-material.json
+```
+
+The material schema is `kerosene.cell-secret-material/v1`; each entry has
+exactly `namespace`, `name`, `type` and a `files` map from Kubernetes key to a
+relative or absolute private file. Empty `files` maps in the generated template
+mark whole-Secret references whose application-specific keys must be supplied.
+The command validates complete inventory coverage and file ownership/mode before
+contacting Kubernetes, rechecks the pinned cluster UID from `cell.json`, creates
+only the two declared Cell namespaces when absent, and creates immutable Secrets.
+It refuses every existing Secret rather than rotating or overwriting it. Secret
+values are sent only to the Kubernetes API, never printed, journaled or placed
+in release artifacts. A mid-operation API failure can leave a prefix of the
+immutable inventory created; inspect it and use an explicit recovery procedure
+instead of rerunning as if nothing happened.
 
 The lower-level equivalent, useful for independently reviewing each generated
 plane, is:

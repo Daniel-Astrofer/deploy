@@ -9,6 +9,7 @@ import tempfile
 from archive import ArchiveError, open_regular, strict_json
 import node_resources
 import render_deployment
+import secret_material
 import vault_resources
 
 
@@ -98,6 +99,11 @@ def prepare(stack, package_release, config_path, output_dir, root, kubectl=None)
         result = render_deployment.render(
             stack, package_release, config["images"], [foundation, nodes, vaults],
             config["admin"], deployment, kubectl=executable)
+        prepared = stack.read_json_document(
+            str(deployment), "prepared Cell deployment", render_deployment.MAX_INPUT)
+        secret_material.template(
+            render_deployment.lifecycle.required_secret_references(stack, prepared),
+            temporary / "secret-material.template.json")
         for path in temporary.iterdir():
             os.rename(path, output / path.name)
         os.rmdir(temporary)
