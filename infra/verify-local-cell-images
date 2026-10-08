@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Verify that every pinned complete-Cell image exists in the local registry."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import urllib.error
+import urllib.request
+
+
+SERVICES = {
+    "admin", "bitcoin", "core", "kfe", "lnd", "node", "postgres",
+    "redis", "tor", "vault", "web-page",
+}
+REFERENCE = re.compile(
+    r"localhost:5000/(?P<repository>[a-z0-9]+(?:[._/-][a-z0-9]+)*)@"
+    r"(?P<digest>sha256:[0-9a-f]{64})$"
+)
+ACCEPT = ", ".join((
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+))
+MAX_DOCUMENT = 1024 * 1024
+
+
+def strict_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f"duplicate JSON field: {key}")
+        value[key] = item
+    return value
+
+
+def verify(path: Path) -> dict[str, str]:
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        status = os.fstat(descriptor)
+        if not status.st_size or status.st_size > MAX_DOCUMENT:
+            raise ValueError("image selection size is invalid")
+        raw = os.read(descriptor, MAX_DOCUMENT + 1)
+    finally:
+        os.close(descriptor)
+    document = json.loads(raw, object_pairs_hook=strict_object,
+                          parse_constant=lambda value: (_ for _ in ()).throw(
+                              ValueError(f"non-finite JSON value: {value}")))
+    if set(document) != {"schema", "services"} or document["schema"] != "kerosene.cell-images/v1":
+        raise ValueError("unsupported image selection document")
+    services = document["services"]
+    if not isinstance(services, dict) or set(services) != SERVICES:
+        raise ValueError("image selection must contain exactly the eleven Cell services")
+
+    references = {}
+    for service in sorted(SERVICES):
+        value = services[service]
+        if not isinstance(value, dict) or set(value) != {"image"}:
+            raise ValueError(f"invalid image selection for {service}")
+        match = REFERENCE.fullmatch(value["image"] if isinstance(value["image"], str) else "")
+        if not match:
+            raise ValueError(f"{service} must use a local-registry sha256 reference")
+        references[service] = (match["repository"], match["digest"])
+
+    verified = {}
+    for service, (repository, digest) in references.items():
+        request = urllib.request.Request(
+            f"http://localhost:5000/v2/{repository}/manifests/{digest}",
+            method="HEAD", headers={"Accept": ACCEPT})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                observed = response.headers.get("Docker-Content-Digest")
+        except (urllib.error.URLError, TimeoutError) as error:
+            raise ValueError(f"cannot resolve pinned image for {service}") from error
+        if observed != digest:
+            raise ValueError(f"registry digest differs for {service}")
+        verified[service] = observed
+    return verified
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--images", type=Path,
+        default=Path(__file__).resolve().parent / "stack/examples/complete-cell-local-images.json")
+    args = parser.parse_args()
+    try:
+        result = verify(args.images.resolve())
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        parser.exit(65, f"image verification failed: {error}\n")
+    print(json.dumps({"schema": "kerosene.cell-images-verification/v1", "verified": result},
+                     indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

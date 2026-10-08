@@ -24,6 +24,19 @@ infra/prepare-cell-deployment --config cell-preparation.json --output-dir prepar
 infra/provision-cell-secrets --cell-dir cell --deployment prepared-cell/deployment.json --material private/cell-secret-material.json
 ```
 
+Para a qualificacao local, a selecao atualmente reconstruida e publicada no
+registry local esta em
+`infra/stack/examples/complete-cell-local-images.json`. O arquivo usa somente
+referencias OCI por digest para os onze componentes; tags `complete-cell` sao
+atalhos de publicacao e nao sao fonte de verdade de um deploy.
+
+Confirme que o registry ainda possui exatamente os manifests fixados antes de
+preparar o Cell:
+
+```bash
+infra/verify-local-cell-images
+```
+
 `infra/start.sh` é o caminho principal do quorum local. Ele usa Kubernetes
 local-full, sobe o **vault mesh** (`vault-mesh-lab.compose.yaml`, testnet3),
 constrói/importa imagens locais quando possível, aplica o overlay, aguarda

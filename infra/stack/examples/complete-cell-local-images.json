@@ -1,0 +1,38 @@
+{
+  "schema": "kerosene.cell-images/v1",
+  "services": {
+    "admin": {
+      "image": "localhost:5000/kerosene/jctl@sha256:247ee18bb59690529026115f1925d0b0f47e090f5ad0daa0d226b8e6dab9b534"
+    },
+    "bitcoin": {
+      "image": "localhost:5000/kerosene/bitcoin@sha256:8cb2a57181624b6435051ee0ead147e6448f99f2044743885b73eea9ef507c1e"
+    },
+    "core": {
+      "image": "localhost:5000/kerosene/core@sha256:9ee25c9df7c99abc6488d925923184878a04be6a736deaf36e9d4a426f5b3c37"
+    },
+    "kfe": {
+      "image": "localhost:5000/kerosene/kfe@sha256:d1b7a0a2fa76202217eaabc8a159a5c549aba5760222b8b61d582d352490ce0c"
+    },
+    "lnd": {
+      "image": "localhost:5000/kerosene/lnd@sha256:544dee2fc4a4700fc299735e7c8ec17d319b65492deb8838b6c6c3c5943f1d63"
+    },
+    "node": {
+      "image": "localhost:5000/kerosene/node@sha256:eb500098b280d42b7049581f197f4b5c219962059de5af0d538da6b605551015"
+    },
+    "postgres": {
+      "image": "localhost:5000/kerosene/postgres@sha256:c8f5f9702c792a6b898ab28f03decf770f0b854d689296f0e5bee644a3b28eac"
+    },
+    "redis": {
+      "image": "localhost:5000/kerosene/redis@sha256:504c860847fbcac739cbf962a2bc8bcf718533187e3e3f5cd4479fb32feb39d9"
+    },
+    "tor": {
+      "image": "localhost:5000/kerosene/tor@sha256:1da02f81da9160df31584913cda50625292b4b5acb23648c0a48f9b0a7b1f81d"
+    },
+    "vault": {
+      "image": "localhost:5000/kerosene/vault@sha256:41db6b3cf22d04210d37b57248f7e67a51aed3a9656e6cc9daa0ac8d1adfcd78"
+    },
+    "web-page": {
+      "image": "localhost:5000/kerosene/web-page@sha256:a90dbefcb55bf4a11e8d5fa0e4fad2efab63c2eac145f472d57ed4ffff150e21"
+    }
+  }
+}
