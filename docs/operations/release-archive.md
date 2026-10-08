@@ -133,6 +133,50 @@ material digests before use:
 The deployment file can be rendered reproducibly from reviewed Kubernetes YAML
 without applying it to a cluster:
 
+For the normal complete-Cell path, place the reviewed public inputs in one
+configuration and run a single command:
+
+```sh
+infra/prepare-cell-deployment \
+  --config /srv/operator/cell-preparation.json \
+  --output-dir /srv/operator/materials/prepared-cell
+```
+
+```json
+{
+  "schema": "kerosene.cell-preparation/v1",
+  "images": "cell-images.json",
+  "adminConfig": "admin-public.json",
+  "genesis": "ceremony/genesis.json",
+  "planes": {
+    "bank": {
+      "membership": "ceremony/bank-membership.json",
+      "attestation": "ceremony/bank-state-attestation.json",
+      "snapshot": "ceremony/bank-state.bin"
+    },
+    "vault": {
+      "membership": "ceremony/vault-membership.json",
+      "attestation": "ceremony/vault-state-attestation.json",
+      "snapshot": "ceremony/vault-state.bin"
+    }
+  },
+  "vaultMeasurementPin": "REVIEWED_64_LOWERCASE_HEX"
+}
+```
+
+Paths are relative to the configuration file unless absolute. The destination
+must not exist and is reserved atomically, so existing operator material is
+never replaced. The command locally renders the reviewed application
+foundation, generates both three-member Node planes and the three-member Vault
+plane, then lifecycle-validates all 11 components together. Its four read-only
+outputs are `foundation.yaml`, `nodes.json`, `vaults.json` and the canonical
+`deployment.json`. No Secret value, private key, DKG share or credential is
+accepted or generated. `kubectl` is used only for local Kustomize/YAML decoding;
+the command never selects or contacts a cluster.
+
+The lower-level equivalent, useful for independently reviewing each generated
+plane, is:
+
 ```sh
 infra/render-cell-deployment \
   --images /srv/operator/cell-images.json \
@@ -152,7 +196,7 @@ writes canonical JSON as a new read-only file. It prints the exact deployment
 digest and every computed component configuration digest for the candidate
 selection. It never contacts or mutates a cluster.
 
-The six Node resources are generated from public, signed ceremony outputs;
+The six Node resources are generated from signed ceremony outputs;
 private Node, Onion and mTLS keys remain external Secret references:
 
 ```sh

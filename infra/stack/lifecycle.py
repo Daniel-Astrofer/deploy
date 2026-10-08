@@ -103,7 +103,7 @@ def verify_deployment(stack, release, summary, path):
     allowed_images = {s["image"] for name, s in summary["services"].items() if name != "admin"}
     for resource in resources:
         stack.require_keys(resource, "resource", ("apiVersion", "kind", "metadata"),
-                           ("spec", "data", "binaryData", "immutable"))
+                           ("spec", "data", "binaryData", "immutable", "automountServiceAccountToken"))
         if resource["kind"] not in KINDS:
             raise stack.ApplyBlockedError("deployment cannot create Secrets, Jobs, RBAC or arbitrary resource kinds")
         if resource["kind"] == "HorizontalPodAutoscaler":
@@ -119,6 +119,9 @@ def verify_deployment(stack, release, summary, path):
         if key in seen:
             raise stack.ApplyBlockedError("duplicate resource identity in deployment")
         seen.add(key)
+        if ("automountServiceAccountToken" in resource and
+                (resource["kind"] != "ServiceAccount" or resource["automountServiceAccountToken"] is not False)):
+            raise stack.ApplyBlockedError("only disabled ServiceAccount token automount is supported")
         if resource["kind"] in WORKLOADS:
             spec = resource.get("spec", {})
             if type(spec.get("replicas")) is not int or spec["replicas"] < 1:

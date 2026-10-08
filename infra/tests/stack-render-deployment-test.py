@@ -3,9 +3,11 @@
 
 import importlib.machinery
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,7 +16,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "stack"))
 import archive
+import node_resources
 import render_deployment
+import vault_resources
 
 stack_loader = importlib.machinery.SourceFileLoader("render_test_stack", str(ROOT / "kerosene-stack"))
 stack_spec = importlib.util.spec_from_loader(stack_loader.name, stack_loader)
@@ -102,6 +106,67 @@ class RenderDeploymentTest(unittest.TestCase):
         self.assertEqual(len(resources), 1)
         self.assertEqual(resources[0]["kind"], "Namespace")
         self.assertEqual(resources[0]["metadata"]["name"], "kerosene-staging")
+
+    @unittest.skipUnless(shutil.which("kubectl"), "kubectl not installed")
+    def test_renders_complete_eleven_component_cell(self):
+        services = ("admin", "core", "kfe", "web-page", "postgres", "redis",
+                    "bitcoin", "lnd", "node", "vault", "tor")
+        self.images.write_text(json.dumps({
+            "schema": render_deployment.IMAGE_SELECTION_SCHEMA,
+            "services": {name: {"image": "registry.invalid/" + name + "@sha256:" +
+                                 format(index, "x") * 64}
+                         for index, name in enumerate(services, 1)}}))
+        foundation = self.root / "foundation.yaml"
+        foundation.write_bytes(subprocess.run(
+            [shutil.which("kubectl"), "kustomize", str(ROOT / "kubernetes/overlays/complete-cell")],
+            check=True, stdin=subprocess.DEVNULL, capture_output=True, timeout=60).stdout)
+
+        network = "synthetic-cell"
+        genesis = {"network_id": network, "bank": {}, "vault": {}}
+        manifests, snapshots = {}, {}
+        for offset, plane in enumerate(("bank", "vault")):
+            members = [{"member_id": f"{plane}-{index}",
+                        "endpoint": "https://" + chr(97 + offset * 3 + index) * 56 + ".onion:8800"}
+                       for index in range(3)]
+            manifest = {"network_id": network, "plane": plane, "threshold": 2,
+                        "members": members, "signatures": [{}, {}]}
+            payload = ("state-" + plane).encode()
+            signable = {key: value for key, value in manifest.items() if key != "signatures"}
+            attestation = {
+                "network_id": network, "plane": plane,
+                "membership_manifest_hash": hashlib.sha256(
+                    archive.canonical_bytes(signable)).hexdigest(),
+                "state_root": hashlib.sha256(payload).hexdigest(), "signatures": [{}, {}]}
+            manifests[plane] = manifest
+            snapshots[plane] = (attestation, payload)
+        nodes = self.root / "nodes.json"
+        vaults = self.root / "vaults.json"
+        node_resources.write(node_resources.generate(genesis, manifests, snapshots), nodes)
+        vault_resources.write(vault_resources.generate(network, "a" * 64), vaults)
+        self.admin.write_text(json.dumps({"apiBaseUrl": "https://core.invalid",
+                                          "kfeBaseUrl": "https://kfe.invalid"}))
+
+        output = self.root / "complete-deployment.json"
+        result = render_deployment.render(
+            stack, package, self.images, [foundation, nodes, vaults], self.admin, output)
+        deployment = json.loads(output.read_bytes())
+        workloads = [resource for resource in deployment["resources"]
+                     if resource["kind"] in render_deployment.lifecycle.WORKLOADS]
+        observed = {container["image"] for resource in workloads
+                    for container in render_deployment.lifecycle.containers(resource)}
+        selected = {value["image"] for name, value in
+                    json.loads(self.images.read_text())["services"].items() if name != "admin"}
+        self.assertEqual(len(workloads), 16)
+        self.assertEqual(observed, selected)
+        self.assertEqual(set(result["configurationDigests"]), set(services))
+        unsafe_foundation = self.root / "unsafe-foundation.yaml"
+        unsafe_foundation.write_text(
+            foundation.read_text().replace("automountServiceAccountToken: false",
+                                           "automountServiceAccountToken: true", 1))
+        with self.assertRaisesRegex(stack.ApplyBlockedError, "disabled ServiceAccount token"):
+            render_deployment.render(
+                stack, package, self.images, [unsafe_foundation, nodes, vaults], self.admin,
+                self.root / "unsafe-deployment.json")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,35 @@
+#!/usr/bin/env python3
+"""Prepare a complete validated Cell deployment from one public input file."""
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "stack"))
+import archive
+import prepare_cell
+
+loader = importlib.machinery.SourceFileLoader("prepare_cell_stack", str(ROOT / "kerosene-stack"))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+stack = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = stack
+loader.exec_module(stack)
+package_spec = importlib.util.spec_from_file_location(
+    "prepare_cell_package", ROOT / "stack/package-release.py")
+package = importlib.util.module_from_spec(package_spec)
+package_spec.loader.exec_module(package)
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--config", required=True, help="kerosene.cell-preparation/v1 JSON")
+parser.add_argument("--output-dir", required=True, help="new directory; never overwritten")
+args = parser.parse_args()
+try:
+    result = prepare_cell.prepare(stack, package, args.config, args.output_dir, ROOT)
+except (archive.ArchiveError, stack.ReleaseValidationError, OSError, ValueError) as error:
+    print(f"preparation failed: {error}", file=sys.stderr)
+    raise SystemExit(65)
+print(json.dumps(result, indent=2, sort_keys=True))

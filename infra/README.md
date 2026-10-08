@@ -20,6 +20,7 @@ bash infra/logs.sh
 bash infra/test.sh
 PATH="$PWD/infra:$PATH" kerosene-stack update --release release-lock.json
 PATH="$PWD/infra:$PATH" kerosene-stack check-update --release release-lock.json ...
+infra/prepare-cell-deployment --config cell-preparation.json --output-dir prepared-cell
 ```
 
 `infra/start.sh` é o caminho principal do quorum local. Ele usa Kubernetes
@@ -47,6 +48,11 @@ requisição de atestação VolumeSnapshot, recibo de restore-test e confirmaç�
 explícita, `update --apply` executa os overlays `staging-vault` e `staging`;
 sem essas provas permanece somente em plano. Não ativa signers Vault. Veja
 [`docs/ops/KEROSENE_STACK.md`](../docs/ops/KEROSENE_STACK.md).
+
+`prepare-cell-deployment` é o caminho offline, de um comando, que transforma a
+seleção de imagens e os documentos assinados de bootstrap em um manifesto
+canônico dos 11 componentes. Ele não aplica recursos nem recebe segredos; veja
+[`docs/operations/release-archive.md`](../docs/operations/release-archive.md).
 
 ## Layout
 
