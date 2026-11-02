@@ -5,10 +5,11 @@ existentes, valida estritamente a cadeia e as identidades e guarda backups
 privados. A rotina não substitui a CA nem altera shares ou signers.
 
 O timer `kerosene-certificate-renewal.timer` verifica os certificados a cada
-quinze minutos. As folhas duram 24 horas e são renovadas quando qualquer uma
+quinze minutos. As folhas duram 48 horas e são renovadas quando qualquer uma
 está a menos de oito horas do vencimento. Uma máquina desligada até os
-certificados expirarem exige recuperação operacional: a rotina automática
-recusa conexões e precondições inválidas, sem desabilitar a validação TLS.
+certificados expirarem exige recuperação operacional com `--recover-expired`:
+a rotina automática padrão recusa conexões e precondições inválidas sem desabilitar
+a validação TLS.
 
 Antes de cada reinício, os três Nodes devem comprovar quórum com três membros
 vivos, e os três Vaults devem responder com `financial_ready=true`. Peers apenas

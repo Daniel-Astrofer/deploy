@@ -188,7 +188,7 @@ data:
   KFE_ONRAMP_URL_ONRAMPER: https://www.onramper.com/
   KFE_ONRAMP_URL_SELL: https://www.bitcoin.com/get-started/how-to-sell-bitcoin/
   KFE_ONRAMP_URL_TRANSAK: https://global.transak.com/
-  KFE_VAULTMESH_BASE_URL: https://ydhgchokg37xcyqxbtif3nqz3deajr57zos46t2fkw4uh3joygsdkvid.onion:7701
+  KFE_VAULTMESH_BASE_URL: https://ydhgchokg37xcyqxbtif3nqz3deajr57zos46t2fkw4uh3joygsdkvid.onion:7801
   KFE_VAULTMESH_CONNECT_TIMEOUT_MS: '45000'
   KFE_VAULTMESH_CONSTITUTION_HASH: 311220a58b04114270dcf3be7be69ac06abd0ce2658075d9bd5c4b1e5817896b
   KFE_VAULTMESH_ENABLED: 'true'
@@ -199,7 +199,7 @@ data:
   KFE_VAULTMESH_READ_TIMEOUT_MS: '60000'
   KFE_VAULTMESH_SUBMIT_ON_OUTBOUND: 'true'
   KFE_VAULTMESH_TRANSPORT: tor
-  KFE_VAULTMESH_URLS: https://ydhgchokg37xcyqxbtif3nqz3deajr57zos46t2fkw4uh3joygsdkvid.onion:7701,https://mx54ndvuigoqe5ujsctdp6fdrpu5t2khabbtn5obfgo3n2g4f5axozad.onion:7701,https://mr7qhv2dcv74bnx3kuyrrn3b5u6xbcf2n5jhjktzd4zsew3vbt2eq2qd.onion:7701
+  KFE_VAULTMESH_URLS: https://ydhgchokg37xcyqxbtif3nqz3deajr57zos46t2fkw4uh3joygsdkvid.onion:7801,https://mx54ndvuigoqe5ujsctdp6fdrpu5t2khabbtn5obfgo3n2g4f5axozad.onion:7801,https://mr7qhv2dcv74bnx3kuyrrn3b5u6xbcf2n5jhjktzd4zsew3vbt2eq2qd.onion:7801
   WEBAUTHN_ORIGINS: http://u3hrcmbbd5lqnkffqub5qzdaihoutztgh3rtrtrtrcv2bget6btnpdad.onion
   SPRING_FLYWAY_ENABLED: 'true'
   SPRING_JPA_HIBERNATE_DDL_AUTO: validate

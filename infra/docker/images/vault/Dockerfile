@@ -21,5 +21,5 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY --chown=65532:65532 --from=build /src/target/release/kerosene-vault /usr/local/bin/kerosene-vault
 USER 65532:65532
-EXPOSE 7701
+EXPOSE 7801
 ENTRYPOINT ["/usr/local/bin/kerosene-vault"]

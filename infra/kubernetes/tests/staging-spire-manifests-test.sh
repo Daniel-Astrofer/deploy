@@ -43,4 +43,17 @@ set -e
 grep -q 'SERVER_IMAGE must be an immutable image reference' <<<"$output" \
   || { echo "[FAIL] SPIRE installer did not fail before cluster mutation when images were absent" >&2; exit 1; }
 
+if grep -rn '7701' "$REPO_ROOT/infra/kubernetes/overlays" "$REPO_ROOT/infra/docker/images/vault/Dockerfile" "$REPO_ROOT/INICIALIZACAO_PRODUCAO.md" >/dev/null 2>&1; then
+  echo "[FAIL] legacy Vault port 7701 detected; canonical Vault service port must be 7801" >&2
+  exit 1
+fi
+
+grep -q 'EXPOSE 7801' "$REPO_ROOT/infra/docker/images/vault/Dockerfile" \
+  || { echo "[FAIL] Vault Dockerfile does not expose canonical port 7801" >&2; exit 1; }
+
+for overlay in staging staging-vault native-local; do
+  grep -rq '7801' "$REPO_ROOT/infra/kubernetes/overlays/$overlay" \
+    || { echo "[FAIL] overlay $overlay does not declare canonical Vault port 7801" >&2; exit 1; }
+done
+
 echo "[PASS] SPIRE staging identity manifests and production refusal"
