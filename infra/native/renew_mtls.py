@@ -170,7 +170,7 @@ def get_json(url: str, context: ssl.SSLContext, timeout: int = 40) -> dict:
 
 def member_health(index: int, context: ssl.SSLContext) -> bool:
     node = get_json(f"https://127.0.0.1:880{index}/ready-quorum", context)
-    vault = get_json(f"https://127.0.0.1:770{index}/v1/health", context)
+    vault = get_json(f"https://127.0.0.1:780{index}/v1/health", context)
     return (node.get("local_ready") is True and node.get("quorum_ready") is True
             and node.get("live_members", 0) >= 3 and vault.get("local_ready") is True
             and vault.get("financial_ready") is True)
@@ -192,7 +192,7 @@ def wait_vault(index: int, context: ssl.SSLContext) -> None:
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
         try:
-            if get_json(f"https://127.0.0.1:770{index}/v1/live", context).get("live") is True:
+            if get_json(f"https://127.0.0.1:780{index}/v1/live", context).get("live") is True:
                 return
         except RenewalError:
             pass
