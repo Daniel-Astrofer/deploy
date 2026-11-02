@@ -13,6 +13,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  compatibility:
+    uses: Daniel-Astrofer/.github/.github/workflows/compatibility-ci.yml@54dd4ccdcc6b0c21ab992bf72b900fe460a04867
+    with:
+      component: deploy
+
+  architecture:
+    name: Architecture guardrails
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash infra/kubernetes/tests/staging-spire-manifests-test.sh
+
+  production-source-policy:
+    name: Production source policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash infra/kubernetes/tests/staging-spire-preflight-test.sh
+
+  production-validation:
+    name: Production validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: bash infra/kubernetes/scripts/check-cluster-prereqs.sh --help || true
+
   security:
     permissions:
       contents: read
