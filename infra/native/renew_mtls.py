@@ -26,8 +26,9 @@ from urllib.request import urlopen
 
 import yaml
 
-RENEW_BEFORE_SECONDS = 8 * 60 * 60
-CERT_LIFETIME_SECONDS = 24 * 60 * 60
+RENEW_BEFORE_SECONDS = 24 * 60 * 60
+CERT_LIFETIME_SECONDS = 48 * 60 * 60
+CERT_LIFETIME_DAYS = CERT_LIFETIME_SECONDS // (24 * 60 * 60)
 KUBE_CONTEXT = "kind-kerosene-local"
 NAMESPACE = "kerosene-staging"
 SECRET_NAME = "vault-client-mtls"
@@ -101,7 +102,7 @@ def issue_leaf(cert: Path, key: Path, ca: Path, ca_key: Path, output: Path, purp
     run(["openssl", "x509", "-in", str(cert), "-x509toreq", "-signkey", str(key),
          "-copy_extensions", "copyall", "-out", str(csr)])
     run(["openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(ca_key),
-         "-copy_extensions", "copyall", "-sha256", "-days", "1", "-out", str(output)])
+         "-copy_extensions", "copyall", "-sha256", "-days", str(CERT_LIFETIME_DAYS), "-out", str(output)])
     run(["openssl", "verify", "-x509_strict", "-purpose", purpose, "-CAfile", str(ca), str(output)])
     if not is_fresh(output, RENEW_BEFORE_SECONDS) or not key_matches(output, key):
         raise RenewalError(f"new certificate failed validation: {cert}")
@@ -259,7 +260,7 @@ def verify_runtime(state: Path) -> None:
                 raise RenewalError(f"unexpected runtime configuration for {name}")
 
 
-def renew(state: Path, ops: Path, force: bool) -> None:
+def renew(state: Path, ops: Path, force: bool, recover_expired: bool = False) -> None:
     certs = state / "ceremony-certs"
     ca, ca_key = certs / "ca.crt", certs / "ca.key"
     source = ops / "native-application-secrets.yaml"
@@ -290,18 +291,27 @@ def renew(state: Path, ops: Path, force: bool) -> None:
         run(["openssl", "x509", "-in", str(state / f"node/member-{index}/client-identity.pem"), "-outform", "DER"])
         == run(["openssl", "x509", "-in", str(certs / f"nodes/vault-{index}/client.crt"), "-outform", "DER"])
         for index in (1, 2, 3))
-    if not force and identities_current and all(is_fresh(cert, RENEW_BEFORE_SECONDS) for cert, _, _ in leaves):
+    expired = [cert for cert, _, _ in leaves if not is_fresh(cert, 0)]
+    if recover_expired and not expired:
+        raise RenewalError("--recover-expired requires an expired leaf; use the normal renewal")
+    if expired and not recover_expired:
+        raise RenewalError("leaf certificates already expired; authenticated health checks are impossible. "
+                           "Run renew_mtls.py --recover-expired")
+    if not recover_expired and not force and identities_current \
+            and all(is_fresh(cert, RENEW_BEFORE_SECONDS) for cert, _, _ in leaves):
         print("Native mTLS certificates are valid beyond the renewal window.")
         return
 
     verify_runtime(state)
-    tls = ssl.create_default_context(cafile=str(ca))
-    tls.load_cert_chain(str(client_cert), str(client_key))
-    if not all(member_health(index, tls) for index in (1, 2, 3)):
-        raise RenewalError("member health/quorum precondition failed")
+    tls = None
+    if not recover_expired:
+        tls = ssl.create_default_context(cafile=str(ca))
+        tls.load_cert_chain(str(client_cert), str(client_key))
+        if not all(member_health(index, tls) for index in (1, 2, 3)):
+            raise RenewalError("member health/quorum precondition failed")
     deployment = json.loads(run(["kubectl", "--context", KUBE_CONTEXT, "get", "deployment",
                                  "-n", NAMESPACE, "kfe-service", "-o", "json"]))
-    if deployment.get("status", {}).get("availableReplicas", 0) < 1:
+    if not recover_expired and deployment.get("status", {}).get("availableReplicas", 0) < 1:
         raise RenewalError("KFE is not available; refusing automatic rotation")
     pod_spec = deployment["spec"]["template"]["spec"]
     secret_volumes = {volume["name"] for volume in pod_spec.get("volumes", [])
@@ -313,7 +323,8 @@ def renew(state: Path, ops: Path, force: bool) -> None:
 
     backup_root = state / "cert-backups"
     backup_root.mkdir(mode=0o700, exist_ok=True)
-    backup = Path(tempfile.mkdtemp(prefix="native-mtls-", dir=backup_root))
+    prefix = "native-mtls-recovery-" if recover_expired else "native-mtls-"
+    backup = Path(tempfile.mkdtemp(prefix=prefix, dir=backup_root))
     for cert, _, _ in leaves:
         destination = backup / cert.relative_to(certs)
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -334,22 +345,40 @@ def renew(state: Path, ops: Path, force: bool) -> None:
             issue_leaf(cert, key, ca, ca_key, output, purpose)
             outputs.append(output)
         updated_source, source_secret = source_update(source_text, client_cert.read_text(), outputs[-1].read_text())
-        for index in (1, 2, 3):
-            if not all(member_health(peer, tls) for peer in (1, 2, 3)):
-                raise RenewalError("all members must be healthy before each restart")
+        def install_member(index: int) -> None:
             for kind, output in zip(("server", "client"), outputs[(index - 1) * 2:index * 2]):
                 atomic_write(certs / f"nodes/vault-{index}/{kind}.crt", output.read_bytes())
             identity = state / f"node/member-{index}/client-identity.pem"
             identity_bytes = outputs[(index - 1) * 2 + 1].read_bytes() + (certs / f"nodes/vault-{index}/client.key").read_bytes()
             atomic_write(identity, identity_bytes)
-            run(["docker", "restart", f"kerosene-native-vault-{index}"], timeout=45)
-            wait_vault(index, tls)
-            run(["docker", "restart", f"kerosene-native-node-{index}"], timeout=45)
-            wait_member(index, tls)
-            for peer in (1, 2, 3):
-                if peer != index and not member_health(peer, tls):
-                    raise RenewalError(f"member {peer} lost quorum health during rotation")
-            print(f"Renewed member {index}; authenticated quorum retained.", flush=True)
+
+        if recover_expired:
+            tls = ssl.create_default_context(cafile=str(ca))
+            tls.load_cert_chain(str(outputs[-1]), str(client_key))
+            for index in (1, 2, 3):
+                install_member(index)
+            for index in (1, 2, 3):
+                run(["docker", "restart", f"kerosene-native-vault-{index}"], timeout=45)
+            for index in (1, 2, 3):
+                wait_vault(index, tls)
+            for index in (1, 2, 3):
+                run(["docker", "restart", f"kerosene-native-node-{index}"], timeout=45)
+            for index in (1, 2, 3):
+                wait_member(index, tls)
+            print("Recovered all members; authenticated quorum restored.", flush=True)
+        else:
+            for index in (1, 2, 3):
+                if not all(member_health(peer, tls) for peer in (1, 2, 3)):
+                    raise RenewalError("all members must be healthy before each restart")
+                install_member(index)
+                run(["docker", "restart", f"kerosene-native-vault-{index}"], timeout=45)
+                wait_vault(index, tls)
+                run(["docker", "restart", f"kerosene-native-node-{index}"], timeout=45)
+                wait_member(index, tls)
+                for peer in (1, 2, 3):
+                    if peer != index and not member_health(peer, tls):
+                        raise RenewalError(f"member {peer} lost quorum health during rotation")
+                print(f"Renewed member {index}; authenticated quorum retained.", flush=True)
 
         # Recheck Secret resourceVersion and data before writing any KFE material.
         current = kube_secret()
@@ -388,7 +417,11 @@ def renew(state: Path, ops: Path, force: bool) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--force", action="store_true", help="rotate even if certificates are still fresh")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--force", action="store_true", help="rotate even if certificates are still fresh")
+    mode.add_argument("--recover-expired", action="store_true",
+                      help="operator recovery after leaves expired: skips pre-rotation health checks "
+                           "(impossible with expired mTLS), swaps all members, then requires quorum")
     args = parser.parse_args()
     os.umask(0o077)
     state = Path.home() / ".local/state/kerosene/production-cells"
@@ -397,7 +430,7 @@ def main() -> int:
     try:
         with lock.open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            renew(state, ops, args.force)
+            renew(state, ops, args.force, recover_expired=args.recover_expired)
     except (RenewalError, OSError, ValueError, KeyError, yaml.YAMLError, json.JSONDecodeError) as exc:
         print(f"Native mTLS renewal failed: {exc}", file=sys.stderr)
         return 1

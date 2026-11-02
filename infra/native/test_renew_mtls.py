@@ -21,7 +21,7 @@ class CertificateTests(unittest.TestCase):
             root = Path(directory)
             ca, ca_key = root / "ca.crt", root / "ca.key"
             key, request, cert, new = (root / name for name in ("server.key", "server.csr", "server.crt", "new.crt"))
-            openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3",
+            openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "10",
                     "-subj", "/CN=test CA", "-addext", "keyUsage=critical,keyCertSign,cRLSign",
                     "-keyout", ca_key, "-out", ca)
             openssl("req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=vault-1",
@@ -53,7 +53,7 @@ class CertificateTests(unittest.TestCase):
             root = Path(directory)
             ca, ca_key, leaf, key, request = (root / name for name in
                                               ("ca.crt", "ca.key", "leaf.crt", "leaf.key", "leaf.csr"))
-            openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3",
+            openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "10",
                     "-subj", "/CN=test CA", "-keyout", ca_key, "-out", ca)
             openssl("req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=leaf",
                     "-keyout", key, "-out", request)
@@ -162,7 +162,7 @@ class RotationFlowTests(unittest.TestCase):
             (certs / "kfe").mkdir(parents=True)
             ops.mkdir()
             ca, ca_key = certs / "ca.crt", certs / "ca.key"
-            openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3",
+            openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "10",
                     "-subj", "/CN=test CA", "-addext", "keyUsage=critical,keyCertSign,cRLSign",
                     "-keyout", ca_key, "-out", ca)
             openssl("genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", root / "key")
@@ -233,6 +233,48 @@ class RotationFlowTests(unittest.TestCase):
             self.assertNotEqual((certs / "kfe/client.crt").read_text(), old_cert)
             renewal.verify_secret(secret, ca, certs / "kfe/client.crt", certs / "kfe/client.key")
             self.assertFalse((state / "run/native-mtls-kfe-rollout.pending").exists())
+
+    def test_normal_renewal_rejects_expired_leaves(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state, ops = root / "state", root / "ops"
+            certs = state / "ceremony-certs"
+            (state / "run").mkdir(parents=True); (certs / "kfe").mkdir(parents=True); ops.mkdir()
+            ca, ca_key = certs / "ca.crt", certs / "ca.key"
+            openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "10",
+                    "-subj", "/CN=test CA", "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+                    "-keyout", ca_key, "-out", ca)
+            openssl("genpkey", "-algorithm", "RSA", "-pkeyopt", "rsa_keygen_bits:2048", "-out", root / "key")
+            for index in (1, 2, 3):
+                (certs / f"nodes/vault-{index}").mkdir(parents=True)
+                (state / f"node/member-{index}").mkdir(parents=True)
+            paths = [(certs / f"nodes/vault-{index}/{kind}", kind)
+                     for index in (1, 2, 3) for kind in ("server", "client")]
+            paths.append((certs / "kfe/client", "client"))
+            for number, (path, kind) in enumerate(paths):
+                key, req, crt, ext = (path.with_suffix(suffix) for suffix in (".key", ".csr", ".crt", ".ext"))
+                key.write_bytes((root / "key").read_bytes())
+                openssl("req", "-new", "-key", key, "-subj", f"/CN=leaf-{number}", "-out", req)
+                purpose = "serverAuth" if kind == "server" else "clientAuth"
+                ext.write_text(f"basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\n"
+                               f"extendedKeyUsage={purpose}\nsubjectAltName=IP:127.0.0.1,URI:spiffe://test/{number}\n")
+                openssl("x509", "-req", "-in", req, "-CA", ca, "-CAkey", ca_key,
+                        "-not_before", "20260101000000Z", "-not_after", "20260102000000Z",
+                        "-extfile", ext, "-out", crt)
+            for index in (1, 2, 3):
+                identity = state / f"node/member-{index}/client-identity.pem"
+                identity.write_bytes((certs / f"nodes/vault-{index}/client.crt").read_bytes()
+                                     + (certs / f"nodes/vault-{index}/client.key").read_bytes())
+            source_secret = {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+                             "metadata": {"name": renewal.SECRET_NAME, "namespace": renewal.NAMESPACE},
+                             "stringData": {"ca.crt": ca.read_text(), "client.crt": (certs / "kfe/client.crt").read_text(),
+                                            "client.key": (certs / "kfe/client.key").read_text()}}
+            (ops / "native-application-secrets.yaml").write_text(yaml.safe_dump(source_secret, sort_keys=False))
+            raw_secret = {"metadata": {"name": renewal.SECRET_NAME, "resourceVersion": "1", "annotations": {}},
+                          "data": {k: base64.b64encode(v.encode()).decode() for k, v in source_secret["stringData"].items()}}
+            with mock.patch.object(renewal, "kube_secret", return_value=raw_secret):
+                with self.assertRaisesRegex(renewal.RenewalError, "--recover-expired"):
+                    renewal.renew(state, ops, force=False)
 
 if __name__ == "__main__":
     unittest.main()
