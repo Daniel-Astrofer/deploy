@@ -1,0 +1,28 @@
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-local-storage
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              for attempt in $(seq 1 180); do
+                if nc -z -w 2 kerosene-db-headless 5432 &&
+                   nc -z -w 2 kerosene-redis-headless 6379; then
+                  echo "PostgreSQL and Redis are reachable"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "Timed out waiting for PostgreSQL and Redis" >&2
+              exit 1
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {cpu: 50m, memory: 32Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}

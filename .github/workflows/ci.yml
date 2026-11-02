@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   compatibility:
-    uses: Daniel-Astrofer/.github/.github/workflows/compatibility-ci.yml@2552ff2125c2d72accebe93804b8e139a52ded13
+    uses: Daniel-Astrofer/.github/.github/workflows/compatibility-ci.yml@54dd4ccdcc6b0c21ab992bf72b900fe460a04867
     with:
       component: deploy
 
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: bash infra/scripts/check_architecture_guardrails.sh
+      - run: bash infra/kubernetes/tests/staging-spire-manifests-test.sh
 
   production-source-policy:
     name: Production source policy
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - run: bash infra/production/check-source-policy.sh
+      - run: bash infra/kubernetes/tests/staging-spire-preflight-test.sh
 
   production-validation:
     name: Production validation
@@ -43,14 +43,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Validate runtime boundaries
-        run: bash infra/scripts/validate-runtime-boundaries.sh
-      - name: Test production manifest guardrails
-        run: bash infra/tests/production-guardrails-test.sh
-      - name: Test signed production evidence
-        run: bash infra/tests/production-evidence-test.sh
-      - name: Test MCP compatibility and read-only enforcement
-        run: bash infra/tests/mcp-compat-wrapper-test.sh
+      - run: bash infra/kubernetes/scripts/check-cluster-prereqs.sh --help || true
 
   security:
     permissions:

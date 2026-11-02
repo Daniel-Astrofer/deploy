@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: kerosene-staging
+resources:
+- ../../base/server
+- ../../base/kfe-service
+- ../../base/web-page
+- native-network-policy.yaml
+- ../../base/policies
+- internal-health-service.yaml
+images:
+- name: kerosene/server
+  newName: docker.io/kerosene/server
+  digest: sha256:091695ebbf659a16d8ee74d30e03ab8a785f499acc0a4649c6ac8fce8ad69d03
+- name: kerosene/kfe-service
+  newName: docker.io/kerosene/kfe-service
+  digest: sha256:6e0238a27582e2aab43af73cbc68db41fd47c835577fda813260a0ae6a6aa1e9
+- name: kerosene/web-page
+  newName: docker.io/kerosene/web-page
+  digest: sha256:3430000f80de8e9f538afcd3c7cafb9dd5db1d9ebf61bf01e69581e10d3db889
+replicas:
+- name: web-page
+  count: 1
+patches:
+- path: runtime-patches.yaml
+- path: spiffe-patches.yaml
+- target:
+    kind: Service
+    name: web-page
+  patch: "- op: add\n  path: /spec/type\n  value: NodePort\n- op: add\n  path: /spec/ports/0/nodePort\n\
+    \  value: 30080"
+- patch: "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n \
+    \ name: server\n$patch: delete\n"
+- patch: "apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata:\n \
+    \ name: kfe-service\n$patch: delete\n"
+- path: mtls-network-policies.yaml

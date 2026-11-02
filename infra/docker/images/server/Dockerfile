@@ -26,16 +26,19 @@ RUN chmod +x gradlew
 # ── Layer 2: Dependency resolution (cache until build.gradle.kts changes) ─────
 COPY settings.gradle.kts ./
 COPY gradle.properties ./
-COPY --from=contracts . /kerosene-contracts
-COPY --from=shared . /kerosene-shared
+COPY --from=contracts . /contracts
+COPY --from=shared . /shared
 COPY auth-service auth-service/
 ARG GRADLE_MAX_WORKERS=2
-RUN ./gradlew :auth-service:dependencies --no-daemon --max-workers=${GRADLE_MAX_WORKERS} --quiet
+ARG GRADLE_JVM_ARGS="-Xmx768m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8"
+RUN ./gradlew :auth-service:dependencies --no-daemon --max-workers=${GRADLE_MAX_WORKERS} \
+    "-Dorg.gradle.jvmargs=${GRADLE_JVM_ARGS}" --quiet
 
 # ── Layer 3: Source compilation ───────────────────────────────────────────────
 COPY --from=deploy infra/docker/healthcheck/Healthcheck.java docker/Healthcheck.java
 COPY web-admin-build web-admin-build/
-RUN ./gradlew :auth-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
+RUN ./gradlew :auth-service:bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} \
+    "-Dorg.gradle.jvmargs=${GRADLE_JVM_ARGS}" -x test
 RUN javac docker/Healthcheck.java -d /workspace/healthcheck
 
 # ── Stage 2: Runtime (Distroless — minimal attack surface) ────────────────────

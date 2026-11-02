@@ -1,0 +1,27 @@
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-core-ready
+          image: curlimages/curl:8.10.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              for attempt in $(seq 1 180); do
+                if curl --fail --silent --max-time 3 http://server:8080/health/ready >/dev/null; then
+                  echo "Core is ready; nginx upstream resolves"
+                  exit 0
+                fi
+                sleep 2
+              done
+              echo "Timed out waiting for Core readiness" >&2
+              exit 1
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {cpu: 50m, memory: 32Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}

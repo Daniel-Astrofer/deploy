@@ -1,0 +1,54 @@
+spec:
+  template:
+    spec:
+      initContainers:
+        - name: wait-financial-backends
+          image: curlimages/curl:8.10.1
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              for attempt in $(seq 1 180); do
+                if curl --fail --silent --max-time 3 \
+                  -u "$BITCOIN_RPC_USER:$BITCOIN_RPC_PASSWORD" \
+                  -H 'Content-Type: application/json' \
+                  --data '{"jsonrpc":"1.0","id":"rail-startup","method":"getblockchaininfo","params":[]}' \
+                  http://bitcoin-core:18332/ | grep -q '"chain"'; then
+                  if curl --fail --silent --max-time 3 \
+                    --cacert /etc/lnd-tls/tls.cert \
+                    -H "Grpc-Metadata-macaroon: $LIGHTNING_LND_MACAROON_HEX" \
+                    https://kerosene-lnd-headless:8080/v1/getinfo | grep -q '"identity_pubkey"'; then
+                    echo "Bitcoin RPC and authenticated LND are available"
+                    exit 0
+                  fi
+                fi
+                sleep 2
+              done
+              echo "Timed out waiting for Bitcoin RPC and authenticated LND" >&2
+              exit 1
+          env:
+            - name: BITCOIN_RPC_USER
+              valueFrom:
+                secretKeyRef: {name: kerosene-bitcoin-secrets, key: rpc-user}
+            - name: BITCOIN_RPC_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: kerosene-bitcoin-secrets, key: rpc-password}
+            - name: LIGHTNING_LND_MACAROON_HEX
+              valueFrom:
+                secretKeyRef: {name: kerosene-lnd-secrets, key: LIGHTNING_LND_MACAROON}
+          volumeMounts:
+            - {name: local-startup-lnd-tls, mountPath: /etc/lnd-tls, readOnly: true}
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {cpu: 50m, memory: 32Mi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+      volumes:
+        - name: local-startup-lnd-tls
+          secret:
+            secretName: vault-client-mtls
+            items:
+              - {key: lnd-tls.cert, path: tls.cert}

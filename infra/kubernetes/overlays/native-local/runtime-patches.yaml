@@ -1,0 +1,342 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-config
+  labels:
+    app.kubernetes.io/name: server
+data:
+  SPRING_PROFILES_ACTIVE: prod
+  SERVER_PORT: '8080'
+  KEROSENE_RUNTIME_ROLE: core-service
+  SERVER_SHUTDOWN: graceful
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 45s
+  FLYWAY_ENABLED: 'true'
+  FLYWAY_BASELINE_ON_MIGRATE: 'false'
+  MANAGEMENT_HEALTH_SHOW_DETAILS: when_authorized
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,prometheus
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  SPRING_DATA_REDIS_HOST: kerosene-redis-headless
+  SPRING_DATA_REDIS_PORT: '6379'
+  LIGHTNING_LND_HOST: kerosene-lnd-headless
+  LIGHTNING_LND_PORT: '10009'
+  BITCOIN_NETWORK: testnet3
+  BITCOIN_RPC_ENABLED: 'true'
+  BITCOIN_RPC_REQUIRED: 'true'
+  BITCOIN_RPC_PRUNED_REQUIRED: 'true'
+  BITCOIN_RPC_URL: http://bitcoin-core:18332
+  BITCOIN_ZMQ_ENABLED: 'true'
+  BITCOIN_ZMQ_RAWTX: tcp://bitcoin-core:28332
+  BITCOIN_ZMQ_HASHBLOCK: tcp://bitcoin-core:28333
+  REGION: PROD
+  AUDIT_SOLVENCY_ENFORCED: 'true'
+  RELEASE_ATTESTATION_REQUIRED: 'true'
+  RELEASE_REMOTE_ATTESTATION_ENABLED: 'true'
+  KFE_REMOTE_BASE_URL: https://kfe-service:8443
+  KFE_REMOTE_WALLET_PROVISIONING_ENABLED: 'true'
+  APP_CORS_ALLOWED_ORIGINS: http://u3hrcmbbd5lqnkffqub5qzdaihoutztgh3rtrtrtrcv2bget6btnpdad.onion
+  BITCOIN_RPC_WALLET: kerosene
+  WEBAUTHN_ORIGINS: http://u3hrcmbbd5lqnkffqub5qzdaihoutztgh3rtrtrtrcv2bget6btnpdad.onion
+  SPRING_FLYWAY_ENABLED: 'true'
+  SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+  QUORUM_ALLOW_LOCAL_SIMULATION: 'false'
+  LIGHTNING_LND_TLS_INSECURE: 'false'
+  LIGHTNING_LND_ENABLED: 'false'
+  LIGHTNING_LND_REST_ENABLED: 'false'
+  TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: 'false'
+  KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: 'false'
+  BITCOIN_PLATFORM_MASTER_XPUB: ''
+  QUORUM_SHARD_URLS: ''
+  QUORUM_PSBT_SIGNER_URLS: ''
+  QUORUM_PSBT_SIGNER_IDS: ''
+  WEBAUTHN_RP_ID: u3hrcmbbd5lqnkffqub5qzdaihoutztgh3rtrtrtrcv2bget6btnpdad.onion
+  KFE_VAULTMESH_REQUIRE_MTLS: 'true'
+  KFE_VAULTMESH_TLS_ENABLED: 'true'
+  SPRING_FLYWAY_DEFAULT_SCHEMA: auth
+  SPRING_FLYWAY_SCHEMAS: auth,public
+  KFE_INTERNAL_BASE_URL: https://kfe-service:8443
+  TOR_PROXY_HOST: 172.18.0.1
+  TOR_PROXY_PORT: '9050'
+  RELEASE_SERVICE_NAME: auth
+  RELEASE_MANIFEST_PATH: /release/release-manifest.json
+  RELEASE_MANIFEST_SIGNATURE_PATH: /release/release-manifest.sig
+  RELEASE_MANIFEST_PUBLIC_KEY_PATH: /release/release-public-key.der.b64
+  GIT_COMMIT: 3848b85355ef310a4ed88341c7156968a971d507
+  IMAGE_DIGEST: sha256:091695ebbf659a16d8ee74d30e03ab8a785f499acc0a4649c6ac8fce8ad69d03
+  CODE_HASH: sha256:0639b22ef08aec4af46adc5cce497a6ec7e44f0264da09b8ffc661fa1f235130
+  CONFIG_HASH: sha256:e8ef4d661ed6a22470ec8bc40faf6adf6caf2b967bf8f7add5bdfa2bba39390d
+  KFE_VAULTMESH_MESH_ONLY: 'true'
+  KFE_VAULTMESH_ENABLED: 'true'
+  KFE_MPC_SIGNING_ENABLED: 'false'
+  TRANSACTIONS_RAILS_LIGHTNING_INVOICE_PROVIDER: disabled
+  TRANSACTIONS_RAILS_LIGHTNING_PAYMENT_PROVIDER: disabled
+  TOR_HEALTH_REQUIRED: 'true'
+  TOR_HEALTH_SOCKS_HOST: 172.18.0.1
+  TOR_HEALTH_SOCKS_PORT: '9050'
+  TICKER_PROXY_SOCKS_HOST: 172.18.0.1
+  TICKER_PROXY_SOCKS_PORT: '9050'
+  KFE_REMOTE_HEALTH_BASE_URL: https://kfe-health:8443
+  TRANSACTIONS_LIGHTNING_INVOICE_PROVIDER: disabled
+  TRANSACTIONS_LIGHTNING_PAYMENT_PROVIDER: disabled
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: server
+        env:
+        - name: KFE_INTERNAL_SHARED_SECRET
+          $patch: delete
+        - name: SPRING_DATASOURCE_URL
+          valueFrom:
+            secretKeyRef:
+              name: auth-database
+              key: jdbc-url
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: auth-database
+              key: application-user
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: auth-database
+              key: application-password
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: auth-jwt-signing
+              key: JWT_SECRET
+        envFrom:
+        - configMapRef:
+            name: server-config
+        - secretRef:
+            name: auth-crypto
+        resources:
+          requests:
+            cpu: 250m
+            memory: 768Mi
+          limits:
+            cpu: 1500m
+            memory: 1536Mi
+        volumeMounts: []
+      volumes: []
+    metadata:
+      annotations:
+        kerosene.io/release-digest: sha256:d9bcb539f5ff186b96662f2e5ab44a3de85367b6fb3527fa86107c194ddf25ab
+  strategy:
+    $patch: replace
+    type: Recreate
+  revisionHistoryLimit: 0
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kfe-service-config
+  labels:
+    app.kubernetes.io/name: kfe-service
+    app.kubernetes.io/component: financial-engine
+data:
+  SPRING_PROFILES_ACTIVE: prod,kfe
+  KEROSENE_RUNTIME_ROLE: kfe-service
+  AUTH_REMOTE_BASE_URL: https://server:8443
+  AUTH_REMOTE_CONNECT_TIMEOUT_MS: '2000'
+  AUTH_REMOTE_READ_TIMEOUT_MS: '5000'
+  KFE_REMOTE_USER_DIRECTORY_ENABLED: 'true'
+  SERVER_PORT: '8080'
+  SERVER_SHUTDOWN: graceful
+  SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 45s
+  FLYWAY_ENABLED: 'true'
+  FLYWAY_BASELINE_ON_MIGRATE: 'false'
+  MANAGEMENT_HEALTH_SHOW_DETAILS: when_authorized
+  MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,prometheus
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  SPRING_DATA_REDIS_HOST: kerosene-redis-headless
+  SPRING_DATA_REDIS_PORT: '6379'
+  LIGHTNING_LND_HOST: kerosene-lnd-headless
+  LIGHTNING_LND_PORT: '10009'
+  LIGHTNING_LND_REST_ENABLED: 'false'
+  LIGHTNING_LND_TLS_INSECURE: 'false'
+  BITCOIN_NETWORK: testnet3
+  BITCOIN_RPC_ENABLED: 'true'
+  BITCOIN_RPC_REQUIRED: 'true'
+  BITCOIN_RPC_PRUNED_REQUIRED: 'true'
+  BITCOIN_RPC_URL: http://bitcoin-core:18332
+  BITCOIN_ZMQ_ENABLED: 'true'
+  BITCOIN_ZMQ_RAWTX: tcp://bitcoin-core:28332
+  BITCOIN_ZMQ_HASHBLOCK: tcp://bitcoin-core:28333
+  REGION: PROD
+  AUDIT_SOLVENCY_ENFORCED: 'true'
+  RELEASE_ATTESTATION_REQUIRED: 'true'
+  RELEASE_REMOTE_ATTESTATION_ENABLED: 'true'
+  APP_CORS_ALLOWED_ORIGINS: http://u3hrcmbbd5lqnkffqub5qzdaihoutztgh3rtrtrtrcv2bget6btnpdad.onion
+  BITCOIN_RPC_WALLET: kerosene
+  KFE_KEROSENE_NODE_BASE_URL: https://ydhgchokg37xcyqxbtif3nqz3deajr57zos46t2fkw4uh3joygsdkvid.onion:8800
+  KFE_KEROSENE_NODE_FALLBACK_URLS: https://mx54ndvuigoqe5ujsctdp6fdrpu5t2khabbtn5obfgo3n2g4f5axozad.onion:8800,https://mr7qhv2dcv74bnx3kuyrrn3b5u6xbcf2n5jhjktzd4zsew3vbt2eq2qd.onion:8800
+  KFE_KEROSENE_NODE_CONNECT_TIMEOUT_MS: '10000'
+  KFE_KEROSENE_NODE_ENABLED: 'true'
+  KFE_KEROSENE_NODE_NETWORK_ID: kerosene-testnet3
+  KFE_KEROSENE_NODE_READ_TIMEOUT_MS: '20000'
+  KFE_KEROSENE_NODE_TRANSPORT: tor
+  KFE_ONRAMP_URL_BUY: https://www.bitcoin.com/get-started/how-to-buy-bitcoin/
+  KFE_ONRAMP_URL_HELP: https://bitcoin.org/en/exchanges
+  KFE_ONRAMP_URL_MOONPAY: https://www.moonpay.com/buy/btc
+  KFE_ONRAMP_URL_ONRAMPER: https://www.onramper.com/
+  KFE_ONRAMP_URL_SELL: https://www.bitcoin.com/get-started/how-to-sell-bitcoin/
+  KFE_ONRAMP_URL_TRANSAK: https://global.transak.com/
+  KFE_VAULTMESH_BASE_URL: https://ydhgchokg37xcyqxbtif3nqz3deajr57zos46t2fkw4uh3joygsdkvid.onion:7701
+  KFE_VAULTMESH_CONNECT_TIMEOUT_MS: '45000'
+  KFE_VAULTMESH_CONSTITUTION_HASH: 311220a58b04114270dcf3be7be69ac06abd0ce2658075d9bd5c4b1e5817896b
+  KFE_VAULTMESH_ENABLED: 'true'
+  KFE_VAULTMESH_MESH_ONLY: 'true'
+  KFE_VAULTMESH_READINESS_FIXED_DELAY_MS: '60000'
+  KFE_VAULTMESH_READINESS_INITIAL_DELAY_MS: '5000'
+  KFE_VAULTMESH_READINESS_STALE_AFTER_MS: '180000'
+  KFE_VAULTMESH_READ_TIMEOUT_MS: '60000'
+  KFE_VAULTMESH_SUBMIT_ON_OUTBOUND: 'true'
+  KFE_VAULTMESH_TRANSPORT: tor
+  KFE_VAULTMESH_URLS: https://ydhgchokg37xcyqxbtif3nqz3deajr57zos46t2fkw4uh3joygsdkvid.onion:7701,https://mx54ndvuigoqe5ujsctdp6fdrpu5t2khabbtn5obfgo3n2g4f5axozad.onion:7701,https://mr7qhv2dcv74bnx3kuyrrn3b5u6xbcf2n5jhjktzd4zsew3vbt2eq2qd.onion:7701
+  WEBAUTHN_ORIGINS: http://u3hrcmbbd5lqnkffqub5qzdaihoutztgh3rtrtrtrcv2bget6btnpdad.onion
+  SPRING_FLYWAY_ENABLED: 'true'
+  SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+  QUORUM_ALLOW_LOCAL_SIMULATION: 'false'
+  LIGHTNING_LND_ENABLED: 'false'
+  TRANSACTIONS_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: 'false'
+  KFE_RECEIVE_BITCOIN_CORE_WALLET_ADDRESS_ENABLED: 'false'
+  BITCOIN_PLATFORM_MASTER_XPUB: ''
+  QUORUM_SHARD_URLS: ''
+  QUORUM_PSBT_SIGNER_URLS: ''
+  QUORUM_PSBT_SIGNER_IDS: ''
+  WEBAUTHN_RP_ID: u3hrcmbbd5lqnkffqub5qzdaihoutztgh3rtrtrtrcv2bget6btnpdad.onion
+  KFE_VAULTMESH_REQUIRE_MTLS: 'true'
+  KFE_VAULTMESH_TLS_ENABLED: 'true'
+  KFE_AUTH_PRODUCTION_MODE: 'true'
+  KFE_KEROSENE_NODE_SOCKS_HOST: 172.18.0.1
+  KFE_KEROSENE_NODE_SOCKS_PORT: '9050'
+  KFE_VAULTMESH_SOCKS_HOST: 172.18.0.1
+  KFE_VAULTMESH_SOCKS_PORT: '9050'
+  KFE_VAULTMESH_TLS_CERT_PATH: /etc/vault-mtls/client.crt
+  KFE_VAULTMESH_TLS_KEY_PATH: /etc/vault-mtls/client.key
+  KFE_VAULTMESH_TLS_CA_PATH: /etc/vault-mtls/ca.crt
+  KFE_KEROSENE_NODE_TLS_CERT_PATH: /etc/vault-mtls/client.crt
+  KFE_KEROSENE_NODE_TLS_KEY_PATH: /etc/vault-mtls/client.key
+  KFE_KEROSENE_NODE_TLS_CA_PATH: /etc/vault-mtls/ca.crt
+  KFE_BITCOIN_CORE_WALLETS_BOOTSTRAP_ENABLED: 'false'
+  KFE_MPC_SIGNING_ENABLED: 'false'
+  BITCOIN_CREDIT_CONFIRMATIONS: '3'
+  KFE_LEDGER_NODE_SYNC_ENABLED: 'true'
+  KFE_LEDGER_NODE_SYNC_SIGNING_KEY_PATH: /etc/kfe-ledger/signing-key.pem
+  RELEASE_SERVICE_NAME: kfe
+  RELEASE_MANIFEST_PATH: /release/release-manifest.json
+  RELEASE_MANIFEST_SIGNATURE_PATH: /release/release-manifest.sig
+  RELEASE_MANIFEST_PUBLIC_KEY_PATH: /release/release-public-key.der.b64
+  GIT_COMMIT: 47d1dcd0eb82e57d8a177c165c5cd3f49f5b960b
+  IMAGE_DIGEST: sha256:6e0238a27582e2aab43af73cbc68db41fd47c835577fda813260a0ae6a6aa1e9
+  CODE_HASH: sha256:dec9bc8dfda8a964689f986a373bb27f23b172becb215007ab7125d12b707cc7
+  CONFIG_HASH: sha256:22f1207626db61cb4f8d254ce2054a83f5ebf469b09fe98261f4906f30d30367
+  # Native Vault Mesh owns custody; external BCX is not configured.
+  CUSTODY_ENABLED: "false"
+  TRANSACTIONS_RAILS_LIGHTNING_INVOICE_PROVIDER: disabled
+  TRANSACTIONS_RAILS_LIGHTNING_PAYMENT_PROVIDER: disabled
+  TRANSACTIONS_LIGHTNING_INVOICE_PROVIDER: disabled
+  TRANSACTIONS_LIGHTNING_PAYMENT_PROVIDER: disabled
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kfe-service
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+      - name: kfe-service
+        env:
+        - name: KFE_INTERNAL_SHARED_SECRET
+          $patch: delete
+        - name: SPRING_DATASOURCE_URL
+          valueFrom:
+            secretKeyRef:
+              name: kfe-database
+              key: jdbc-url
+        - name: SPRING_DATASOURCE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: kfe-database
+              key: application-user
+        - name: SPRING_DATASOURCE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kfe-database
+              key: application-password
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: auth-jwt-signing
+              key: JWT_SECRET
+        - name: KFE_FEE_QUOTE_SIGNING_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: kfe-service-secrets
+              key: fee-quote-signing-secret
+        - name: KFE_COLUMN_CRYPTO_KEY_BASE64
+          valueFrom:
+            secretKeyRef:
+              name: kfe-service-secrets
+              key: KFE_COLUMN_CRYPTO_KEY_BASE64
+        envFrom:
+        - configMapRef:
+            name: kfe-service-config
+        resources:
+          requests:
+            cpu: 250m
+            memory: 768Mi
+          limits:
+            cpu: 1500m
+            memory: 1536Mi
+        volumeMounts:
+        - name: vault-client-mtls
+          mountPath: /etc/vault-mtls
+          readOnly: true
+        - name: ledger-checkpoint
+          mountPath: /etc/kfe-ledger
+          readOnly: true
+      volumes:
+      - name: vault-client-mtls
+        secret:
+          secretName: vault-client-mtls
+          defaultMode: 288
+      - name: ledger-checkpoint
+        secret:
+          secretName: kfe-ledger-checkpoint
+          defaultMode: 288
+    metadata:
+      annotations:
+        kerosene.io/release-digest: sha256:d9bcb539f5ff186b96662f2e5ab44a3de85367b6fb3527fa86107c194ddf25ab
+  strategy:
+    $patch: replace
+    type: Recreate
+  revisionHistoryLimit: 0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-page
+spec:
+  template:
+    spec:
+      containers:
+      - name: web-page
+        command:
+        - nginx
+        args:
+        - -g
+        - daemon off;
+  revisionHistoryLimit: 0
+  strategy:
+    $patch: replace
+    type: Recreate
