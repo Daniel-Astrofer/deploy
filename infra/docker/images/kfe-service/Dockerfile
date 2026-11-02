@@ -8,18 +8,20 @@ FROM eclipse-temurin:21-jdk AS builder
 
 WORKDIR /workspace
 
-COPY gradlew gradlew.bat ./
+COPY gradlew ./
 COPY gradle gradle/
 RUN chmod +x gradlew
 
 COPY settings.gradle.kts build.gradle.kts gradle.properties ./
 COPY src src/
-COPY --from=contracts . /kerosene-contracts
-COPY --from=shared . /kerosene-shared
+COPY --from=contracts . /contracts
+COPY --from=shared . /shared
 
 COPY --from=deploy infra/docker/healthcheck/Healthcheck.java docker/Healthcheck.java
 ARG GRADLE_MAX_WORKERS=2
-RUN ./gradlew bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} -x test
+ARG GRADLE_JVM_ARGS="-Xmx768m -XX:MaxMetaspaceSize=384m -Dfile.encoding=UTF-8"
+RUN ./gradlew bootJar --no-daemon --max-workers=${GRADLE_MAX_WORKERS} \
+    "-Dorg.gradle.jvmargs=${GRADLE_JVM_ARGS}" -x test
 RUN javac docker/Healthcheck.java -d /workspace/healthcheck
 
 FROM gcr.io/distroless/java21-debian12:nonroot AS runtime

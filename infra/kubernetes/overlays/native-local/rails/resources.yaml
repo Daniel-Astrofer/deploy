@@ -1,0 +1,411 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kerosene-local
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rail-cells
+  labels:
+    app.kubernetes.io/name: rail-cell
+    app.kubernetes.io/part-of: kerosene
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: false
+  selector:
+    app.kubernetes.io/name: rail-cell
+  ports:
+  - name: bitcoin-https
+    port: 8090
+    targetPort: bitcoin-https
+  - name: lightning-https
+    port: 8091
+    targetPort: lightning-https
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rail-cell
+  labels:
+    app.kubernetes.io/name: rail-cell
+    app.kubernetes.io/part-of: kerosene
+spec:
+  serviceName: rail-cells
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: rail-cell
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: rail-cell
+        app.kubernetes.io/part-of: kerosene
+        kerosene.io/network: testnet3
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: bitcoin-rail
+        image: kerosene/bitcoin-rail:native-20261025
+        imagePullPolicy: IfNotPresent
+        command:
+        - gunicorn
+        args:
+        - wsgi:app
+        - --bind=0.0.0.0:8090
+        - --workers=1
+        - --threads=4
+        - --timeout=30
+        - --certfile=/etc/rail-tls/tls.crt
+        - --keyfile=/etc/rail-tls/tls.key
+        - --access-logfile=-
+        - --error-logfile=-
+        ports:
+        - name: bitcoin-https
+          containerPort: 8090
+        env:
+        - name: HOME
+          value: /tmp
+        - name: HOST
+          value: 0.0.0.0
+        - name: BITCOIN_BACKEND_PRODUCTION
+          value: 'true'
+        - name: BITCOIN_BACKEND_TLS_ENABLED
+          value: 'true'
+        - name: BITCOIN_CHAIN
+          value: test
+        - name: BITCOIN_RPC_URL
+          value: http://bitcoin-core.kerosene-staging.svc.cluster.local:18332
+        - name: BITCOIN_RPC_ALLOW_INSECURE
+          value: 'true'
+        - name: BITCOIN_BACKEND_ALLOW_BROADCAST
+          value: 'true'
+        - name: BITCOIN_BACKEND_ALLOW_WALLET_CREATE
+          value: 'false'
+        - name: BITCOIN_BACKEND_DB_PATH
+          value: /var/lib/kerosene/bitcoin/state.sqlite3
+        - name: BITCOIN_BACKEND_INSTANCE_COUNT
+          value: '1'
+        - name: BITCOIN_RPC_USER
+          valueFrom:
+            secretKeyRef:
+              name: kerosene-bitcoin-secrets
+              key: rpc-user
+        - name: BITCOIN_RPC_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: kerosene-bitcoin-secrets
+              key: rpc-password
+        - name: BITCOIN_BACKEND_READ_API_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: rail-runtime-credentials
+              key: bitcoin-read-token
+        - name: BITCOIN_BACKEND_WRITE_API_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: rail-runtime-credentials
+              key: bitcoin-write-token
+        - name: BITCOIN_BACKEND_ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: rail-runtime-credentials
+              key: bitcoin-admin-token
+        readinessProbe:
+          httpGet:
+            scheme: HTTPS
+            path: /healthz
+            port: bitcoin-https
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/kerosene
+        - name: rail-tls
+          mountPath: /etc/rail-tls
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      - name: lightning-rail
+        image: kerosene/lightning-rail:native-20261025
+        imagePullPolicy: IfNotPresent
+        command:
+        - gunicorn
+        args:
+        - src.adapters.inbound.http.app:create_app()
+        - --bind=0.0.0.0:8091
+        - --workers=1
+        - --threads=4
+        - --timeout=30
+        - --certfile=/etc/rail-tls/tls.crt
+        - --keyfile=/etc/rail-tls/tls.key
+        - --access-logfile=-
+        - --error-logfile=-
+        ports:
+        - name: lightning-https
+          containerPort: 8091
+        env:
+        - name: HOME
+          value: /tmp
+        - name: HOST
+          value: 0.0.0.0
+        - name: LIGHTNING_PRODUCTION
+          value: 'true'
+        - name: LIGHTNING_TLS_ENABLED
+          value: 'true'
+        - name: LIGHTNING_NETWORK
+          value: testnet
+        - name: LIGHTNING_LND_REST_URL
+          value: https://kerosene-lnd-headless:8080
+        - name: LIGHTNING_LND_MACAROON_HEX
+          valueFrom:
+            secretKeyRef:
+              name: kerosene-lnd-secrets
+              key: LIGHTNING_LND_MACAROON
+        - name: LIGHTNING_LND_TLS_CERT_PATH
+          value: /etc/lnd-tls/tls.cert
+        - name: LIGHTNING_BACKEND_SQLITE
+          value: /var/lib/kerosene/lightning/state.sqlite3
+        - name: LIGHTNING_BACKEND_INSTANCE_COUNT
+          value: '1'
+        - name: LIGHTNING_READ_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: rail-runtime-credentials
+              key: lightning-read-token
+        - name: LIGHTNING_WRITE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: rail-runtime-credentials
+              key: lightning-write-token
+        - name: LIGHTNING_ADMIN_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: rail-runtime-credentials
+              key: lightning-admin-token
+        readinessProbe:
+          httpGet:
+            scheme: HTTPS
+            path: /health
+            port: lightning-https
+          periodSeconds: 5
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/kerosene
+        - name: rail-tls
+          mountPath: /etc/rail-tls
+          readOnly: true
+        - name: lnd-tls
+          mountPath: /etc/lnd-tls
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: rail-tls
+        secret:
+          secretName: rail-runtime-tls
+          defaultMode: 288
+      - name: lnd-tls
+        secret:
+          secretName: vault-client-mtls
+          items:
+          - key: lnd-tls.cert
+            path: tls.cert
+          defaultMode: 288
+      - name: tmp
+        emptyDir: {}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: kerosene-native-static
+      resources:
+        requests:
+          storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kerosene-native-rail-0
+spec:
+  capacity:
+    storage: 256Mi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-native-static
+  claimRef:
+    namespace: kerosene-local
+    name: data-rail-cell-0
+  local:
+    path: /var/lib/kerosene-native/rail-cell-0
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kerosene-local-control-plane
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kerosene-native-rail-1
+spec:
+  capacity:
+    storage: 256Mi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-native-static
+  claimRef:
+    namespace: kerosene-local
+    name: data-rail-cell-1
+  local:
+    path: /var/lib/kerosene-native/rail-cell-1
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kerosene-local-control-plane
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: kerosene-native-rail-2
+spec:
+  capacity:
+    storage: 256Mi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: kerosene-native-static
+  claimRef:
+    namespace: kerosene-local
+    name: data-rail-cell-2
+  local:
+    path: /var/lib/kerosene-native/rail-cell-2
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - kerosene-local-control-plane
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-lnd-headless
+spec:
+  ports:
+  - port: 8080
+    targetPort: 18080
+    name: rest
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kerosene-lnd-native
+  labels:
+    kubernetes.io/service-name: kerosene-lnd-headless
+    endpointslice.kubernetes.io/managed-by: kerosene-native
+addressType: IPv4
+ports:
+- name: rest
+  port: 18080
+  protocol: TCP
+endpoints:
+- addresses:
+  - 172.18.0.1
+  conditions:
+    ready: true
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rail-cell-network
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: rail-cell
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kerosene-staging
+      podSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+          - server
+          - kfe-service
+    ports:
+    - port: 8090
+      protocol: TCP
+    - port: 8091
+      protocol: TCP
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 172.18.0.1/32
+    ports:
+    - port: 18332
+      protocol: TCP
+    - port: 18080
+      protocol: TCP
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - port: 53
+      protocol: UDP
+    - port: 53
+      protocol: TCP

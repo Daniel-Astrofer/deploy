@@ -2,9 +2,6 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-REPO_ROOT="$ROOT"
-# shellcheck source=infra/scripts/polyrepo-env.sh
-source "$ROOT/infra/scripts/polyrepo-env.sh"
 CONTRACT="$ROOT/infra/docker/images.yaml"
 IMAGE_KEY="${1:-}"
 
@@ -18,8 +15,8 @@ if [[ -z "$IMAGE_KEY" || "$IMAGE_KEY" == "-h" || "$IMAGE_KEY" == "--help" ]]; th
 Usage: bash infra/docker/build-image.sh <image-key>
 
 Image keys are defined in infra/docker/images.yaml.
-Common keys: server, kfe-service, kerosene-vault, kerosene-node,
-kerosene-rsctl, kerosene-jctl, tor, web-page, bitcoin-rail, lightning-rail.
+Common keys: server, kfe-service, vault, node, rsctl, jctl, tor, web-page,
+bitcoin-rail, lightning-rail.
 
 This script reads the image contract and resolves build contexts from the
 independent polyrepo workspace.
@@ -31,24 +28,13 @@ if [[ "$IMAGE_KEY" == "server" || "$IMAGE_KEY" == "web-page" ]]; then
   bash "$ROOT/infra/kubernetes/scripts/build-web-admin-backend.sh" --no-jar
 fi
 
-python3 - \
-  "$CONTRACT" \
-  "$IMAGE_KEY" \
-  "$ROOT" \
-  "$CORE_DIR" \
-  "$CLIENTS_DIR" \
-  "$VAULT_DIR" \
-  "$NODE_DIR" \
-  "$RAILS_DIR" \
-  "$CONTRACTS_DIR" \
-  "$ADMIN_DIR" \
-  "$KFE_DIR" \
-  "$SHARED_DIR" <<'PY'
+python3 - "$CONTRACT" "$IMAGE_KEY" "$ROOT" <<'PYTHON'
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-contract, key, root, core, clients, vault, node, rails, contracts, admin, kfe, shared = sys.argv[1:]
+contract, key, root = sys.argv[1:]
 text = Path(contract).read_text(encoding="utf-8").splitlines()
 
 current = None
@@ -83,24 +69,22 @@ if item["dockerfile"].startswith("generated-by-"):
 
 root_path = Path(root)
 dockerfile = root_path / item["dockerfile"]
-repository_roots = {
-    "deploy": root_path,
-    "core": Path(core),
-    "users-authentication": Path(core),
-    "clients": Path(clients),
-    "vault": Path(vault),
-    "node": Path(node),
-    "discoveryng-node": Path(node),
-    "discorveryng-node": Path(node),
-    "rails": Path(rails),
-    "financial-rails": Path(rails),
-    "contracts": Path(contracts),
-    "admin": Path(admin),
-    "server-administration": Path(admin),
-    "kfe": Path(kfe),
-    "krinse-engine": Path(kfe),
-    "shared": Path(shared),
+workspace = root_path.parent
+repository_variables = {
+    "users-authentication": "CORE_DIR",
+    "clients": "CLIENTS_DIR",
+    "vault": "VAULT_DIR",
+    "discoveryng-node": "NODE_DIR",
+    "financial-rails": "RAILS_DIR",
+    "contracts": "CONTRACTS_DIR",
+    "server-administration": "ADMIN_DIR",
+    "krinse-engine": "KFE_DIR",
+    "shared": "SHARED_DIR",
 }
+repository_roots = {"deploy": root_path}
+for repository, variable in repository_variables.items():
+    override = os.environ.get(f"KEROSENE_{variable}") or os.environ.get(variable)
+    repository_roots[repository] = Path(override) if override else workspace / repository
 context_repository = item["context_repository"]
 if context_repository not in repository_roots:
     print(
@@ -118,17 +102,13 @@ if not context.exists():
 
 image = f"{item['image']}:{item['local_tag']}"
 cmd = ["docker", "build"]
-if context_repository in ("core", "users-authentication"):
-    cmd.extend(["--build-context", f"contracts={contracts}"])
+if context_repository in ("users-authentication", "krinse-engine"):
+    cmd.extend(["--build-context", f"contracts={repository_roots['contracts']}"])
     cmd.extend(["--build-context", f"deploy={root}"])
-    cmd.extend(["--build-context", f"shared={shared}"])
-elif context_repository in ("kfe", "krinse-engine"):
-    cmd.extend(["--build-context", f"contracts={contracts}"])
-    cmd.extend(["--build-context", f"deploy={root}"])
-    cmd.extend(["--build-context", f"shared={shared}"])
+    cmd.extend(["--build-context", f"shared={repository_roots['shared']}"])
 elif context_repository == "clients":
     cmd.extend(["--build-context", f"deploy={root}"])
 cmd.extend(["-t", image, "-f", str(dockerfile), str(context)])
 print(" ".join(cmd))
 subprocess.check_call(cmd)
-PY
+PYTHON

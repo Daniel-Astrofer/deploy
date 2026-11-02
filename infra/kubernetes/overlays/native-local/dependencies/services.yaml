@@ -1,0 +1,135 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-db-headless
+spec:
+  ports:
+  - name: tcp-5432
+    port: 5432
+    targetPort: 5432
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kerosene-db-headless-native
+  labels:
+    kubernetes.io/service-name: kerosene-db-headless
+    endpointslice.kubernetes.io/managed-by: kerosene-native
+addressType: IPv4
+ports:
+- name: tcp-5432
+  port: 5432
+  protocol: TCP
+endpoints:
+- addresses:
+  - 172.18.0.20
+  conditions:
+    ready: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-redis-headless
+spec:
+  ports:
+  - name: tcp-6379
+    port: 6379
+    targetPort: 6379
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kerosene-redis-headless-native
+  labels:
+    kubernetes.io/service-name: kerosene-redis-headless
+    endpointslice.kubernetes.io/managed-by: kerosene-native
+addressType: IPv4
+ports:
+- name: tcp-6379
+  port: 6379
+  protocol: TCP
+endpoints:
+- addresses:
+  - 172.18.0.1
+  conditions:
+    ready: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bitcoin-core
+spec:
+  ports:
+  - name: tcp-18332
+    port: 18332
+    targetPort: 18332
+  - name: tcp-28332
+    port: 28332
+    targetPort: 28332
+  - name: tcp-28333
+    port: 28333
+    targetPort: 28333
+  - name: tcp-28334
+    port: 28334
+    targetPort: 28334
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: bitcoin-core-native
+  labels:
+    kubernetes.io/service-name: bitcoin-core
+    endpointslice.kubernetes.io/managed-by: kerosene-native
+addressType: IPv4
+ports:
+- name: tcp-18332
+  port: 18332
+  protocol: TCP
+- name: tcp-28332
+  port: 28332
+  protocol: TCP
+- name: tcp-28333
+  port: 28333
+  protocol: TCP
+- name: tcp-28334
+  port: 28334
+  protocol: TCP
+endpoints:
+- addresses:
+  - 172.18.0.1
+  conditions:
+    ready: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kerosene-lnd-headless
+spec:
+  ports:
+  - name: tcp-10009
+    port: 10009
+    targetPort: 10009
+  - name: tcp-8080
+    port: 8080
+    targetPort: 18080
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kerosene-lnd-headless-native
+  labels:
+    kubernetes.io/service-name: kerosene-lnd-headless
+    endpointslice.kubernetes.io/managed-by: kerosene-native
+addressType: IPv4
+ports:
+- name: tcp-10009
+  port: 10009
+  protocol: TCP
+- name: tcp-8080
+  port: 18080
+  protocol: TCP
+endpoints:
+- addresses:
+  - 172.18.0.1
+  conditions:
+    ready: true

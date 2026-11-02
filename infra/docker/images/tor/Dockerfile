@@ -26,7 +26,7 @@ RUN mkdir -p /var/run/tor/socks /var/lib/tor/kerosene_service/authorized_clients
 
 COPY entrypoint.sh /usr/local/bin/kerosene-tor-entrypoint
 COPY torrc /etc/tor/torrc
-RUN chmod 0755 /usr/local/bin/kerosene-tor-entrypoint && \
+RUN chmod 0755 C && \
     sha256sum /usr/bin/tor | awk '{print $1}' > /usr/local/share/tor.sha256
 
 # Must run as root initially so Tor can drop privs to kerosene user internally

@@ -11,7 +11,7 @@ images:
     image: kerosene/server
     local_tag: local
     dockerfile: infra/docker/images/server/Dockerfile
-    context_repository: core
+    context_repository: users-authentication
     context: .
     owner: backend
 
@@ -19,14 +19,14 @@ images:
     image: kerosene/kfe-service
     local_tag: local
     dockerfile: infra/docker/images/kfe-service/Dockerfile
-    context_repository: kfe
+    context_repository: krinse-engine
     context: .
     owner: kfe
 
-  kerosene-vault:
+  vault:
     image: kerosene/vault
     local_tag: local
-    dockerfile: infra/docker/images/kerosene-vault/Dockerfile
+    dockerfile: infra/docker/images/vault/Dockerfile
     context_repository: vault
     context: .
     owner: vault-mesh
@@ -35,30 +35,30 @@ images:
       Runtime configuration remains fail-closed and comes from the private
       operations overlay.
 
-  kerosene-node:
+  node:
     image: kerosene/node
     local_tag: local
-    dockerfile: infra/docker/images/kerosene-node/Dockerfile
-    context_repository: node
+    dockerfile: infra/docker/images/node/Dockerfile
+    context_repository: discoveryng-node
     context: .
     owner: discovery
 
-  kerosene-rsctl:
+  rsctl:
     image: kerosene/rsctl
     local_tag: local
-    dockerfile: infra/docker/images/kerosene-rsctl/Dockerfile
-    context_repository: node
+    dockerfile: infra/docker/images/rsctl/Dockerfile
+    context_repository: discoveryng-node
     context: .
     owner: operations
     notes: >-
       Ephemeral operator image. It is not installed in Node or Vault service
       images and carries no credentials.
 
-  kerosene-jctl:
+  jctl:
     image: kerosene/jctl
     local_tag: local
-    dockerfile: infra/docker/images/kerosene-jctl/Dockerfile
-    context_repository: admin
+    dockerfile: infra/docker/images/jctl/Dockerfile
+    context_repository: server-administration
     context: .
     owner: operations
     notes: >-
@@ -88,7 +88,7 @@ images:
     image: kerosene/bitcoin-rail
     local_tag: local
     dockerfile: infra/docker/images/bitcoin-rail/Dockerfile
-    context_repository: rails
+    context_repository: financial-rails
     context: bitcoin_core_backend
     owner: rails
 
@@ -96,6 +96,6 @@ images:
     image: kerosene/lightning-rail
     local_tag: local
     dockerfile: infra/docker/images/lightning-rail/Dockerfile
-    context_repository: rails
+    context_repository: financial-rails
     context: lightning_flask
     owner: rails
